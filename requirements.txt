@@ -2,3 +2,10 @@ anthropic>=0.50.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-dotenv>=1.0.0
+
+# Wake-word listener (listener.py)
+openwakeword>=0.6.0
+onnxruntime>=1.10.0
+numpy>=1.24.0
+elevenlabs>=2.5.0
+pyaudio>=0.2.14
