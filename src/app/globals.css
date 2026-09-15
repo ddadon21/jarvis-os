@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/*
+ * JARVIS visual system.
+ *
+ * Dark, dense, and quiet. The design brief is "command centre", not "sci-fi
+ * prop": the glow is structural (thin rules, corner brackets, a single accent)
+ * rather than decorative, because this surface has to stay readable at 6am on a
+ * phone. Colour carries meaning — accent for Jarvis itself, and red/amber/green
+ * exclusively for readiness. Nothing else may use those three.
+ */
+
+@theme inline {
+  --color-void: #04060a;
+  --color-surface: #080b12;
+  --color-surface-raised: #0c111a;
+  --color-line: #16202e;
+  --color-line-bright: #1f2e42;
+
+  --color-ink: #e6edf5;
+  --color-ink-muted: #8a99ad;
+  --color-ink-faint: #56677d;
+
+  --color-accent: #35e0e8;
+  --color-accent-dim: #14707a;
+
+  --color-status-red: #ff5a6a;
+  --color-status-yellow: #ffb340;
+  --color-status-green: #3ddc97;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: var(--color-void);
+  color: var(--color-ink);
+}
+
+body {
+  /* A single faint radial keeps the page from reading as a flat black slab
+     without adding anything that competes with the data. */
+  background-image: radial-gradient(
+    120% 80% at 50% -10%,
+    rgba(53, 224, 232, 0.07) 0%,
+    rgba(4, 6, 10, 0) 60%
+  );
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Micro-label: the uppercase mono caption used above every data group. */
+.jarvis-label {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+/* Corner brackets. Drawn with borders on pseudo-elements so they cost nothing
+   and scale with the panel. */
+.jarvis-panel::before,
+.jarvis-panel::after {
+  content: "";
+  position: absolute;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-color: var(--color-line-bright);
+  pointer-events: none;
+}
+
+.jarvis-panel::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+
+.jarvis-panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1px solid;
+  border-right: 1px solid;
+}
+
+/* Tabular figures everywhere numbers appear, so columns do not shift as values
+   update — the difference between a dashboard and a slot machine. */
+.jarvis-figure {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
