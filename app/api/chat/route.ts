@@ -87,18 +87,24 @@ export async function POST(request: Request) {
     return Response.json(parsed);
   } catch (error) {
     console.error("Jarvis chat error", error);
+    const errorText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const gatewayNeedsBilling = /credit card|customer_verification_required/i.test(errorText);
+
     return Response.json(
       {
-        reply:
-          "Core link unavailable. The interface is online, but the reasoning gateway could not complete this request.",
+        reply: gatewayNeedsBilling
+          ? "The interface and runtime are online, but the AI reasoning provider is locked until Vercel AI Gateway billing verification is enabled. Once that is activated, I can reason, research, and synthesize through this interface."
+          : "Core link unavailable. The interface is online, but the reasoning gateway could not complete this request.",
         memoryUpdates: [],
         nextMove: {
-          title: "Restore reasoning link",
-          reason: "Jarvis cannot safely synthesize or act until the model connection is healthy.",
+          title: gatewayNeedsBilling ? "Activate AI reasoning provider" : "Restore reasoning link",
+          reason: gatewayNeedsBilling
+            ? "Background research and conversational reasoning require an active model provider connection."
+            : "Jarvis cannot safely synthesize or act until the model connection is healthy.",
           domain: "CORE",
         },
       },
-      { status: 500 },
+      { status: gatewayNeedsBilling ? 503 : 500 },
     );
   }
 }
