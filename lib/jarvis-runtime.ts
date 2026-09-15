@@ -1,0 +1,149 @@
+import { getCache } from "@vercel/functions";
+
+export type RuntimeDomain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE" | "CORE";
+
+export type RuntimeEvent = {
+  id: string;
+  type: string;
+  domain: RuntimeDomain;
+  source: string;
+  importance: "BACKGROUND" | "NORMAL" | "IMPORTANT" | "TIME_SENSITIVE" | "CRITICAL";
+  occurredAt: string;
+  receivedAt: string;
+  summary: string;
+};
+
+export type ResearchOpportunity = {
+  title: string;
+  whyItMatters: string;
+  evidence: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+};
+
+export type JarvisPulse = {
+  id: string;
+  ranAt: string;
+  status: "OK" | "DEGRADED" | "ERROR";
+  lane: "SENTRYOPS_RESEARCH" | "CORE_HEARTBEAT";
+  summary: string;
+  opportunities: ResearchOpportunity[];
+  nextMove: {
+    title: string;
+    reason: string;
+    domain: RuntimeDomain;
+  };
+  sourceCount: number;
+};
+
+const LATEST_PULSE_KEY = "jarvis:runtime:latest-pulse:v1";
+const RECENT_EVENTS_KEY = "jarvis:runtime:recent-events:v1";
+const LAST_PULSE_AT_KEY = "jarvis:runtime:last-pulse-at:v1";
+const THIRTY_DAYS = 60 * 60 * 24 * 30;
+
+type FallbackStore = Map<string, unknown>;
+
+const globalForJarvis = globalThis as typeof globalThis & {
+  __jarvisRuntimeFallback?: FallbackStore;
+};
+
+const fallbackStore = globalForJarvis.__jarvisRuntimeFallback ?? new Map<string, unknown>();
+globalForJarvis.__jarvisRuntimeFallback = fallbackStore;
+
+async function readValue<T>(key: string): Promise<T | null> {
+  try {
+    const cache = getCache();
+    const value = await cache.get(key);
+    return (value ?? null) as T | null;
+  } catch {
+    return (fallbackStore.get(key) as T | undefined) ?? null;
+  }
+}
+
+async function writeValue<T>(key: string, value: T, ttl = THIRTY_DAYS): Promise<void> {
+  fallbackStore.set(key, value);
+
+  try {
+    const cache = getCache();
+    await cache.set(key, value, { ttl, tags: ["jarvis-runtime"] });
+  } catch {
+    // Local development and some preview environments may not expose Runtime Cache.
+    // The in-process fallback keeps the app usable without pretending it is durable storage.
+  }
+}
+
+export async function getLatestPulse(): Promise<JarvisPulse | null> {
+  return readValue<JarvisPulse>(LATEST_PULSE_KEY);
+}
+
+export async function setLatestPulse(pulse: JarvisPulse): Promise<void> {
+  await Promise.all([
+    writeValue(LATEST_PULSE_KEY, pulse),
+    writeValue(LAST_PULSE_AT_KEY, pulse.ranAt),
+  ]);
+}
+
+export async function getLastPulseAt(): Promise<string | null> {
+  return readValue<string>(LAST_PULSE_AT_KEY);
+}
+
+export async function getRecentEvents(): Promise<RuntimeEvent[]> {
+  return (await readValue<RuntimeEvent[]>(RECENT_EVENTS_KEY)) ?? [];
+}
+
+export async function appendRuntimeEvent(event: RuntimeEvent): Promise<void> {
+  const current = await getRecentEvents();
+  const next = [event, ...current.filter((item) => item.id !== event.id)].slice(0, 100);
+  await writeValue(RECENT_EVENTS_KEY, next);
+}
+
+export function createRuntimeEvent(input: {
+  type: string;
+  domain?: RuntimeDomain;
+  source?: string;
+  importance?: RuntimeEvent["importance"];
+  occurredAt?: string;
+  summary: string;
+}): RuntimeEvent {
+  return {
+    id: crypto.randomUUID(),
+    type: sanitizeLabel(input.type, "event.unknown"),
+    domain: normalizeDomain(input.domain),
+    source: sanitizeLabel(input.source, "jarvis"),
+    importance: normalizeImportance(input.importance),
+    occurredAt: isIsoDate(input.occurredAt) ? input.occurredAt! : new Date().toISOString(),
+    receivedAt: new Date().toISOString(),
+    summary: input.summary.trim().slice(0, 500),
+  };
+}
+
+export function shouldRunPulse(lastRanAt: string | null, minimumMinutes: number): boolean {
+  if (!lastRanAt) return true;
+  const last = Date.parse(lastRanAt);
+  if (!Number.isFinite(last)) return true;
+  return Date.now() - last >= minimumMinutes * 60_000;
+}
+
+function sanitizeLabel(value: string | undefined, fallback: string): string {
+  const cleaned = typeof value === "string" ? value.trim().slice(0, 120) : "";
+  return cleaned || fallback;
+}
+
+function normalizeDomain(value: unknown): RuntimeDomain {
+  const domain = typeof value === "string" ? value.toUpperCase() : "CORE";
+  if (domain === "TRADING" || domain === "FINANCE" || domain === "SENTRYOPS" || domain === "LIFE") {
+    return domain;
+  }
+  return "CORE";
+}
+
+function normalizeImportance(value: unknown): RuntimeEvent["importance"] {
+  const level = typeof value === "string" ? value.toUpperCase() : "NORMAL";
+  if (level === "BACKGROUND" || level === "IMPORTANT" || level === "TIME_SENSITIVE" || level === "CRITICAL") {
+    return level;
+  }
+  return "NORMAL";
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
