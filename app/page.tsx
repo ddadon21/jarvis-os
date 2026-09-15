@@ -18,7 +18,6 @@ import {
   Sparkles,
   Target,
   TrendingUp,
-  UserRound,
   WalletCards,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -80,8 +79,8 @@ const baseSectors = [
     id: "FINANCE" as const,
     icon: WalletCards,
     title: "FINANCE CORE",
-    stat: "SETUP",
-    sub: "Accounts not connected",
+    stat: "MAPPING",
+    sub: "Financial architecture mapped; live feed pending",
     signal: "CFO",
   },
   {
@@ -100,6 +99,15 @@ const baseSectors = [
     sub: "Goals + decision support",
     signal: "ALIGN",
   },
+];
+
+const financeArchitecture = [
+  { institution: "BOFA BUSINESS", role: "CAPITAL GENERATION", detail: "Business income · payouts · operating cash" },
+  { institution: "CHASE", role: "PERSONAL CONTROL / DEBT ELIMINATION", detail: "Personal control · debt attack · cash routing" },
+  { institution: "AMEX HYSA", role: "LIQUIDITY", detail: "Reserves · emergency cash · near-term runway" },
+  { institution: "SCHWAB", role: "COMPOUNDING", detail: "Long-term investing · wealth accumulation" },
+  { institution: "RBFCU", role: "LIFESTYLE", detail: "Lifestyle spending · cards · daily flexibility" },
+  { institution: "BOFA PERSONAL", role: "TEMPORARY SUBSCRIPTIONS", detail: "Netflix · Prime · smart-home · temporary bills" },
 ];
 
 type ApiResponse = {
@@ -178,9 +186,13 @@ export default function Home() {
 
   const sectors = useMemo(() => {
     const sentryStatus = systemStatus?.integrations.sentryopsResearch;
+    const financeStatus = systemStatus?.integrations.finance;
     const pulse = systemStatus?.backgroundResearch.latestPulse;
 
     return baseSectors.map((sector) => {
+      if (sector.id === "FINANCE" && financeStatus === "ACTIVE") {
+        return { ...sector, stat: "LIVE", sub: "Direct finance feed active" };
+      }
       if (sector.id !== "SENTRYOPS") return sector;
       if (pulse?.status === "ERROR") {
         return { ...sector, stat: "DEGRADED", sub: "Research engine needs attention" };
@@ -270,10 +282,12 @@ export default function Home() {
           <div className="status-block"><span>SYSTEM STATUS</span><b><i /> {systemMode}</b></div>
           <div className="status-block"><span>LOCAL TIME</span><b>{time}</b></div>
         </div>
-        <div className="top-actions">
-          <Bell size={17} />
-          <ShieldCheck size={17} />
-          <div className="profile-chip"><UserRound size={15} /> <span>OPERATOR</span><i /></div>
+        <div className="company-zone">
+          <div>
+            <div className="company">HIMIE JOHNSON VENTURES</div>
+            <div className="micro company-micro">DWIGHT // FOUNDER & OPERATOR</div>
+          </div>
+          <div className="brand-mark"><BriefcaseBusiness size={18} /></div>
         </div>
       </header>
 
@@ -285,6 +299,7 @@ export default function Home() {
               <div><span>NEXT MOVE ENGINE</span><strong>ACTIVE</strong></div>
               <Gauge size={38} />
             </div>
+            <div className="tiny-row"><span>Primary user</span><b>DWIGHT</b></div>
             <div className="tiny-row"><span>Current mode</span><b>{domain}</b></div>
             <div className="tiny-row"><span>Decision posture</span><b>CONTROLLED FAST</b></div>
             <div className="tiny-row"><span>Persistent memory</span><b>{memories.length} ITEMS</b></div>
@@ -313,21 +328,25 @@ export default function Home() {
                   <Event text="Jarvis core online" time="NOW" />
                   <Event text="Background event bus ready" time="LIVE" />
                   <Event text="Trading recorder pending" time="SETUP" />
-                  <Event text="Secure finance persistence pending" time="SETUP" />
+                  <Event text="Finance architecture mapped" time="PH1" />
                 </>
               )}
             </div>
           </Panel>
         </aside>
 
-        <section className="center-core">
-          <div className="core-visual">
-            <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
-            <div className="radar mid" />
-            <div className="radar inner" />
-            <div className="core-node"><BrainCircuit size={36} /><span>CORE</span><strong>{systemMode === "DEGRADED" ? "CHECK" : "ACTIVE"}</strong></div>
-            <span className="axis a" /><span className="axis b" /><span className="axis c" /><span className="axis d" />
-          </div>
+        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""}`}>
+          {domain === "FINANCE" ? (
+            <FinanceCockpit />
+          ) : (
+            <div className="core-visual">
+              <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
+              <div className="radar mid" />
+              <div className="radar inner" />
+              <div className="core-node"><BrainCircuit size={36} /><span>CORE</span><strong>{systemMode === "DEGRADED" ? "CHECK" : "ACTIVE"}</strong></div>
+              <span className="axis a" /><span className="axis b" /><span className="axis c" /><span className="axis d" />
+            </div>
+          )}
 
           <div className="domain-switcher">
             {sectors.map(({ id, icon: Icon }) => (
@@ -366,6 +385,11 @@ export default function Home() {
                 );
               })}
             </div>
+            {domain === "FINANCE" && (
+              <div className="approval-row">
+                <ShieldCheck size={14} /> Phase 1 maps structure only · direct Plaid automation comes in Phase 2
+              </div>
+            )}
             {domain === "SENTRYOPS" && latestPulse && (
               <div className="approval-row">
                 <Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}
@@ -377,7 +401,7 @@ export default function Home() {
             <div className="chat-log">
               {messages.map((message, index) => (
                 <div key={`${message.role}-${message.createdAt ?? index}-${index}`} className={`message ${message.role}`}>
-                  <div className="message-meta">{message.role === "assistant" ? "JARVIS" : "YOU"}</div>
+                  <div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div>
                   <p>{message.content}</p>
                 </div>
               ))}
@@ -406,11 +430,71 @@ export default function Home() {
       </section>
 
       <footer className="footerbar">
-        <span><Bot size={13} /> JARVIS CORE v0.2</span>
+        <span><Bot size={13} /> JARVIS CORE v0.3</span>
         <span><Radar size={13} /> OBSERVE → SYNTHESIZE → PRIORITIZE → ACT → LEARN</span>
         <span><LifeBuoy size={13} /> {systemMode === "DEGRADED" ? "MONITORING WITH LIMITATIONS" : "ALWAYS-ON EVENT MODE"}</span>
       </footer>
     </main>
+  );
+}
+
+function FinanceCockpit() {
+  const metrics = [
+    { label: "NET WORTH", note: "Assets minus liabilities" },
+    { label: "LIQUIDITY", note: "Cash + reserve accounts" },
+    { label: "TOTAL DEBT", note: "Cards + future liabilities" },
+    { label: "COMPOUNDING", note: "Schwab + future investments" },
+  ];
+
+  return (
+    <section className="finance-cockpit">
+      <div className="finance-titlebar">
+        <div>
+          <span>HIMIE JOHNSON VENTURES // DWIGHT</span>
+          <strong>FINANCIAL COMMAND CORE</strong>
+        </div>
+        <div className="finance-sync"><i /> PHASE 1 · DATA SYNCING</div>
+      </div>
+
+      <div className="finance-metrics">
+        {metrics.map((metric) => (
+          <div className="finance-metric" key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>SYNCING</strong>
+            <small>{metric.note}</small>
+          </div>
+        ))}
+      </div>
+
+      <div className="cashflow-strip">
+        <div><span>MONTHLY INFLOW</span><b>PENDING HISTORY</b></div>
+        <div><span>MONTHLY OUTFLOW</span><b>PENDING HISTORY</b></div>
+        <div><span>FREE CASH FLOW</span><b>PENDING HISTORY</b></div>
+      </div>
+
+      <div className="finance-section-head">
+        <div><span>ACCOUNT ARCHITECTURE</span><strong>EVERY DOLLAR HAS A JOB</strong></div>
+        <small>6 PURPOSES MAPPED</small>
+      </div>
+
+      <div className="account-role-grid">
+        {financeArchitecture.map((account) => (
+          <article className="account-role-card" key={account.institution}>
+            <div className="account-role-top"><span>{account.institution}</span><b>MAPPED</b></div>
+            <strong>{account.role}</strong>
+            <p>{account.detail}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="finance-roadmap">
+        <ShieldCheck size={15} />
+        <div>
+          <span>LIVE AUTOMATION PATH</span>
+          <strong>PHASE 2 // DIRECT PLAID → JARVIS DATABASE → FINANCE BRAIN → NEXT MOVE</strong>
+        </div>
+      </div>
+    </section>
   );
 }
 
