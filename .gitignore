@@ -1,9 +1,8 @@
-__pycache__/
-*.py[cod]
-*.pyo
+node_modules/
+.next/
 .env
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
+.env.local
+.env.*.local
+.vercel
+*.log
+.DS_Store
