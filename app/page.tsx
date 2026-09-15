@@ -34,7 +34,40 @@ import {
   saveJarvisState,
 } from "../lib/jarvis-state";
 
-const sectors = [
+type RuntimeEvent = {
+  id: string;
+  type: string;
+  domain: string;
+  importance: string;
+  occurredAt: string;
+  summary: string;
+};
+
+type RuntimePulse = {
+  ranAt: string;
+  status: "OK" | "DEGRADED" | "ERROR";
+  summary: string;
+  opportunities: Array<{ title: string; priority: string }>;
+  nextMove: JarvisNextMove;
+};
+
+type SystemStatus = {
+  online: boolean;
+  mode: "ACTIVE" | "DEGRADED";
+  backgroundResearch: {
+    enabled: boolean;
+    latestPulse: RuntimePulse | null;
+  };
+  events: RuntimeEvent[];
+  integrations: {
+    trading: string;
+    finance: string;
+    sentryopsResearch: string;
+    life: string;
+  };
+};
+
+const baseSectors = [
   {
     id: "TRADING" as const,
     icon: TrendingUp,
@@ -56,7 +89,7 @@ const sectors = [
     icon: BriefcaseBusiness,
     title: "SENTRYOPS",
     stat: "RESEARCH",
-    sub: "Market intelligence ready",
+    sub: "Background intelligence starting",
     signal: "BUILD",
   },
   {
@@ -85,6 +118,7 @@ export default function Home() {
   const [memories, setMemories] = useState<JarvisMemory[]>(defaultState.memories);
   const [goals, setGoals] = useState<JarvisGoal[]>(defaultState.goals);
   const [nextMove, setNextMove] = useState<JarvisNextMove>(defaultState.nextMove);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -117,11 +151,52 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function refreshStatus() {
+      try {
+        const response = await fetch("/api/system/status", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as SystemStatus;
+        if (!cancelled) setSystemStatus(data);
+      } catch {
+        // The conversational interface remains usable even if background status is temporarily unavailable.
+      }
+    }
+
+    void refreshStatus();
+    const timer = window.setInterval(refreshStatus, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
-  const currentSector = useMemo(() => sectors.find((item) => item.id === domain)!, [domain]);
+  const sectors = useMemo(() => {
+    const sentryStatus = systemStatus?.integrations.sentryopsResearch;
+    const pulse = systemStatus?.backgroundResearch.latestPulse;
+
+    return baseSectors.map((sector) => {
+      if (sector.id !== "SENTRYOPS") return sector;
+      if (pulse?.status === "ERROR") {
+        return { ...sector, stat: "DEGRADED", sub: "Research engine needs attention" };
+      }
+      if (sentryStatus === "ACTIVE") {
+        return { ...sector, stat: "MONITORING", sub: "Background research active" };
+      }
+      return sector;
+    });
+  }, [systemStatus]);
+
+  const currentSector = useMemo(() => sectors.find((item) => item.id === domain)!, [domain, sectors]);
   const SectorIcon = currentSector.icon;
+  const runtimeEvents = systemStatus?.events ?? [];
+  const latestPulse = systemStatus?.backgroundResearch.latestPulse;
+  const systemMode = systemStatus?.online ? systemStatus.mode : "STARTING";
 
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
@@ -192,7 +267,7 @@ export default function Home() {
           </div>
         </div>
         <div className="top-center">
-          <div className="status-block"><span>SYSTEM STATUS</span><b><i /> OPTIMAL</b></div>
+          <div className="status-block"><span>SYSTEM STATUS</span><b><i /> {systemMode}</b></div>
           <div className="status-block"><span>LOCAL TIME</span><b>{time}</b></div>
         </div>
         <div className="top-actions">
@@ -213,6 +288,7 @@ export default function Home() {
             <div className="tiny-row"><span>Current mode</span><b>{domain}</b></div>
             <div className="tiny-row"><span>Decision posture</span><b>CONTROLLED FAST</b></div>
             <div className="tiny-row"><span>Persistent memory</span><b>{memories.length} ITEMS</b></div>
+            <div className="tiny-row"><span>Background monitor</span><b>{systemStatus?.backgroundResearch.enabled ? systemMode : "STARTING"}</b></div>
           </Panel>
 
           <Panel eyebrow="SYSTEM //" title="GOAL READINESS" corner="LIVE">
@@ -228,11 +304,18 @@ export default function Home() {
 
           <Panel eyebrow="SYSTEM //" title="EVENT STREAM" corner="RT-MONITOR">
             <div className="event-list">
-              <Event text="Jarvis core online" time="NOW" />
-              <Event text="Reasoning link provisioned" time="LIVE" />
-              <Event text="Device memory active" time="LIVE" />
-              <Event text="Trading recorder pending" time="SETUP" />
-              <Event text="Secure finance persistence pending" time="SETUP" />
+              {runtimeEvents.length > 0 ? (
+                runtimeEvents.slice(0, 5).map((event) => (
+                  <Event key={event.id} text={event.summary} time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)} />
+                ))
+              ) : (
+                <>
+                  <Event text="Jarvis core online" time="NOW" />
+                  <Event text="Background event bus ready" time="LIVE" />
+                  <Event text="Trading recorder pending" time="SETUP" />
+                  <Event text="Secure finance persistence pending" time="SETUP" />
+                </>
+              )}
             </div>
           </Panel>
         </aside>
@@ -242,7 +325,7 @@ export default function Home() {
             <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
             <div className="radar mid" />
             <div className="radar inner" />
-            <div className="core-node"><BrainCircuit size={36} /><span>CORE</span><strong>ACTIVE</strong></div>
+            <div className="core-node"><BrainCircuit size={36} /><span>CORE</span><strong>{systemMode === "DEGRADED" ? "CHECK" : "ACTIVE"}</strong></div>
             <span className="axis a" /><span className="axis b" /><span className="axis c" /><span className="axis d" />
           </div>
 
@@ -283,6 +366,11 @@ export default function Home() {
                 );
               })}
             </div>
+            {domain === "SENTRYOPS" && latestPulse && (
+              <div className="approval-row">
+                <Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}
+              </div>
+            )}
           </Panel>
 
           <Panel eyebrow="SYSTEM //" title="JARVIS LINK" corner="AI-LOG" className="chat-panel">
@@ -320,7 +408,7 @@ export default function Home() {
       <footer className="footerbar">
         <span><Bot size={13} /> JARVIS CORE v0.2</span>
         <span><Radar size={13} /> OBSERVE → SYNTHESIZE → PRIORITIZE → ACT → LEARN</span>
-        <span><LifeBuoy size={13} /> SECURE FOUNDATION MODE</span>
+        <span><LifeBuoy size={13} /> {systemMode === "DEGRADED" ? "MONITORING WITH LIMITATIONS" : "ALWAYS-ON EVENT MODE"}</span>
       </footer>
     </main>
   );
