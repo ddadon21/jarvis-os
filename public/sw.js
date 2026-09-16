@@ -1,5 +1,5 @@
-const CACHE_NAME = "jarvis-shell-v1";
-const CORE = ["/", "/ambient", "/manifest.webmanifest"];
+const CACHE_NAME = "jarvis-shell-v2";
+const CORE = ["/home", "/work", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE)).catch(() => undefined));
@@ -25,6 +25,6 @@ self.addEventListener("fetch", (event) => {
         if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => undefined);
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/home")))
   );
 });
