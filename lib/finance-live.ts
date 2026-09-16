@@ -9,8 +9,8 @@ import {
   setFinanceState,
 } from "./jarvis-runtime";
 
-const TEN_K = 10_000;
-const ONE_MILLION = 1_000_000;
+const FIRST_CAPITAL_MILESTONE = 5_000;
+const HUNDRED_MILLION = 100_000_000;
 
 const SEEDED_ACCOUNTS: FinanceAccountState[] = [
   { key: "chase-checking", institution: "CHASE", name: "CHASE SECURE BANKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "PERSONAL CONTROL", current: 60.27, available: 11.25, limit: null },
@@ -54,35 +54,13 @@ export function buildFinanceState(input: {
 }): FinanceRuntimeState {
   const liabilities = input.liabilities ?? [];
   const accounts = input.accounts.map(sanitizeAccount);
-
-  const liquidity = roundMoney(
-    accounts
-      .filter((account) => account.type === "depository")
-      .reduce((sum, account) => sum + Math.max(0, account.current), 0),
-  );
-
-  const investmentValue = roundMoney(
-    accounts
-      .filter((account) => account.type === "investment")
-      .reduce((sum, account) => sum + account.current, 0),
-  );
-
-  const personalDebt = roundMoney(
-    accounts
-      .filter((account) => (account.type === "credit" || account.type === "loan") && account.ownership !== "AUTHORIZED_USER")
-      .reduce((sum, account) => sum + Math.max(0, account.current), 0),
-  );
-
-  const authorizedUserBalance = roundMoney(
-    accounts
-      .filter((account) => (account.type === "credit" || account.type === "loan") && account.ownership === "AUTHORIZED_USER")
-      .reduce((sum, account) => sum + Math.max(0, account.current), 0),
-  );
-
+  const liquidity = roundMoney(accounts.filter((account) => account.type === "depository").reduce((sum, account) => sum + Math.max(0, account.current), 0));
+  const investmentValue = roundMoney(accounts.filter((account) => account.type === "investment").reduce((sum, account) => sum + account.current, 0));
+  const personalDebt = roundMoney(accounts.filter((account) => (account.type === "credit" || account.type === "loan") && account.ownership !== "AUTHORIZED_USER").reduce((sum, account) => sum + Math.max(0, account.current), 0));
+  const authorizedUserBalance = roundMoney(accounts.filter((account) => (account.type === "credit" || account.type === "loan") && account.ownership === "AUTHORIZED_USER").reduce((sum, account) => sum + Math.max(0, account.current), 0));
   const providerNetWorth = roundMoney(liquidity + investmentValue - personalDebt - authorizedUserBalance);
   const personalNetWorth = roundMoney(liquidity + investmentValue - personalDebt);
-  const { currentStage, nextStage } = determineStage({ personalDebt, liquidity });
-  const goals = buildGoals({ personalDebt, liquidity, personalNetWorth });
+  const { currentStage, nextStage } = determineStage({ personalDebt, liquidity, personalNetWorth });
 
   return {
     version: 1,
@@ -95,28 +73,33 @@ export function buildFinanceState(input: {
     recurringHistory: input.recurringHistory?.trim().slice(0, 80) || "UNKNOWN",
     accounts,
     liabilities,
-    metrics: {
-      personalNetWorth,
-      providerNetWorth,
-      liquidity,
-      investmentValue,
-      personalDebt,
-      authorizedUserBalance,
-    },
+    metrics: { personalNetWorth, providerNetWorth, liquidity, investmentValue, personalDebt, authorizedUserBalance },
     currentStage,
     nextStage,
-    goals,
-    note:
-      input.note?.trim().slice(0, 500) ||
-      (input.mode === "DIRECT"
-        ? "Direct finance state is feeding Jarvis automatically."
-        : "Connected finance data has been synchronized into Jarvis, but the website is not yet independently refreshing the provider connection."),
+    goals: buildGoals({ personalDebt, liquidity, personalNetWorth }),
+    note: input.note?.trim().slice(0, 500) || (input.mode === "DIRECT"
+      ? "Direct finance state is feeding Jarvis automatically."
+      : "Connected finance data has been synchronized into Jarvis, but the website is not yet independently refreshing the provider connection."),
   };
 }
 
 export async function getOrSeedFinanceState(): Promise<FinanceRuntimeState> {
   const existing = await getFinanceState();
-  if (existing) return existing;
+  if (existing) {
+    const refreshed = buildFinanceState({
+      accounts: existing.accounts,
+      liabilities: existing.liabilities,
+      mode: existing.mode,
+      source: existing.source,
+      asOf: existing.asOf,
+      connectionCount: existing.connectionCount,
+      transactionHistory: existing.transactionHistory,
+      recurringHistory: existing.recurringHistory,
+      note: existing.note,
+    });
+    await setFinanceState(refreshed);
+    return refreshed;
+  }
 
   const seeded = buildFinanceState({
     accounts: SEEDED_ACCOUNTS,
@@ -129,7 +112,6 @@ export async function getOrSeedFinanceState(): Promise<FinanceRuntimeState> {
     recurringHistory: "FULL HISTORY READY",
     note: "Real connected-account snapshot. Jarvis is ready for automatic provider refresh, but direct provider credentials are not connected to the website yet.",
   });
-
   await setFinanceState(seeded);
   return seeded;
 }
@@ -138,37 +120,32 @@ export async function ingestFinanceState(input: Parameters<typeof buildFinanceSt
   const previous = await getFinanceState();
   const next = buildFinanceState(input);
   await setFinanceState(next);
-
-  const changed = !previous || financeFingerprint(previous) !== financeFingerprint(next);
-  if (changed) {
-    await appendRuntimeEvent(
-      createRuntimeEvent({
-        type: "finance.state_updated",
-        domain: "FINANCE",
-        source: next.mode === "DIRECT" ? "jarvis.finance.direct" : "jarvis.finance.snapshot",
-        importance: "NORMAL",
-        summary: `Finance refreshed: ${money(next.metrics.liquidity)} liquid, ${money(next.metrics.personalDebt)} personal debt, ${signedMoney(next.metrics.personalNetWorth)} adjusted net worth.`,
-      }),
-    );
+  if (!previous || financeFingerprint(previous) !== financeFingerprint(next)) {
+    await appendRuntimeEvent(createRuntimeEvent({
+      type: "finance.state_updated",
+      domain: "FINANCE",
+      source: next.mode === "DIRECT" ? "jarvis.finance.direct" : "jarvis.finance.snapshot",
+      importance: "NORMAL",
+      summary: `Finance refreshed: ${money(next.metrics.liquidity)} cash, ${money(next.metrics.personalDebt)} personal debt, ${signedMoney(next.metrics.personalNetWorth)} adjusted net worth.`,
+    }));
   }
-
   return next;
 }
 
 export function financeDirective(state: FinanceRuntimeState): string {
   if (state.metrics.personalDebt > 0) {
-    return `Protect operating cash and eliminate ${money(state.metrics.personalDebt)} of personal revolving debt before accelerating lifestyle spending.`;
+    return `Protect operating cash and eliminate ${money(state.metrics.personalDebt)} of personal revolving debt. Credit repair comes before lifestyle expansion.`;
   }
-  if (state.metrics.liquidity < TEN_K) {
-    return `Debt is controlled. Build liquid reserves from ${money(state.metrics.liquidity)} toward ${money(TEN_K)}.`;
+  const milestone = getNextNetWorthMilestone(state.metrics.personalNetWorth);
+  if (state.metrics.personalNetWorth < FIRST_CAPITAL_MILESTONE) {
+    return `Debt is controlled. Push adjusted net worth toward the first ${money(FIRST_CAPITAL_MILESTONE)} capital milestone while building cash reserves.`;
   }
-  return `Protect liquidity and move excess capital toward the next ${money(getNextNetWorthMilestone(state.metrics.personalNetWorth).target)} net-worth milestone.`;
+  return `Advance the next ${money(milestone.target)} net-worth milestone while increasing reliable cash flow, credit strength, productive assets, and long-term cash toward $100M.`;
 }
 
 function buildGoals(input: { personalDebt: number; liquidity: number; personalNetWorth: number }): FinanceGoalState[] {
   const milestone = getNextNetWorthMilestone(input.personalNetWorth);
-  const liquidProgress = clampPercent((input.liquidity / TEN_K) * 100);
-  const millionProgress = clampPercent((Math.max(0, input.personalNetWorth) / ONE_MILLION) * 100);
+  const hundredMCashProgress = clampPercent((Math.max(0, input.liquidity) / HUNDRED_MILLION) * 100);
 
   return [
     {
@@ -177,23 +154,17 @@ function buildGoals(input: { personalDebt: number; liquidity: number; personalNe
       progress: input.personalDebt <= 0 ? 100 : null,
       current: input.personalDebt <= 0 ? "$0 personal debt" : `${money(input.personalDebt)} personal debt`,
       target: "$0",
-      blocker: input.personalDebt <= 0 ? "Complete." : "Clear personal revolving balances without draining operating liquidity.",
+      blocker: input.personalDebt <= 0 ? "Complete." : "Clear personal revolving balances while protecting enough cash to avoid recreating debt.",
     },
     {
-      name: "$10K LIQUID",
-      state: input.liquidity >= TEN_K ? "GREEN" : liquidProgress >= 50 ? "YELLOW" : "RED",
-      progress: liquidProgress,
-      current: money(input.liquidity),
-      target: money(TEN_K),
-      blocker: input.liquidity >= TEN_K ? "Complete." : `${money(TEN_K - input.liquidity)} remaining.`,
-    },
-    {
-      name: "NET WORTH MILESTONE",
-      state: milestone.progress >= 70 ? "YELLOW" : "RED",
+      name: "NEXT WEALTH MILESTONE",
+      state: milestone.progress >= 100 ? "GREEN" : milestone.progress >= 50 ? "YELLOW" : "RED",
       progress: milestone.progress,
       current: signedMoney(input.personalNetWorth),
       target: money(milestone.target),
-      blocker: `Target rolls by ${money(milestone.step)} when reached; after $100,000 each new milestone advances by $10,000.`,
+      blocker: input.personalNetWorth < 0
+        ? "Progress stays at 0% until adjusted net worth is positive."
+        : `Target advances by ${money(milestone.step)} when reached; after $100,000 it advances by $10,000.`,
     },
     {
       name: "MOVE OUT",
@@ -201,7 +172,7 @@ function buildGoals(input: { personalDebt: number; liquidity: number; personalNe
       progress: null,
       current: "Criteria not locked",
       target: "Readiness gate",
-      blocker: "Housing budget, move-in capital, reserve floor and income-consistency gates still need to be locked.",
+      blocker: "Housing budget, move-in capital, cash floor and income-consistency gates still need to be locked.",
     },
     {
       name: "GR SUPRA",
@@ -209,23 +180,23 @@ function buildGoals(input: { personalDebt: number; liquidity: number; personalNe
       progress: null,
       current: "Criteria not locked",
       target: "Readiness gate",
-      blocker: "Purchase price, down payment, insurance and post-purchase liquidity gates still need to be locked.",
+      blocker: "Purchase price, down payment, insurance and post-purchase cash floor still need to be locked.",
     },
     {
-      name: "$1M NET WORTH",
-      state: input.personalNetWorth >= ONE_MILLION ? "GREEN" : millionProgress >= 50 ? "YELLOW" : "RED",
-      progress: millionProgress,
-      current: signedMoney(input.personalNetWorth),
-      target: "$1,000,000",
-      blocker: input.personalNetWorth >= ONE_MILLION ? "Complete." : "Long-horizon destination; rolling milestones keep the path measurable.",
+      name: "$100M CASH",
+      state: input.liquidity >= HUNDRED_MILLION ? "GREEN" : "RED",
+      progress: hundredMCashProgress,
+      current: money(input.liquidity),
+      target: "$100,000,000",
+      blocker: "Ultimate capital destination. Jarvis should compound through smaller stages instead of skipping financial foundations.",
     },
   ];
 }
 
-function determineStage(input: { personalDebt: number; liquidity: number }) {
+function determineStage(input: { personalDebt: number; liquidity: number; personalNetWorth: number }) {
   if (input.personalDebt > 0) return { currentStage: "DEBT", nextStage: "STABILITY" };
   if (input.liquidity < 2_500) return { currentStage: "STABILITY", nextStage: "RESERVES" };
-  if (input.liquidity < TEN_K) return { currentStage: "RESERVES", nextStage: "CREDIT" };
+  if (input.personalNetWorth < FIRST_CAPITAL_MILESTONE) return { currentStage: "RESERVES", nextStage: "CREDIT" };
   return { currentStage: "CAPITAL", nextStage: "INVESTING" };
 }
 
@@ -251,22 +222,8 @@ function normalizeDate(value?: string) {
   return new Date().toISOString();
 }
 
-function safeNumber(value: number) {
-  return Number.isFinite(value) ? value : 0;
-}
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
-function clampPercent(value: number) {
-  return Math.max(0, Math.min(100, value));
-}
-
-function money(value: number) {
-  return `$${Math.max(0, value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function signedMoney(value: number) {
-  return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+function safeNumber(value: number) { return Number.isFinite(value) ? value : 0; }
+function roundMoney(value: number) { return Math.round((value + Number.EPSILON) * 100) / 100; }
+function clampPercent(value: number) { return Math.max(0, Math.min(100, value)); }
+function money(value: number) { return `$${Math.max(0, value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
