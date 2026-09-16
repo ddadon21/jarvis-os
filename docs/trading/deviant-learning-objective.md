@@ -1,15 +1,17 @@
 # DEVIANT Learning Objective
 
 ## Primary mission
-Use Jarvis Trading Observer data to improve Dwight's DEVIANT entry-arrow logic over time without changing the current indicator prematurely.
+Use Jarvis Trading Observer data from Dwight's actual live trading to improve DEVIANT's entry-arrow logic over time. The observer learns from Dwight's entries, management, exits, and chart context; DEVIANT does not need to be running while Dwight trades.
 
 ## Baseline
 - Baseline Pine file: `trading/indicators/deviant-refined-baseline-v1.pine`
-- Baseline is immutable. Future revisions get new versioned files.
-- Current visual contract from Dwight: the finished indicator should remain minimal and show entry arrows only; buy arrows blue, sell arrows black.
+- Baseline is immutable. Future learned revisions get new versioned files.
+- The Pine logic has broad freedom to change internally when evidence supports it.
+- Visual contract is fixed: the finished indicator shows entry arrows only; buy arrows blue, sell arrows black. No HMA/EMA/bank-level lines, dashboards, labels, or other plotted clutter.
+- Signal-density target: surface roughly 1-2 of the highest-quality trade opportunities per normal active trading day. Do not create extra arrows just to satisfy a quota when the learned setup is absent; quality takes priority over forced frequency.
 
-## Evidence to collect
-For every observed actual trade:
+## Evidence to collect from actual live trades
+For every observed trade:
 - symbol / contract
 - direction
 - quantity
@@ -20,39 +22,43 @@ For every observed actual trade:
 - time/session
 - MFE / MAE where observable
 - partial exits / scale-ins
-- pre-entry and post-entry chart frames
-- whether a DEVIANT arrow was present near the decision
-
-For every DEVIANT signal once signal capture is enabled:
-- signal timestamp and price
-- long/short
-- all current indicator feature values
-- whether Dwight took the trade
-- subsequent excursion and outcome labels (for example: +1R before -1R, MFE, MAE, time-to-target)
+- pre-entry, entry, management, exit, and short post-exit chart frames
+- higher-timeframe location and bias when observable
+- nearby liquidity / sweep context when observable
+- zone / POI context when observable
+- gaps, iFVG/FVG, displacement, candle structure, and confirmation context when observable
+- time from confirmation to entry when observable
 
 ## Research questions
-1. Which DEVIANT signals correspond to the trades Dwight actually selects?
-2. Which market-context features separate good signals from bad signals?
-3. Can those features be expressed deterministically in Pine without lookahead/repainting?
-4. Does each proposed filter improve out-of-sample expectancy, drawdown, and signal quality rather than merely reducing signal count?
+1. What conditions are consistently present before Dwight takes his highest-quality live trades?
+2. Which conditions are predictive rather than merely coincidental?
+3. Which current DEVIANT rules fail to represent what Dwight actually does?
+4. Can the learned conditions be expressed deterministically in Pine without lookahead/repainting?
+5. Can DEVIANT rank or filter opportunities so approximately 1-2 high-quality arrows are shown on a normal active day?
+6. Does each proposed revision improve unseen-trade expectancy, entry efficiency, drawdown, MAE/MFE, and signal quality rather than merely fitting prior trades?
 
 ## Change-control rules
-- Do not optimize toward a claimed 100% win rate or guarantee future performance.
-- Do not change production signal logic from a tiny sample.
-- Every revision must preserve the prior baseline and identify exactly what changed.
-- Prefer one hypothesis per revision so cause/effect stays measurable.
-- Validate on unseen dates / walk-forward samples before promoting a revision.
-- Keep live execution manual until a separately validated shadow/paper system is reliable.
+- The observer learns from Dwight's live trading; it does not need DEVIANT signals as training labels.
+- Do not optimize toward a guaranteed 100% win rate or assume recent results will persist unchanged.
+- The code may be rewritten substantially when the evidence supports it.
+- Never mutate the original baseline in place; every learned candidate is versioned so changes can be compared or rolled back.
+- Prefer measurable hypotheses and out-of-sample / walk-forward checks before promoting a revision.
+- Do not force a daily arrow solely to hit the 1-2/day target if no qualifying setup is present.
+- Keep live execution manual until a separately validated shadow/paper execution system is reliable.
 
 ## Storage plan
-- Raw TradingView evidence: local Jarvis Observer session folders first.
-- Structured signal/trade/event dataset: Jarvis persistence layer (database) once wired.
+- Raw TradingView visual evidence: local Jarvis Observer session folders first.
+- Structured trade/context/event dataset: Jarvis persistence layer once wired.
 - Human-readable trade summaries: Dwight's Notion `Funded Trading Journal`.
+- Pine versions, experiments, metrics, and promotion history: versioned in the Jarvis repository.
 
 ## Near-term sequence
-1. Prove the Windows observer reliably captures TradingView Desktop.
-2. Calibrate the Tradovate panel and chart region.
-3. Extract position lifecycle into structured events.
-4. Add DEVIANT signal capture so skipped arrows are recorded too.
-5. Establish baseline statistics before changing the Pine logic.
-6. Test learned revisions in shadow mode before Dwight relies on them daily.
+1. Prove the Windows observer reliably captures Dwight's normal TradingView Desktop layout.
+2. Calibrate the chart area and visible Tradovate execution/position areas.
+3. Extract the position lifecycle: FLAT -> ENTRY -> MANAGING -> EXIT.
+4. Preserve pre-entry context and convert each observed live trade into a structured record.
+5. Build the live-trade analysis loop and Notion journal writer.
+6. Accumulate enough clean observed trades to identify repeatable entry features.
+7. Generate versioned DEVIANT candidates from those features.
+8. Test candidates on unseen data, with the design goal of about 1-2 highest-quality arrows per normal active trading day.
+9. Promote only revisions that improve evidence-based performance while keeping the chart arrows-only.
