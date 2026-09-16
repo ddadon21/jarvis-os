@@ -101,12 +101,12 @@ const baseSectors = [
 ];
 
 const financeArchitecture = [
-  { institution: "BOFA BUSINESS", role: "CAPITAL GENERATION", detail: "Business income · payouts · operating cash" },
-  { institution: "CHASE", role: "PERSONAL CONTROL / DEBT ELIMINATION", detail: "Personal control · debt attack · cash routing" },
-  { institution: "AMEX HYSA", role: "LIQUIDITY", detail: "Reserves · emergency cash · near-term runway" },
-  { institution: "SCHWAB", role: "COMPOUNDING", detail: "Long-term investing · wealth accumulation" },
-  { institution: "RBFCU", role: "LIFESTYLE", detail: "Lifestyle spending · cards · daily flexibility" },
-  { institution: "BOFA PERSONAL", role: "TEMPORARY SUBSCRIPTIONS", detail: "Netflix · Prime · smart-home · temporary bills" },
+  { institution: "BOFA BUSINESS", role: "CAPITAL GENERATION", detail: "Current $750.68 · business income · payouts · operating cash" },
+  { institution: "CHASE", role: "PERSONAL CONTROL / DEBT ELIMINATION", detail: "Current $60.27 · personal control · debt attack · cash routing" },
+  { institution: "AMEX HYSA", role: "LIQUIDITY", detail: "Current $0.74 · reserves · emergency cash · near-term runway" },
+  { institution: "SCHWAB", role: "COMPOUNDING", detail: "Current $2.71 combined · checking + brokerage · wealth accumulation" },
+  { institution: "RBFCU", role: "LIFESTYLE", detail: "Cash $4.04 · World Card $598.12 · authorized-user card tracked separately" },
+  { institution: "BOFA PERSONAL", role: "TEMPORARY SUBSCRIPTIONS", detail: "Current $5.63 · Netflix · Prime · smart-home · temporary bills" },
 ];
 
 const demoGoals: JarvisGoal[] = [
@@ -117,6 +117,14 @@ const demoGoals: JarvisGoal[] = [
 ];
 
 const NET_WORTH_TARGET = 5000;
+const PROVISIONAL_FINANCE = {
+  personalNetWorth: -277.10,
+  providerNetWorth: -8483.07,
+  liquidity: 822.29,
+  personalDebt: 1101.17,
+  authorizedUserBalance: 8205.97,
+  compounding: 2.71,
+};
 
 type ApiResponse = {
   reply?: string;
@@ -133,7 +141,11 @@ function goalTone(value: number) {
 
 function formatSignedCurrency(value: number) {
   const sign = value >= 0 ? "+" : "-";
-  return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function formatCurrency(value: number) {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function Home() {
@@ -415,7 +427,7 @@ export default function Home() {
               })}
             </div>
             {domain === "FINANCE" && (
-              <div className="approval-row"><ShieldCheck size={14} /> Phase 1 maps structure only · direct Plaid automation comes in Phase 2</div>
+              <div className="approval-row"><ShieldCheck size={14} /> Phase 1 uses a provisional snapshot while history finishes syncing · direct Plaid automation comes in Phase 2</div>
             )}
             {domain === "SENTRYOPS" && latestPulse && (
               <div className="approval-row"><Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}</div>
@@ -464,17 +476,32 @@ export default function Home() {
   );
 }
 
-function FinanceCockpit({ netWorth = null }: { netWorth?: number | null }) {
+function FinanceCockpit() {
   const metrics = [
     {
       label: "NET WORTH",
-      value: netWorth === null ? "SYNCING" : formatSignedCurrency(netWorth),
-      note: `GOAL ${formatSignedCurrency(NET_WORTH_TARGET)} · current will stay signed + / -`,
+      value: formatSignedCurrency(PROVISIONAL_FINANCE.personalNetWorth),
+      note: `PROVISIONAL · GOAL ${formatSignedCurrency(NET_WORTH_TARGET)} · raw linked ${formatSignedCurrency(PROVISIONAL_FINANCE.providerNetWorth)} incl. AU card`,
       className: "net-worth-metric",
     },
-    { label: "LIQUIDITY", value: "SYNCING", note: "Cash + reserve accounts", className: "" },
-    { label: "TOTAL DEBT", value: "SYNCING", note: "Cards + future liabilities", className: "" },
-    { label: "COMPOUNDING", value: "SYNCING", note: "Schwab + future investments", className: "" },
+    {
+      label: "LIQUIDITY",
+      value: formatCurrency(PROVISIONAL_FINANCE.liquidity),
+      note: "Current linked depository balances · provisional",
+      className: "",
+    },
+    {
+      label: "PERSONAL DEBT",
+      value: formatCurrency(PROVISIONAL_FINANCE.personalDebt),
+      note: `${formatCurrency(PROVISIONAL_FINANCE.authorizedUserBalance)} authorized-user balance excluded`,
+      className: "",
+    },
+    {
+      label: "COMPOUNDING",
+      value: formatCurrency(PROVISIONAL_FINANCE.compounding),
+      note: "Schwab checking + brokerage · provisional",
+      className: "",
+    },
   ];
 
   return (
@@ -484,7 +511,7 @@ function FinanceCockpit({ netWorth = null }: { netWorth?: number | null }) {
           <span>HIMIE JOHNSON VENTURES // DWIGHT</span>
           <strong>FINANCIAL COMMAND CORE</strong>
         </div>
-        <div className="finance-sync"><i /> PHASE 1 · DATA SYNCING</div>
+        <div className="finance-sync"><i /> PHASE 1 · PROVISIONAL SNAPSHOT · HISTORY SYNCING</div>
       </div>
 
       <div className="finance-metrics">
