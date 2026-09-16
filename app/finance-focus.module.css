@@ -1,0 +1,206 @@
+.focusHero {
+  position: relative;
+  overflow: hidden;
+  padding: 22px 24px;
+  border: 1px solid rgba(183, 31, 38, 0.48);
+  border-left: 3px solid #b71f26;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(183, 31, 38, 0.16), transparent 38%),
+    linear-gradient(180deg, rgba(16, 10, 12, 0.94), rgba(5, 7, 9, 0.88));
+  box-shadow: inset 0 0 42px rgba(183, 31, 38, 0.05);
+}
+
+.focusHero::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 34%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35));
+}
+
+.focusTopline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.focusTopline span,
+.targetStrip span,
+.nextStep span,
+.moneyRules span,
+.watchHeader span {
+  color: #9da5aa;
+  font-size: .58rem;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+
+.focusTopline b {
+  color: #fff;
+  font-size: .62rem;
+  letter-spacing: .14em;
+  padding: 4px 8px;
+  border: 1px solid rgba(183, 31, 38, .48);
+  background: rgba(183, 31, 38, .09);
+}
+
+.focusHero h2 {
+  margin: 0;
+  max-width: 780px;
+  color: #f4f6f7;
+  font-size: clamp(1.25rem, 2.25vw, 2rem);
+  line-height: 1.02;
+  letter-spacing: .035em;
+}
+
+.why {
+  margin: 10px 0 16px;
+  max-width: 760px;
+  color: #9aa2a7;
+  font-size: .72rem;
+  line-height: 1.45;
+}
+
+.targetStrip {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255,255,255,.07);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.018);
+}
+
+.targetStrip strong {
+  color: #fff;
+  font-size: .82rem;
+  letter-spacing: .06em;
+}
+
+.targetStrip small {
+  color: #c7cbce;
+  font-size: .64rem;
+  text-align: right;
+}
+
+.nextStep {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-left: 2px solid rgba(255,255,255,.62);
+  background: linear-gradient(90deg, rgba(255,255,255,.04), transparent);
+}
+
+.nextStep strong {
+  display: block;
+  margin-top: 6px;
+  color: #fff;
+  font-size: clamp(.88rem, 1.25vw, 1.02rem);
+  line-height: 1.42;
+}
+
+.moneyRules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin-top: 16px;
+  background: rgba(255,255,255,.07);
+}
+
+.moneyRules > div {
+  min-width: 0;
+  padding: 12px 14px;
+  background: rgba(4, 7, 9, .92);
+}
+
+.moneyRules p {
+  margin: 6px 0 0;
+  color: #b0b6ba;
+  font-size: .66rem;
+  line-height: 1.42;
+}
+
+.watchPanel {
+  padding: 15px 16px;
+  border-top: 1px solid rgba(183, 31, 38, .28);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background: rgba(5, 7, 9, .56);
+}
+
+.watchHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 11px;
+}
+
+.watchHeader > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.watchHeader strong {
+  color: #e7eaec;
+  font-size: .72rem;
+  letter-spacing: .04em;
+}
+
+.watchHeader small {
+  color: #9da5aa;
+  font-size: .54rem;
+  letter-spacing: .12em;
+  white-space: nowrap;
+}
+
+.verdictGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.verdictGrid article {
+  min-width: 0;
+  padding: 10px 11px;
+  border-left: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.018);
+}
+
+.verdictGrid b {
+  display: block;
+  margin-bottom: 5px;
+  font-size: .58rem;
+  letter-spacing: .14em;
+}
+
+.verdictGrid span {
+  color: #8f989d;
+  font-size: .61rem;
+  line-height: 1.36;
+}
+
+.aligned b { color: #d9e6dc; }
+.review b { color: #d9d0bc; }
+.misaligned b { color: #e4c1c3; }
+.misaligned { border-left-color: rgba(183,31,38,.48) !important; }
+
+.watchNote {
+  margin: 10px 0 0;
+  color: #727c82;
+  font-size: .56rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 760px) {
+  .focusHero { padding: 18px 16px; }
+  .targetStrip { grid-template-columns: 1fr; }
+  .targetStrip small { text-align: left; }
+  .moneyRules,
+  .verdictGrid { grid-template-columns: 1fr; }
+  .watchHeader { align-items: flex-start; flex-direction: column; }
+}
