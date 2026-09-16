@@ -35,9 +35,113 @@ export type JarvisPulse = {
   sourceCount: number;
 };
 
+export type AgentId =
+  | "EXECUTIVE"
+  | "FINANCE_CFO"
+  | "SENTRYOPS_RESEARCH"
+  | "TRADING_OBSERVER"
+  | "BUILDER";
+
+export type AgentRunStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
+
+export type AgentPermission =
+  | "READ"
+  | "ANALYZE"
+  | "WRITE_INTERNAL"
+  | "EXTERNAL_LOW_RISK"
+  | "REQUIRES_APPROVAL";
+
+export type AgentState = {
+  id: AgentId;
+  domain: RuntimeDomain;
+  status: AgentRunStatus;
+  permissionCeiling: AgentPermission;
+  lastRanAt: string | null;
+  lastResult: string;
+  currentWork: string;
+};
+
+export type WorkforceObjective = {
+  id: string;
+  title: string;
+  domain: RuntimeDomain;
+  createdAt: string;
+  updatedAt: string;
+  status: "ACTIVE" | "BLOCKED" | "DONE" | "PAUSED";
+  successDefinition: string;
+  currentFocus: string;
+  requiresApprovalForExternalActions: boolean;
+};
+
+export type WorkforceState = {
+  version: 1;
+  cycleId: string | null;
+  lastCycleAt: string | null;
+  status: "STARTING" | "ACTIVE" | "DEGRADED";
+  agents: AgentState[];
+  objectives: WorkforceObjective[];
+  executiveSummary: string;
+};
+
+export type FinanceAccountState = {
+  key: string;
+  institution: string;
+  name: string;
+  type: "depository" | "investment" | "credit" | "loan";
+  subtype: string | null;
+  ownership: "PERSONAL" | "BUSINESS" | "AUTHORIZED_USER";
+  role: string;
+  current: number;
+  available: number | null;
+  limit: number | null;
+};
+
+export type FinanceLiabilityState = {
+  accountKey: string;
+  apr: number | null;
+  minimum: number | null;
+  due: string | null;
+};
+
+export type FinanceGoalState = {
+  name: string;
+  state: "RED" | "YELLOW" | "GREEN" | "SETUP";
+  progress: number | null;
+  current: string;
+  target: string;
+  blocker: string;
+};
+
+export type FinanceRuntimeState = {
+  version: 1;
+  mode: "SYNCED_SNAPSHOT" | "DIRECT";
+  source: string;
+  asOf: string;
+  connectionCount: number;
+  accountCount: number;
+  transactionHistory: string;
+  recurringHistory: string;
+  accounts: FinanceAccountState[];
+  liabilities: FinanceLiabilityState[];
+  metrics: {
+    personalNetWorth: number;
+    providerNetWorth: number;
+    liquidity: number;
+    investmentValue: number;
+    personalDebt: number;
+    authorizedUserBalance: number;
+  };
+  currentStage: string;
+  nextStage: string;
+  goals: FinanceGoalState[];
+  note: string;
+};
+
 const LATEST_PULSE_KEY = "jarvis:runtime:latest-pulse:v1";
 const RECENT_EVENTS_KEY = "jarvis:runtime:recent-events:v1";
 const LAST_PULSE_AT_KEY = "jarvis:runtime:last-pulse-at:v1";
+const WORKFORCE_STATE_KEY = "jarvis:runtime:workforce:v1";
+const FINANCE_STATE_KEY = "jarvis:runtime:finance:v1";
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
 type FallbackStore = Map<string, unknown>;
@@ -94,6 +198,22 @@ export async function appendRuntimeEvent(event: RuntimeEvent): Promise<void> {
   const current = await getRecentEvents();
   const next = [event, ...current.filter((item) => item.id !== event.id)].slice(0, 100);
   await writeValue(RECENT_EVENTS_KEY, next);
+}
+
+export async function getWorkforceState(): Promise<WorkforceState | null> {
+  return readValue<WorkforceState>(WORKFORCE_STATE_KEY);
+}
+
+export async function setWorkforceState(state: WorkforceState): Promise<void> {
+  await writeValue(WORKFORCE_STATE_KEY, state);
+}
+
+export async function getFinanceState(): Promise<FinanceRuntimeState | null> {
+  return readValue<FinanceRuntimeState>(FINANCE_STATE_KEY);
+}
+
+export async function setFinanceState(state: FinanceRuntimeState): Promise<void> {
+  await writeValue(FINANCE_STATE_KEY, state);
 }
 
 export function createRuntimeEvent(input: {
