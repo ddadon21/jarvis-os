@@ -1,7 +1,11 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
 
 export const runtime = "nodejs";
+
+const CLAUDE_MODEL = "claude-opus-5";
+const GPT_MODEL = "gpt-5.6-sol";
 
 const SYSTEM_PROMPT = `You are JARVIS, a private executive operating system for one user.
 
@@ -34,6 +38,7 @@ CORE BEHAVIOR
 - When data is missing, say exactly what connection or information would make the answer stronger.
 - Do not invent live account, broker, market, email, calendar, or business data.
 - Do not present mock dashboard numbers as real.
+- Never guess which foundation model is running. Use the runtime model identity injected into each request.
 
 PERSISTENT MEMORY RULES
 You may suggest short memory updates only for durable, non-secret facts that will improve future reasoning, such as goals, strategy rules, project decisions, preferences, or durable business context.
@@ -60,6 +65,7 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
 type BrainPreference = "auto" | "claude" | "gpt";
+type ActiveBrain = "CLAUDE" | "GPT";
 
 type JarvisResponse = {
   reply: string;
@@ -67,7 +73,17 @@ type JarvisResponse = {
   nextMove: { title: string; reason: string; domain: string };
 };
 
+type BrainResult = {
+  brain: ActiveBrain;
+  provider: "Anthropic" | "OpenAI";
+  model: string;
+  text: string;
+};
+
 export async function POST(request: Request) {
+  let activeBrain: ActiveBrain | undefined;
+  let activeModel: string | undefined;
+
   try {
     const body = (await request.json()) as {
       messages?: ChatMessage[];
@@ -83,60 +99,147 @@ export async function POST(request: Request) {
     const memories = Array.isArray(body.memories) ? body.memories.slice(-60) : [];
     const brainPreference: BrainPreference = body.brain === "claude" || body.brain === "gpt" ? body.brain : "auto";
 
-    const context = `CURRENT JARVIS CONTEXT\nActive domain: ${activeDomain}\nKnown goals: ${JSON.stringify(goals)}\nDurable memory: ${JSON.stringify(memories)}`;
     const directClaudeAvailable = Boolean(process.env.ANTHROPIC_API_KEY);
-    const useClaude = brainPreference === "claude" || (brainPreference === "auto" && directClaudeAvailable);
+    const directOpenAIAvailable = Boolean(process.env.OPENAI_API_KEY);
 
     if (brainPreference === "claude" && !directClaudeAvailable) {
+      return missingProviderResponse("CLAUDE", CLAUDE_MODEL, "Anthropic");
+    }
+
+    if (brainPreference === "gpt" && !directOpenAIAvailable) {
+      return missingProviderResponse("GPT", GPT_MODEL, "OpenAI");
+    }
+
+    if (!directClaudeAvailable && !directOpenAIAvailable) {
       return Response.json(
         {
-          reply: "Claude is wired into Jarvis, but the server does not have an Anthropic API credential yet. Add it to the deployment environment and redeploy; do not paste the key into chat or the Jarvis interface.",
+          reply: "Jarvis is online, but neither direct model provider is connected. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to the deployment environment and redeploy.",
           memoryUpdates: [],
           nextMove: {
-            title: "Connect Claude securely",
-            reason: "Jarvis already has the Claude provider path; it only needs the server-side Anthropic credential.",
+            title: "Connect a reasoning provider",
+            reason: "Jarvis needs at least one direct model credential to answer reliably without the locked gateway.",
             domain: "CORE",
           },
-          brain: "CLAUDE",
+          brain: "AUTO",
+          model: null,
+          provider: null,
         },
         { status: 503 },
       );
     }
 
-    const { text } = await generateText({
-      model: useClaude ? anthropic("claude-sonnet-4-6") : "openai/gpt-5.6-sol",
-      system: `${SYSTEM_PROMPT}\n\n${context}`,
-      messages,
-      temperature: 0.25,
+    const primaryBrain: ActiveBrain =
+      brainPreference === "gpt"
+        ? "GPT"
+        : brainPreference === "claude"
+          ? "CLAUDE"
+          : directClaudeAvailable
+            ? "CLAUDE"
+            : "GPT";
+
+    const context = `CURRENT JARVIS CONTEXT\nActive domain: ${activeDomain}\nKnown goals: ${JSON.stringify(goals)}\nDurable memory: ${JSON.stringify(memories)}`;
+
+    let result: BrainResult;
+    try {
+      result = await runBrain(primaryBrain, messages, context);
+    } catch (primaryError) {
+      const canFallback =
+        brainPreference === "auto" &&
+        ((primaryBrain === "CLAUDE" && directOpenAIAvailable) ||
+          (primaryBrain === "GPT" && directClaudeAvailable));
+
+      if (!canFallback) throw primaryError;
+
+      const fallbackBrain: ActiveBrain = primaryBrain === "CLAUDE" ? "GPT" : "CLAUDE";
+      console.warn("Jarvis primary brain failed; using fallback", {
+        primaryBrain,
+        fallbackBrain,
+        error: primaryError instanceof Error ? primaryError.message : String(primaryError),
+      });
+      result = await runBrain(fallbackBrain, messages, context);
+    }
+
+    activeBrain = result.brain;
+    activeModel = result.model;
+
+    const parsed = parseResponse(result.text, activeDomain);
+    return Response.json({
+      ...parsed,
+      brain: result.brain,
+      model: result.model,
+      provider: result.provider,
+    });
+  } catch (error) {
+    console.error("Jarvis chat error", {
+      brain: activeBrain,
+      model: activeModel,
+      error,
     });
 
-    const parsed = parseResponse(text, activeDomain);
-    return Response.json({ ...parsed, brain: useClaude ? "CLAUDE" : "GPT" });
-  } catch (error) {
-    console.error("Jarvis chat error", error);
     const errorText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    const gatewayNeedsBilling = /credit card|customer_verification_required/i.test(errorText);
     const anthropicAuthIssue = /anthropic|api key|authentication|unauthorized/i.test(errorText);
+    const openAIAuthIssue = /openai|api key|authentication|unauthorized/i.test(errorText);
+    const rateLimited = /rate limit|too many requests|429/i.test(errorText);
 
     return Response.json(
       {
-        reply: gatewayNeedsBilling
-          ? "The interface and runtime are online, but the current GPT gateway is locked by provider billing verification. A direct Claude connection can bypass that gateway once the server-side Anthropic credential is configured."
+        reply: rateLimited
+          ? "The active reasoning provider is temporarily rate-limited. Jarvis is online; retry in a moment."
           : anthropicAuthIssue
-            ? "Claude is wired into Jarvis, but its server-side provider credential is missing or invalid."
-            : "Core link unavailable. The interface is online, but the reasoning provider could not complete this request.",
+            ? "Claude is wired into Jarvis, but its server-side Anthropic credential is missing, invalid, or unavailable to this deployment."
+            : openAIAuthIssue
+              ? "GPT is wired into Jarvis, but its server-side OpenAI credential is missing, invalid, or unavailable to this deployment."
+              : "Core link unavailable. The interface is online, but the reasoning provider could not complete this request.",
         memoryUpdates: [],
         nextMove: {
-          title: gatewayNeedsBilling || anthropicAuthIssue ? "Restore AI brain connection" : "Restore reasoning link",
-          reason: gatewayNeedsBilling || anthropicAuthIssue
-            ? "Jarvis needs at least one healthy model provider to answer through the command interface."
-            : "Jarvis cannot safely synthesize or act until the model connection is healthy.",
+          title: "Restore reasoning link",
+          reason: "Jarvis needs at least one healthy direct model provider to answer through the command interface.",
           domain: "CORE",
         },
+        brain: activeBrain,
+        model: activeModel,
       },
       { status: 503 },
     );
   }
+}
+
+async function runBrain(brain: ActiveBrain, messages: ChatMessage[], context: string): Promise<BrainResult> {
+  const isClaude = brain === "CLAUDE";
+  const modelId = isClaude ? CLAUDE_MODEL : GPT_MODEL;
+  const provider = isClaude ? "Anthropic" : "OpenAI";
+  const modelIdentity = isClaude
+    ? `RUNTIME MODEL IDENTITY\nProvider: Anthropic\nModel: Claude Opus 5\nAPI model id: ${CLAUDE_MODEL}\nIf Dwight asks which model or brain is answering, state exactly this runtime identity. Do not claim to be GPT-4o, GPT-4, or another model.`
+    : `RUNTIME MODEL IDENTITY\nProvider: OpenAI\nModel: GPT-5.6 Sol\nAPI model id: ${GPT_MODEL}\nIf Dwight asks which model or brain is answering, state exactly this runtime identity. Do not claim to be GPT-4o, GPT-4, or another model.`;
+
+  console.info("Jarvis brain request", { brain, provider, model: modelId });
+
+  const { text } = await generateText({
+    model: isClaude ? anthropic(CLAUDE_MODEL) : openai(GPT_MODEL),
+    system: `${SYSTEM_PROMPT}\n\n${modelIdentity}\n\n${context}`,
+    messages,
+  });
+
+  return { brain, provider, model: modelId, text };
+}
+
+function missingProviderResponse(brain: ActiveBrain, model: string, provider: "Anthropic" | "OpenAI") {
+  const keyName = brain === "CLAUDE" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+  return Response.json(
+    {
+      reply: `${provider} ${model} is wired into Jarvis, but this deployment does not have ${keyName} available yet. Add it as a server-side environment variable and redeploy; do not paste the secret into Jarvis chat.`,
+      memoryUpdates: [],
+      nextMove: {
+        title: `Connect ${provider} securely`,
+        reason: `Jarvis already has the ${provider} model path; it only needs the server-side credential.`,
+        domain: "CORE",
+      },
+      brain,
+      model,
+      provider,
+    },
+    { status: 503 },
+  );
 }
 
 function parseResponse(text: string, activeDomain: string): JarvisResponse {
