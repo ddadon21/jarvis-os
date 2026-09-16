@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./personalization.css";
+import "./theme-tuning.css";
 
 export const metadata: Metadata = {
   title: "JARVIS // Command Core",
