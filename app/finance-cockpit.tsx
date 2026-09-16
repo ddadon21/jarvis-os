@@ -32,7 +32,7 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
           <span>HIMIE JOHNSON VENTURES // DWIGHT</span>
           <strong>FINANCE // THE PATH</strong>
         </div>
-        <div className="finance-sync"><i /> PHASE 1 COMPLETE · DATA READY</div>
+        <div className="finance-sync"><i /> PHASE 1 SYNCED · SNAPSHOT</div>
       </div>
 
       <div className="finance-metrics">
@@ -83,7 +83,7 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
           <p>Every new dollar is judged first by what must remain liquid, what is due, and what debt creates the most drag.</p>
         </article>
         <article className="finance-action-card">
-          <span>NEXT // STABILITY + RESERVES</span>
+          <span>AFTER // STABILITY + RESERVES</span>
           <strong>Build a real cash floor after debt is controlled.</strong>
           <p>The goal is to stop depending on credit for normal life and create enough runway that one bad month does not reset progress.</p>
         </article>
@@ -95,7 +95,7 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
         <article className="finance-action-card">
           <span>DESTINATION // INVESTING + ASSETS</span>
           <strong>Turn excess cash flow into ownership and compounding.</strong>
-          <p>$10K liquid, $100K net worth, $1M net worth, moving out, and the Supra become consequences of stronger finances—not distractions from them.</p>
+          <p>$10K liquid, rolling net-worth milestones, $1M net worth, moving out, and the Supra become consequences of stronger finances—not distractions from them.</p>
         </article>
       </div>
 
@@ -156,7 +156,7 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
         <ShieldCheck size={15} />
         <div>
           <span>HOW JARVIS SHOULD OPERATE</span>
-          <strong>SEE THE MONEY → KNOW THE STAGE → IDENTIFY THE BLOCKER → GIVE ONE NEXT MOVE → MEASURE PROGRESS → REPEAT</strong>
+          <strong>SEE THE MONEY → KNOW THE STAGE → IDENTIFY THE BLOCKER → ACT WITHIN AUTHORITY → MEASURE → REPEAT</strong>
         </div>
       </div>
 
@@ -187,7 +187,7 @@ export function FinanceGoalMiniList() {
           {goal.progress != null ? <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div> : <small>{goal.current}</small>}
         </div>
       ))}
-      <div className="finance-mini-proof"><CheckCircle2 size={12} /> Jarvis shows the next blocker, not extra choices.</div>
+      <div className="finance-mini-proof"><CheckCircle2 size={12} /> Jarvis tracks the path and the blocker without adding extra choices.</div>
     </div>
   );
 }
