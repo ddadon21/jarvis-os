@@ -83,3 +83,14 @@
   color: #c4262e !important;
   border-color: rgba(183, 31, 38, .24) !important;
 }
+
+/* Net worth is the first finance target: signed current value + a visible +$5K objective. */
+.net-worth-metric {
+  border-color: rgba(183, 31, 38, .34) !important;
+  background: linear-gradient(180deg, rgba(35, 7, 9, .46), rgba(8, 8, 8, .88)) !important;
+}
+
+.net-worth-metric small {
+  color: #d8d8d8 !important;
+  letter-spacing: .04em;
+}
