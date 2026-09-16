@@ -1,4 +1,4 @@
-import { runJarvisPulse } from "../../../../lib/jarvis-pulse";
+import { runWorkforceCycle } from "../../../../lib/jarvis-workforce";
 import { getLastPulseAt, shouldRunPulse } from "../../../../lib/jarvis-runtime";
 
 export const runtime = "nodejs";
@@ -19,13 +19,13 @@ export async function GET(request: Request) {
     return Response.json({
       ok: true,
       skipped: true,
-      reason: "A Jarvis pulse completed recently; duplicate work was suppressed.",
+      reason: "A Jarvis workforce cycle completed recently; duplicate work was suppressed.",
       lastPulseAt,
     });
   }
 
-  const pulse = await runJarvisPulse();
-  return Response.json({ ok: pulse.status !== "ERROR", skipped: false, pulse });
+  const workforce = await runWorkforceCycle();
+  return Response.json({ ok: workforce.status !== "DEGRADED", skipped: false, workforce });
 }
 
 function isAuthorized(request: Request): boolean {
@@ -36,11 +36,8 @@ function isAuthorized(request: Request): boolean {
     return authorization === `Bearer ${configuredSecret}`;
   }
 
-  // Vercel sets this header on scheduled Cron requests. This is an interim fallback
-  // until CRON_SECRET is configured in the production project.
   if (request.headers.get("x-vercel-cron-schedule")) return true;
 
-  // Manual execution is allowed only on preview/development deployments for testing.
   if (process.env.VERCEL_ENV !== "production") {
     const url = new URL(request.url);
     return url.searchParams.get("manual") === "1";
