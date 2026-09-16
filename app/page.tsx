@@ -116,16 +116,24 @@ const demoGoals: JarvisGoal[] = [
   { name: "GR Supra", value: 31, state: "RED" },
 ];
 
+const NET_WORTH_TARGET = 5000;
+
 type ApiResponse = {
   reply?: string;
   memoryUpdates?: Array<{ domain?: string; fact?: string }>;
   nextMove?: JarvisNextMove;
+  brain?: "CLAUDE" | "GPT";
 };
 
 function goalTone(value: number) {
   if (value >= 70) return "goal-good";
   if (value >= 40) return "goal-watch";
   return "goal-risk";
+}
+
+function formatSignedCurrency(value: number) {
+  const sign = value >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 export default function Home() {
@@ -140,6 +148,7 @@ export default function Home() {
   const [goals, setGoals] = useState<JarvisGoal[]>(defaultState.goals);
   const [nextMove, setNextMove] = useState<JarvisNextMove>(defaultState.nextMove);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [activeBrain, setActiveBrain] = useState<"AUTO" | "CLAUDE" | "GPT">("AUTO");
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -248,11 +257,14 @@ export default function Home() {
           activeDomain: domain,
           goals,
           memories: memories.map(({ domain: memoryDomain, fact }) => ({ domain: memoryDomain, fact })),
+          brain: "auto",
         }),
       });
 
       const data = (await response.json()) as ApiResponse;
       const reply = data.reply?.trim() || "No response returned from core.";
+
+      if (data.brain === "CLAUDE" || data.brain === "GPT") setActiveBrain(data.brain);
 
       setMessages((previous) => [
         ...previous,
@@ -410,7 +422,7 @@ export default function Home() {
             )}
           </Panel>
 
-          <Panel eyebrow="SYSTEM //" title="JARVIS LINK" corner="AI-LOG" className="chat-panel">
+          <Panel eyebrow="SYSTEM //" title="JARVIS LINK" corner={`AI-${activeBrain}`} className="chat-panel">
             <div className="chat-log">
               {messages.map((message, index) => (
                 <div key={`${message.role}-${message.createdAt ?? index}-${index}`} className={`message ${message.role}`}>
@@ -425,6 +437,7 @@ export default function Home() {
               )}
               <div ref={endRef} />
             </div>
+            <div className="approval-row"><BrainCircuit size={14} /> Brain router: Claude direct when connected · GPT fallback</div>
           </Panel>
 
           <Panel eyebrow="SYSTEM //" title="NEXT MOVE" corner="PRIORITY">
@@ -451,12 +464,17 @@ export default function Home() {
   );
 }
 
-function FinanceCockpit() {
+function FinanceCockpit({ netWorth = null }: { netWorth?: number | null }) {
   const metrics = [
-    { label: "NET WORTH", note: "Assets minus liabilities" },
-    { label: "LIQUIDITY", note: "Cash + reserve accounts" },
-    { label: "TOTAL DEBT", note: "Cards + future liabilities" },
-    { label: "COMPOUNDING", note: "Schwab + future investments" },
+    {
+      label: "NET WORTH",
+      value: netWorth === null ? "SYNCING" : formatSignedCurrency(netWorth),
+      note: `GOAL ${formatSignedCurrency(NET_WORTH_TARGET)} · current will stay signed + / -`,
+      className: "net-worth-metric",
+    },
+    { label: "LIQUIDITY", value: "SYNCING", note: "Cash + reserve accounts", className: "" },
+    { label: "TOTAL DEBT", value: "SYNCING", note: "Cards + future liabilities", className: "" },
+    { label: "COMPOUNDING", value: "SYNCING", note: "Schwab + future investments", className: "" },
   ];
 
   return (
@@ -471,9 +489,9 @@ function FinanceCockpit() {
 
       <div className="finance-metrics">
         {metrics.map((metric) => (
-          <div className="finance-metric" key={metric.label}>
+          <div className={`finance-metric ${metric.className}`} key={metric.label}>
             <span>{metric.label}</span>
-            <strong>SYNCING</strong>
+            <strong>{metric.value}</strong>
             <small>{metric.note}</small>
           </div>
         ))}
