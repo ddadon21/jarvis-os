@@ -68,7 +68,6 @@ export default function AmbientPage() {
     saveJarvisState({ ...state, messages: nextMessages });
 
     try {
-      const brain = window.localStorage.getItem("jarvis-brain-mode-v1") ?? "auto";
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -77,7 +76,7 @@ export default function AmbientPage() {
           activeDomain: state.activeDomain,
           goals: state.goals,
           memories: state.memories.map(({ domain, fact }) => ({ domain, fact })),
-          brain,
+          brain: "auto",
         }),
       });
 
