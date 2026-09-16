@@ -2,11 +2,19 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./personalization.css";
 import "./theme-tuning.css";
+import PwaRegister from "./pwa-register";
 
 export const metadata: Metadata = {
   title: "JARVIS // Command Core",
   description: "Personal executive operating system",
   applicationName: "JARVIS",
+  icons: {
+    icon: [
+      { url: "/jarvis-icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
+      { url: "/jarvis-icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+    ],
+    apple: "/jarvis-icon-192.svg",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -15,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#02080d",
+  themeColor: "#020305",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -24,7 +32,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PwaRegister />
+        {children}
+      </body>
     </html>
   );
 }
