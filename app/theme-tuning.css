@@ -1,0 +1,67 @@
+:root {
+  --cyan: #cf2028;
+  --jarvis-red: #cf2028;
+  --jarvis-red-soft: #94171d;
+}
+
+/* Keep the overall red identity strong, but less neon/bright. */
+.topbar {
+  border-bottom-color: rgba(207, 32, 40, .22) !important;
+}
+
+.brand {
+  text-shadow: 0 0 10px rgba(207, 32, 40, .25) !important;
+}
+
+.status-block i,
+.event i,
+.finance-sync i {
+  box-shadow: 0 0 8px rgba(207, 32, 40, .55) !important;
+}
+
+.panel-rule {
+  background: linear-gradient(90deg, rgba(207, 32, 40, .30), rgba(255,255,255,.055), transparent) !important;
+}
+
+.radar {
+  border-color: rgba(207, 32, 40, .27) !important;
+}
+
+.radar.inner {
+  border-color: rgba(207, 32, 40, .46) !important;
+}
+
+.sweep {
+  box-shadow: 0 0 9px rgba(207, 32, 40, .46) !important;
+}
+
+.domain-switcher button.active,
+.domain-matrix button.selected {
+  border-color: rgba(207, 32, 40, .55) !important;
+  background: rgba(43, 5, 8, .38) !important;
+  box-shadow: inset 0 0 18px rgba(207, 32, 40, .03), 0 0 12px rgba(207, 32, 40, .035) !important;
+}
+
+.finance-titlebar {
+  border-bottom-color: rgba(207, 32, 40, .19) !important;
+}
+
+.finance-roadmap {
+  background: linear-gradient(90deg, rgba(207, 32, 40, .045), rgba(8,8,8,.78)) !important;
+}
+
+.footerbar {
+  border-top-color: rgba(207, 32, 40, .16) !important;
+}
+
+/* Institution names need to read immediately against the dark finance cards. */
+.account-role-top span {
+  color: #ededed !important;
+  font-weight: 700;
+  letter-spacing: .10em;
+}
+
+.account-role-top b {
+  color: #d92a32 !important;
+  border-color: rgba(207, 32, 40, .24) !important;
+}
