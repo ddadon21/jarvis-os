@@ -1,67 +1,85 @@
 :root {
-  --cyan: #cf2028;
-  --jarvis-red: #cf2028;
-  --jarvis-red-soft: #94171d;
+  --cyan: #b71f26;
+  --jarvis-red: #b71f26;
+  --jarvis-red-soft: #7f151a;
 }
 
-/* Keep the overall red identity strong, but less neon/bright. */
+/* Darker, richer Jarvis red: still visible on black without reading neon. */
 .topbar {
-  border-bottom-color: rgba(207, 32, 40, .22) !important;
+  border-bottom-color: rgba(183, 31, 38, .22) !important;
 }
 
 .brand {
-  text-shadow: 0 0 10px rgba(207, 32, 40, .25) !important;
+  text-shadow: 0 0 9px rgba(183, 31, 38, .22) !important;
+}
+
+/* Dwight + Himie Johnson Ventures are part of the red identity layer. */
+.company,
+.company-micro {
+  color: var(--jarvis-red) !important;
+}
+
+.company {
+  text-shadow: 0 0 8px rgba(183, 31, 38, .18) !important;
+}
+
+/* Main box titles such as MISSION CONTROL stay crisp white. */
+.panel-head strong {
+  color: #f5f5f5 !important;
+  text-shadow: none !important;
 }
 
 .status-block i,
 .event i,
 .finance-sync i {
-  box-shadow: 0 0 8px rgba(207, 32, 40, .55) !important;
+  background: var(--jarvis-red) !important;
+  box-shadow: 0 0 7px rgba(183, 31, 38, .48) !important;
 }
 
 .panel-rule {
-  background: linear-gradient(90deg, rgba(207, 32, 40, .30), rgba(255,255,255,.055), transparent) !important;
+  background: linear-gradient(90deg, rgba(183, 31, 38, .28), rgba(255,255,255,.055), transparent) !important;
 }
 
 .radar {
-  border-color: rgba(207, 32, 40, .27) !important;
+  border-color: rgba(183, 31, 38, .25) !important;
 }
 
 .radar.inner {
-  border-color: rgba(207, 32, 40, .46) !important;
+  border-color: rgba(183, 31, 38, .42) !important;
 }
 
 .sweep {
-  box-shadow: 0 0 9px rgba(207, 32, 40, .46) !important;
+  background: linear-gradient(var(--jarvis-red), transparent) !important;
+  box-shadow: 0 0 8px rgba(183, 31, 38, .40) !important;
 }
 
 .domain-switcher button.active,
 .domain-matrix button.selected {
-  border-color: rgba(207, 32, 40, .55) !important;
-  background: rgba(43, 5, 8, .38) !important;
-  box-shadow: inset 0 0 18px rgba(207, 32, 40, .03), 0 0 12px rgba(207, 32, 40, .035) !important;
+  border-color: rgba(183, 31, 38, .50) !important;
+  background: rgba(37, 5, 7, .40) !important;
+  box-shadow: inset 0 0 18px rgba(183, 31, 38, .025), 0 0 11px rgba(183, 31, 38, .03) !important;
 }
 
 .finance-titlebar {
-  border-bottom-color: rgba(207, 32, 40, .19) !important;
+  border-bottom-color: rgba(183, 31, 38, .18) !important;
 }
 
 .finance-roadmap {
-  background: linear-gradient(90deg, rgba(207, 32, 40, .045), rgba(8,8,8,.78)) !important;
+  background: linear-gradient(90deg, rgba(183, 31, 38, .04), rgba(8,8,8,.80)) !important;
 }
 
 .footerbar {
-  border-top-color: rgba(207, 32, 40, .16) !important;
+  border-top-color: rgba(183, 31, 38, .15) !important;
 }
 
 /* Institution names need to read immediately against the dark finance cards. */
 .account-role-top span {
-  color: #ededed !important;
+  color: #f0f0f0 !important;
   font-weight: 700;
   letter-spacing: .10em;
 }
 
 .account-role-top b {
-  color: #d92a32 !important;
-  border-color: rgba(207, 32, 40, .24) !important;
+  color: #c4262e !important;
+  border-color: rgba(183, 31, 38, .24) !important;
 }
