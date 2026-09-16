@@ -14,4 +14,12 @@
 .core-visual .core-node svg,.core-visual .core-node span,.core-visual .core-node strong{display:none!important}
 .core-visual .core-node:after{content:"JARVIS";font-size:clamp(.8rem,1.15vw,1.05rem);font-weight:700;letter-spacing:.18em;color:#f2f2f2}
 
-@media(max-width:760px){.panel-body{font-size:.72rem!important}.chat-log .message p{font-size:.72rem!important}.command-box input{font-size:.78rem!important}.core-visual{width:min(74vw,330px)!important}}
+/* Mission Control is the page heading, not a card. Remove SYSTEM // eyebrow text and passive Next Move UI. */
+.panel-head>div>span{display:none!important}
+.left-column>.panel:first-child{display:none!important}
+.right-column>.panel:last-child{display:none!important}
+.workspace{padding-top:62px!important}
+.workspace:before{content:"MISSION CONTROL";position:absolute;top:18px;left:24px;right:24px;text-align:center;color:#f1f1f1;font-size:.78rem;font-weight:700;letter-spacing:.24em;text-shadow:0 0 10px rgba(183,31,38,.16);pointer-events:none}
+.right-column>.chat-panel{flex:1!important}
+
+@media(max-width:760px){.panel-body{font-size:.72rem!important}.chat-log .message p{font-size:.72rem!important}.command-box input{font-size:.78rem!important}.core-visual{width:min(74vw,330px)!important}.workspace{padding-top:50px!important}.workspace:before{top:15px;left:12px;right:12px;font-size:.68rem}}
