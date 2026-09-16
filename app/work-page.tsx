@@ -20,6 +20,8 @@ import {
   WalletCards,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import FinanceCockpit, { FinanceGoalMiniList } from "./finance-cockpit";
+import { FINANCE_DEBTS, FINANCE_GOALS, FINANCE_SNAPSHOT } from "../lib/finance-snapshot";
 import {
   ChatMessage,
   Domain,
@@ -85,8 +87,8 @@ const baseSectors = [
     id: "FINANCE" as const,
     icon: WalletCards,
     title: "FINANCE CORE",
-    stat: "MAPPING",
-    sub: "Financial architecture mapped; live feed pending",
+    stat: "OPERATIONAL",
+    sub: "Phase 1 financial data ready · direct feed next",
     signal: "CFO",
   },
   {
@@ -106,32 +108,6 @@ const baseSectors = [
     signal: "ALIGN",
   },
 ];
-
-const financeArchitecture = [
-  { institution: "BOFA BUSINESS", role: "CAPITAL GENERATION", detail: "Current $750.68 · business income · payouts · operating cash" },
-  { institution: "CHASE", role: "PERSONAL CONTROL / DEBT ELIMINATION", detail: "Current $60.27 · personal control · debt attack · cash routing" },
-  { institution: "AMEX HYSA", role: "LIQUIDITY", detail: "Current $0.74 · reserves · emergency cash · near-term runway" },
-  { institution: "SCHWAB", role: "COMPOUNDING", detail: "Current $2.71 combined · checking + brokerage · wealth accumulation" },
-  { institution: "RBFCU", role: "LIFESTYLE", detail: "Cash $4.04 · World Card $598.12 · authorized-user card tracked separately" },
-  { institution: "BOFA PERSONAL", role: "TEMPORARY SUBSCRIPTIONS", detail: "Current $5.63 · Netflix · Prime · smart-home · temporary bills" },
-];
-
-const demoGoals: JarvisGoal[] = [
-  { name: "Debt Freedom", value: 24, state: "RED" },
-  { name: "$10K Liquid", value: 56, state: "YELLOW" },
-  { name: "Move Out", value: 84, state: "GREEN" },
-  { name: "GR Supra", value: 31, state: "RED" },
-];
-
-const NET_WORTH_TARGET = 5000;
-const PROVISIONAL_FINANCE = {
-  personalNetWorth: -277.10,
-  providerNetWorth: -8483.07,
-  liquidity: 822.29,
-  personalDebt: 1101.17,
-  authorizedUserBalance: 8205.97,
-  compounding: 2.71,
-};
 
 const BRAIN_MODES: Array<{ id: BrainMode; label: string }> = [
   { id: "auto", label: "AUTO" },
@@ -154,15 +130,6 @@ function goalTone(value: number) {
   if (value >= 70) return "goal-good";
   if (value >= 40) return "goal-watch";
   return "goal-risk";
-}
-
-function formatSignedCurrency(value: number) {
-  const sign = value >= 0 ? "+" : "-";
-  return `${sign}$${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-}
-
-function formatCurrency(value: number) {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function isBrainMode(value: string | null): value is BrainMode {
@@ -280,7 +247,6 @@ export default function Work() {
   const latestPulse = systemStatus?.backgroundResearch.latestPulse;
   const systemMode = systemStatus?.online ? systemStatus.mode : "STARTING";
   const financeIsLive = systemStatus?.integrations.finance === "ACTIVE";
-  const displayedGoals = financeIsLive ? goals : demoGoals;
 
   const brainRouterText =
     brainMode === "auto"
@@ -314,9 +280,10 @@ export default function Work() {
           goals,
           memories: memories.map(({ domain: memoryDomain, fact }) => ({ domain: memoryDomain, fact })),
           financeSnapshot: {
-            ...PROVISIONAL_FINANCE,
-            targetNetWorth: NET_WORTH_TARGET,
-            status: "PHASE 1 PROVISIONAL SNAPSHOT · HISTORY SYNCING · NOT LIVE-LINKED",
+            ...FINANCE_SNAPSHOT,
+            debts: FINANCE_DEBTS,
+            financeGoals: FINANCE_GOALS,
+            status: "PHASE 1 COMPLETE · CONNECTED HISTORY READY · SANITIZED IMPORT · DIRECT BANK FEED NOT YET ENABLED",
           },
           brain: brainMode,
         }),
@@ -396,20 +363,24 @@ export default function Work() {
             <div className="tiny-row"><span>Background monitor</span><b>{systemStatus?.backgroundResearch.enabled ? systemMode : "STARTING"}</b></div>
           </Panel>
 
-          <Panel eyebrow="SYSTEM //" title="GOAL READINESS" corner={financeIsLive ? "LIVE" : "DEMO"}>
-            <div className="goal-list">
-              {displayedGoals.map((goal) => (
-                <div className={`goal ${goalTone(goal.value)}`} key={goal.name}>
-                  <div className="goal-head">
-                    <span>{goal.name}</span>
-                    <b>{Math.round(goal.value)}%</b>
+          <Panel eyebrow="SYSTEM //" title="GOAL READINESS" corner={domain === "FINANCE" ? "PH1" : financeIsLive ? "LIVE" : "LOCAL"}>
+            {domain === "FINANCE" ? (
+              <FinanceGoalMiniList />
+            ) : (
+              <div className="goal-list">
+                {goals.map((goal) => (
+                  <div className={`goal ${goalTone(goal.value)}`} key={goal.name}>
+                    <div className="goal-head">
+                      <span>{goal.name}</span>
+                      <b>{Math.round(goal.value)}%</b>
+                    </div>
+                    <div className="bar" aria-label={`${goal.name} ${Math.round(goal.value)} percent complete`}>
+                      <i style={{ width: `${Math.max(0, Math.min(100, goal.value))}%` }} />
+                    </div>
                   </div>
-                  <div className="bar" aria-label={`${goal.name} ${Math.round(goal.value)} percent complete`}>
-                    <i style={{ width: `${Math.max(0, Math.min(100, goal.value))}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </Panel>
 
           <Panel eyebrow="SYSTEM //" title="EVENT STREAM" corner="RT-MONITOR">
@@ -423,7 +394,7 @@ export default function Work() {
                   <Event text="Jarvis core online" time="NOW" />
                   <Event text="Background event bus ready" time="LIVE" />
                   <Event text="Trading recorder pending" time="SETUP" />
-                  <Event text="Finance architecture mapped" time="PH1" />
+                  <Event text="Finance Phase 1 data ready" time="PH1" />
                 </>
               )}
             </div>
@@ -432,7 +403,7 @@ export default function Work() {
 
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""}`}>
           {domain === "FINANCE" ? (
-            <FinanceCockpit />
+            <FinanceCockpit onAsk={setInput} />
           ) : (
             <div className="core-visual">
               <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
@@ -481,7 +452,7 @@ export default function Work() {
               })}
             </div>
             {domain === "FINANCE" && (
-              <div className="approval-row"><ShieldCheck size={14} /> Phase 1 uses a provisional snapshot while history finishes syncing · direct Plaid automation comes in Phase 2</div>
+              <div className="approval-row"><ShieldCheck size={14} /> Phase 1 account + history data is ready. Next: direct server-side finance feed, durable CFO state, and automated refresh.</div>
             )}
             {domain === "SENTRYOPS" && latestPulse && (
               <div className="approval-row"><Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}</div>
@@ -543,91 +514,11 @@ export default function Work() {
       </section>
 
       <footer className="footerbar">
-        <span><Bot size={13} /> JARVIS CORE v0.4</span>
+        <span><Bot size={13} /> JARVIS CORE v0.5</span>
         <span><Radar size={13} /> OBSERVE → SYNTHESIZE → PRIORITIZE → ACT → LEARN</span>
         <span><LifeBuoy size={13} /> {systemMode === "DEGRADED" ? "MONITORING WITH LIMITATIONS" : "ALWAYS-ON EVENT MODE"}</span>
       </footer>
     </main>
-  );
-}
-
-function FinanceCockpit() {
-  const metrics = [
-    {
-      label: "NET WORTH",
-      value: formatSignedCurrency(PROVISIONAL_FINANCE.personalNetWorth),
-      note: `PROVISIONAL · GOAL ${formatSignedCurrency(NET_WORTH_TARGET)} · raw linked ${formatSignedCurrency(PROVISIONAL_FINANCE.providerNetWorth)} incl. AU card`,
-      className: "net-worth-metric",
-    },
-    {
-      label: "LIQUIDITY",
-      value: formatCurrency(PROVISIONAL_FINANCE.liquidity),
-      note: "Current linked depository balances · provisional",
-      className: "",
-    },
-    {
-      label: "PERSONAL DEBT",
-      value: formatCurrency(PROVISIONAL_FINANCE.personalDebt),
-      note: `${formatCurrency(PROVISIONAL_FINANCE.authorizedUserBalance)} authorized-user balance excluded`,
-      className: "",
-    },
-    {
-      label: "COMPOUNDING",
-      value: formatCurrency(PROVISIONAL_FINANCE.compounding),
-      note: "Schwab checking + brokerage · provisional",
-      className: "",
-    },
-  ];
-
-  return (
-    <section className="finance-cockpit">
-      <div className="finance-titlebar">
-        <div>
-          <span>HIMIE JOHNSON VENTURES // DWIGHT</span>
-          <strong>FINANCIAL COMMAND CORE</strong>
-        </div>
-        <div className="finance-sync"><i /> PHASE 1 · PROVISIONAL SNAPSHOT · HISTORY SYNCING</div>
-      </div>
-
-      <div className="finance-metrics">
-        {metrics.map((metric) => (
-          <div className={`finance-metric ${metric.className}`} key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <small>{metric.note}</small>
-          </div>
-        ))}
-      </div>
-
-      <div className="cashflow-strip">
-        <div><span>MONTHLY INFLOW</span><b>PENDING HISTORY</b></div>
-        <div><span>MONTHLY OUTFLOW</span><b>PENDING HISTORY</b></div>
-        <div><span>FREE CASH FLOW</span><b>PENDING HISTORY</b></div>
-      </div>
-
-      <div className="finance-section-head">
-        <div><span>ACCOUNT ARCHITECTURE</span><strong>EVERY DOLLAR HAS A JOB</strong></div>
-        <small>6 PURPOSES MAPPED</small>
-      </div>
-
-      <div className="account-role-grid">
-        {financeArchitecture.map((account) => (
-          <article className="account-role-card" key={account.institution}>
-            <div className="account-role-top"><span>{account.institution}</span><b>MAPPED</b></div>
-            <strong>{account.role}</strong>
-            <p>{account.detail}</p>
-          </article>
-        ))}
-      </div>
-
-      <div className="finance-roadmap">
-        <ShieldCheck size={15} />
-        <div>
-          <span>LIVE AUTOMATION PATH</span>
-          <strong>PHASE 2 // DIRECT PLAID → JARVIS DATABASE → FINANCE BRAIN → NEXT MOVE</strong>
-        </div>
-      </div>
-    </section>
   );
 }
 
