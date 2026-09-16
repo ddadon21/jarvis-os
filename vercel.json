@@ -6,19 +6,7 @@
   "crons": [
     {
       "path": "/api/cron/pulse-2a9f5ae0290a6f31a2809bc4",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/pulse-2a9f5ae0290a6f31a2809bc4",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/pulse-2a9f5ae0290a6f31a2809bc4",
       "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/cron/pulse-2a9f5ae0290a6f31a2809bc4",
-      "schedule": "0 18 * * *"
     }
   ]
 }
