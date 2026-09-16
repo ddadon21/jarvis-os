@@ -1,0 +1,130 @@
+.jarvis-global-controls{
+  position:fixed;
+  right:18px;
+  bottom:16px;
+  z-index:80;
+  display:flex;
+  gap:7px;
+  align-items:center;
+  padding:6px;
+  border:1px solid rgba(183,31,38,.18);
+  background:rgba(2,4,6,.82);
+  backdrop-filter:blur(12px);
+  box-shadow:0 12px 34px rgba(0,0,0,.34);
+}
+
+.jarvis-global-controls button{
+  border:1px solid rgba(255,255,255,.075);
+  background:rgba(255,255,255,.018);
+  color:#8f8f8f;
+  padding:7px 9px;
+  font:inherit;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.08em;
+  cursor:pointer;
+}
+
+.jarvis-global-controls button:hover,
+.jarvis-global-controls button.active{
+  color:#f1f1f1;
+  border-color:rgba(183,31,38,.42);
+  background:rgba(66,8,11,.34);
+}
+
+.global-dot{
+  display:inline-block;
+  width:6px;
+  height:6px;
+  margin-right:5px;
+  border-radius:50%;
+  background:#666;
+}
+
+.jarvis-global-controls button.active .global-dot{
+  background:#c4262e;
+  box-shadow:0 0 8px rgba(196,38,46,.72);
+}
+
+.jarvis-voice-status{
+  position:fixed;
+  left:50%;
+  bottom:18px;
+  transform:translateX(-50%);
+  z-index:79;
+  width:min(560px,calc(100vw - 420px));
+  min-width:260px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 11px;
+  border:1px solid rgba(183,31,38,.14);
+  background:rgba(1,3,4,.82);
+  backdrop-filter:blur(10px);
+  box-shadow:0 12px 32px rgba(0,0,0,.28);
+}
+
+.jarvis-voice-status span{
+  color:#c4262e;
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:.11em;
+  white-space:nowrap;
+}
+
+.jarvis-voice-status strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#b8b8b8;
+  font-size:9px;
+  font-weight:600;
+}
+
+.jarvis-voice-status.state-listening{
+  border-color:rgba(183,31,38,.28);
+}
+
+.jarvis-voice-status.state-thinking{
+  box-shadow:0 0 20px rgba(183,31,38,.08),0 12px 32px rgba(0,0,0,.28);
+}
+
+.jarvis-voice-status.state-speaking{
+  border-color:rgba(255,255,255,.18);
+}
+
+.jarvis-global-controls.ambient-controls{
+  right:18px;
+  bottom:18px;
+  opacity:.35;
+  transition:opacity .2s ease;
+  background:rgba(0,0,0,.36);
+}
+
+.jarvis-global-controls.ambient-controls:hover,
+.jarvis-global-controls.ambient-controls:focus-within{
+  opacity:1;
+}
+
+@media(max-width:900px){
+  .jarvis-global-controls{
+    right:10px;
+    bottom:10px;
+    gap:4px;
+  }
+
+  .jarvis-global-controls button{
+    padding:6px 7px;
+    font-size:8px;
+  }
+
+  .jarvis-voice-status{
+    left:10px;
+    right:10px;
+    bottom:54px;
+    transform:none;
+    width:auto;
+    min-width:0;
+  }
+}
