@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FinanceRuntimeState } from "../lib/jarvis-runtime";
 
 type Domain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE";
-type GoalEvent = { type: string };
+type GoalEvent = { type: string; occurredAt?: string };
 
 type GoalItem = {
   name: string;
@@ -12,7 +12,26 @@ type GoalItem = {
   detail: string;
   progress: number | null;
   active?: boolean;
+  habitId?: HabitId;
 };
+
+type HabitId = "life.bible" | "life.gym" | "life.read30" | "life.phonefree" | "trading.review";
+
+type HabitStore = {
+  version: 1;
+  startedOn: string;
+  days: Record<string, Partial<Record<HabitId, boolean>>>;
+  tradingDays: Record<string, true>;
+};
+
+const HABIT_KEY = "jarvis-habit-history-v1";
+
+const LIFE_HABITS: Array<{ id: HabitId; name: string }> = [
+  { id: "life.bible", name: "READ BIBLE" },
+  { id: "life.gym", name: "GYM" },
+  { id: "life.read30", name: "READ 30 MINUTES" },
+  { id: "life.phonefree", name: "PHONE OFF 30–60 MIN" },
+];
 
 function percentLabel(value: number) {
   if (value > 0 && value < 0.01) return "<0.01%";
@@ -29,9 +48,117 @@ function hasEvent(events: GoalEvent[], type: string) {
   return events.some((event) => event.type === type);
 }
 
+function dateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseDateKey(value: string) {
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0, 0);
+}
+
+function emptyHabitStore(): HabitStore {
+  return { version: 1, startedOn: dateKey(), days: {}, tradingDays: {} };
+}
+
+function loadHabitStore(): HabitStore {
+  if (typeof window === "undefined") return emptyHabitStore();
+  try {
+    const raw = window.localStorage.getItem(HABIT_KEY);
+    if (!raw) return emptyHabitStore();
+    const parsed = JSON.parse(raw) as Partial<HabitStore>;
+    if (parsed.version !== 1 || typeof parsed.startedOn !== "string") return emptyHabitStore();
+    return {
+      version: 1,
+      startedOn: parsed.startedOn,
+      days: parsed.days && typeof parsed.days === "object" ? parsed.days : {},
+      tradingDays: parsed.tradingDays && typeof parsed.tradingDays === "object" ? parsed.tradingDays : {},
+    };
+  } catch {
+    return emptyHabitStore();
+  }
+}
+
+function saveHabitStore(store: HabitStore) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(HABIT_KEY, JSON.stringify(store));
+  window.dispatchEvent(new CustomEvent("jarvis-habits-updated", { detail: buildHabitSummary(store) }));
+}
+
+function datesBetween(startKey: string, endKey: string, maxDays = 30) {
+  const start = parseDateKey(startKey);
+  const end = parseDateKey(endKey);
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end && dates.length < maxDays) {
+    dates.push(dateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function recentLifeDates(store: HabitStore, days: number) {
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(today.getDate() - (days - 1));
+  const actualStart = parseDateKey(store.startedOn) > start ? parseDateKey(store.startedOn) : start;
+  return datesBetween(dateKey(actualStart), dateKey(today), days);
+}
+
+function habitRate(store: HabitStore, id: HabitId, days = 7) {
+  const dates = id === "trading.review"
+    ? Object.keys(store.tradingDays).sort().slice(-days)
+    : recentLifeDates(store, days);
+  if (dates.length === 0) return null;
+  const done = dates.filter((day) => store.days[day]?.[id] === true).length;
+  return (done / dates.length) * 100;
+}
+
+function habitStreak(store: HabitStore, id: HabitId) {
+  const today = new Date();
+  let streak = 0;
+  for (let i = 0; i < 365; i += 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() - i);
+    const key = dateKey(day);
+    if (id === "trading.review" && !store.tradingDays[key]) continue;
+    if (store.days[key]?.[id] === true) streak += 1;
+    else break;
+  }
+  return streak;
+}
+
+function buildHabitSummary(store: HabitStore) {
+  const lifeRates = LIFE_HABITS.map((habit) => habitRate(store, habit.id, 7)).filter((value): value is number => value != null);
+  const overall = lifeRates.length ? lifeRates.reduce((sum, value) => sum + value, 0) / lifeRates.length : null;
+  const trackedDays = recentLifeDates(store, 30).length;
+  const verdict = trackedDays < 3 || overall == null
+    ? "BUILDING DATA"
+    : overall >= 85
+      ? "CONSISTENT"
+      : overall >= 60
+        ? "SLIPPING"
+        : "BULLSHITTING";
+  return {
+    verdict,
+    life7DayCompletion: overall == null ? null : Math.round(overall),
+    trackedDays,
+    tradingReview7DayCompletion: habitRate(store, "trading.review", 7),
+  };
+}
+
 export default function DomainGoals({ domain, events }: { domain: Domain; events: GoalEvent[] }) {
   const [finance, setFinance] = useState<FinanceRuntimeState | null>(null);
-  const [bibleDone, setBibleDone] = useState(false);
+  const [habits, setHabits] = useState<HabitStore>(() => emptyHabitStore());
+
+  useEffect(() => {
+    const loaded = loadHabitStore();
+    setHabits(loaded);
+    if (!window.localStorage.getItem(HABIT_KEY)) saveHabitStore(loaded);
+  }, []);
 
   useEffect(() => {
     if (domain !== "FINANCE") return;
@@ -50,15 +177,42 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
   }, [domain]);
 
   useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    setBibleDone(window.localStorage.getItem("jarvis-life-bible-date") === today);
-  }, []);
+    const tradeDays = events
+      .filter((event) => event.type === "trading.trade_closed" && event.occurredAt)
+      .map((event) => dateKey(new Date(event.occurredAt as string)));
+    if (tradeDays.length === 0) return;
+    setHabits((current) => {
+      const tradingDays = { ...current.tradingDays };
+      let changed = false;
+      for (const day of tradeDays) {
+        if (!tradingDays[day]) { tradingDays[day] = true; changed = true; }
+      }
+      if (!changed) return current;
+      const next = { ...current, tradingDays };
+      saveHabitStore(next);
+      return next;
+    });
+  }, [events]);
+
+  const summary = useMemo(() => buildHabitSummary(habits), [habits]);
 
   const goals = useMemo<GoalItem[]>(() => {
     if (domain === "TRADING") {
       const passed = hasEvent(events, "trading.account_passed");
       const payout = hasEvent(events, "trading.payout_received");
+      const reviewDone = habits.days[dateKey()]?.["trading.review"] === true;
+      const reviewRate = habitRate(habits, "trading.review", 7);
       return [
+        {
+          name: "REVIEW TRADE",
+          status: reviewDone ? "DONE" : "ACTIVE",
+          detail: reviewRate == null
+            ? "Manual check-off after you trade. Jarvis will score consistency automatically once Observer trade days are flowing."
+            : `${Math.round(reviewRate)}% of the last observed trading days reviewed · streak ${habitStreak(habits, "trading.review")}.`,
+          progress: reviewDone ? 100 : 0,
+          active: !reviewDone,
+          habitId: "trading.review",
+        },
         { name: "PASS CURRENT ACCOUNT", status: passed ? "DONE" : "ACTIVE", detail: passed ? "Passed." : "Current objective. Progress will automate once trading data is connected.", progress: passed ? 100 : null, active: !passed },
         { name: "FIRST PAYOUT", status: payout ? "DONE" : passed ? "ACTIVE" : "NEXT", detail: payout ? "Payout recorded." : "Unlocks after the account is funded.", progress: payout ? 100 : null, active: passed && !payout },
         { name: "REPEAT PAYOUTS", status: payout ? "ACTIVE" : "LOCKED", detail: "Build consistency before scaling risk.", progress: null, active: payout },
@@ -78,8 +232,21 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     }
 
     if (domain === "LIFE") {
+      const habitGoals = LIFE_HABITS.map<GoalItem>((habit) => {
+        const done = habits.days[dateKey()]?.[habit.id] === true;
+        const rate = habitRate(habits, habit.id, 7);
+        return {
+          name: habit.name,
+          status: done ? "DONE" : "ACTIVE",
+          detail: `${rate == null ? "No history yet" : `${Math.round(rate)}% last 7D`} · streak ${habitStreak(habits, habit.id)}.`,
+          progress: done ? 100 : 0,
+          active: !done,
+          habitId: habit.id,
+        };
+      });
       return [
-        { name: "READ BIBLE TODAY", status: bibleDone ? "DONE" : "ACTIVE", detail: bibleDone ? "Completed today." : "Manual check-off because there is no reliable external data source.", progress: bibleDone ? 100 : 0, active: !bibleDone },
+        ...habitGoals,
+        { name: "CONSISTENCY CHECK", status: summary.verdict, detail: summary.life7DayCompletion == null ? "Jarvis is building your baseline." : `${summary.life7DayCompletion}% average completion across your daily Life check-offs.`, progress: summary.life7DayCompletion, active: summary.verdict !== "CONSISTENT" },
         { name: "MOVE OUT READINESS", status: "LINKED TO FINANCE", detail: "Moves only when Finance gates are actually satisfied.", progress: null },
         { name: "LIFESTYLE UPGRADE", status: "LINKED TO FINANCE", detail: "Lifestyle expands after cash flow, debt, credit and reserves support it.", progress: null },
       ];
@@ -101,28 +268,38 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
       { name: "GR SUPRA", status: "SETUP", detail: "Unlocks only when purchase + insurance + post-purchase cash gates are safe.", progress: null },
       { name: "$100M CASH", status: "ULTIMATE", detail: `$${metrics.liquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} current connected cash.`, progress: cash100M },
     ];
-  }, [bibleDone, domain, events, finance]);
+  }, [domain, events, finance, habits, summary]);
 
-  function toggleBible() {
-    const today = new Date().toISOString().slice(0, 10);
-    if (bibleDone) {
-      window.localStorage.removeItem("jarvis-life-bible-date");
-      setBibleDone(false);
-    } else {
-      window.localStorage.setItem("jarvis-life-bible-date", today);
-      setBibleDone(true);
-    }
+  function toggleHabit(id: HabitId) {
+    const today = dateKey();
+    setHabits((current) => {
+      const existing = current.days[today]?.[id] === true;
+      const days = {
+        ...current.days,
+        [today]: { ...current.days[today], [id]: !existing },
+      };
+      const tradingDays = id === "trading.review" ? { ...current.tradingDays, [today]: true as const } : current.tradingDays;
+      const next = { ...current, days, tradingDays };
+      saveHabitStore(next);
+      return next;
+    });
   }
 
   return (
     <div className="goal-list">
-      {goals.map((goal) => (
-        <div className={`goal ${tone(goal)}`} key={goal.name}>
-          <div className="goal-head"><span>{goal.name}</span><b>{goal.progress == null ? goal.status : percentLabel(goal.progress)}</b></div>
-          {goal.progress != null && <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div>}
-          <div className="tiny-row"><span>{goal.detail}</span>{domain === "LIFE" && goal.name === "READ BIBLE TODAY" ? <input aria-label="Mark Bible reading complete" type="checkbox" checked={bibleDone} onChange={toggleBible} /> : null}</div>
-        </div>
-      ))}
+      {goals.map((goal) => {
+        const checked = goal.habitId ? habits.days[dateKey()]?.[goal.habitId] === true : false;
+        return (
+          <div className={`goal ${tone(goal)}`} key={goal.name}>
+            <div className="goal-head"><span>{goal.name}</span><b>{goal.progress == null ? goal.status : percentLabel(goal.progress)}</b></div>
+            {goal.progress != null && <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div>}
+            <div className="tiny-row">
+              <span>{goal.detail}</span>
+              {goal.habitId ? <input aria-label={`Mark ${goal.name} complete`} type="checkbox" checked={checked} onChange={() => toggleHabit(goal.habitId as HabitId)} /> : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
