@@ -320,4 +320,301 @@
   }
 }
 
-/* Preview refresh after OpenAI credential update. */
+/* Purpose-driven Finance CFO workspace. */
+.finance-operating-system {
+  gap: .62rem !important;
+}
+
+.finance-subnav {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: .28rem;
+}
+
+.finance-subnav button,
+.finance-action-card button,
+.finance-primary-action,
+.finance-decision-list button {
+  border: 1px solid rgba(255,255,255,.075);
+  background: rgba(0,0,0,.34);
+  color: #aaa;
+  cursor: pointer;
+  font: inherit;
+  font-size: .54rem;
+  font-weight: 700;
+  letter-spacing: .065em;
+}
+
+.finance-subnav button {
+  padding: .38rem .18rem;
+}
+
+.finance-subnav button.active,
+.finance-subnav button:hover,
+.finance-action-card button:hover,
+.finance-primary-action:hover,
+.finance-decision-list button:hover {
+  color: #f2f2f2;
+  border-color: rgba(183,31,38,.46);
+  background: rgba(64,8,11,.32);
+}
+
+.finance-metrics-three {
+  grid-template-columns: repeat(3, 1fr) !important;
+}
+
+.finance-stage-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+.finance-stage-row > div {
+  padding: .42rem .22rem;
+  text-align: center;
+  border-right: 1px solid rgba(255,255,255,.045);
+}
+
+.finance-stage-row > div:last-child { border-right: 0; }
+
+.finance-stage-row span {
+  color: #777;
+  font-size: .52rem;
+  font-weight: 700;
+  letter-spacing: .055em;
+}
+
+.finance-stage-row > div.active {
+  background: rgba(90,10,14,.30);
+  box-shadow: inset 0 0 14px rgba(183,31,38,.04);
+}
+
+.finance-stage-row > div.active span { color: #e2e2e2; }
+
+.finance-operating-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .42rem;
+}
+
+.finance-action-card,
+.finance-explainer,
+.finance-debt-card,
+.finance-goal-card,
+.finance-decision-list article {
+  border: 1px solid rgba(255,255,255,.065);
+  background: rgba(255,255,255,.016);
+}
+
+.finance-action-card {
+  padding: .58rem;
+  min-height: 8.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+
+.finance-action-card.priority {
+  border-color: rgba(183,31,38,.28);
+  background: linear-gradient(180deg, rgba(52,7,10,.28), rgba(255,255,255,.012));
+}
+
+.finance-action-card > span,
+.finance-explainer > span,
+.finance-debt-card > div span,
+.finance-goal-head span,
+.finance-decision-list article > div span {
+  color: #c32931;
+  font-size: .54rem;
+  font-weight: 700;
+  letter-spacing: .075em;
+}
+
+.finance-action-card > strong,
+.finance-explainer > strong {
+  color: #eee;
+  font-size: .70rem;
+  line-height: 1.3;
+}
+
+.finance-action-card p,
+.finance-explainer p,
+.finance-debt-card p,
+.finance-goal-card p,
+.finance-decision-list p {
+  margin: 0;
+  color: #aaa;
+  font-size: .61rem;
+  line-height: 1.42;
+}
+
+.finance-action-card button,
+.finance-decision-list button {
+  margin-top: auto;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: .24rem;
+  padding: .30rem .40rem;
+}
+
+.finance-explainer {
+  padding: .68rem;
+  display: flex;
+  flex-direction: column;
+  gap: .24rem;
+}
+
+.finance-primary-action {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: .28rem;
+  padding: .42rem .52rem;
+}
+
+.finance-debt-grid,
+.finance-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .42rem;
+}
+
+.finance-goal-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.finance-debt-card,
+.finance-goal-card {
+  padding: .58rem;
+  display: flex;
+  flex-direction: column;
+  gap: .24rem;
+}
+
+.finance-debt-card > div,
+.finance-goal-head,
+.finance-decision-list article > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .4rem;
+}
+
+.finance-debt-card > div b,
+.finance-goal-head b,
+.finance-decision-list article > div b {
+  color: #aaa;
+  font-size: .50rem;
+  letter-spacing: .055em;
+}
+
+.finance-debt-card > strong,
+.finance-goal-card > strong {
+  color: #f0f0f0;
+  font-size: .82rem;
+}
+
+.finance-debt-card small,
+.finance-goal-card small {
+  color: #7f7f7f;
+  font-size: .55rem;
+}
+
+.finance-debt-card.au {
+  opacity: .72;
+  border-style: dashed;
+}
+
+.finance-goal-card.finance-goal-setup {
+  border-style: dashed;
+}
+
+.finance-goal-bar {
+  height: 3px;
+  background: rgba(255,255,255,.055);
+  overflow: hidden;
+}
+
+.finance-goal-bar i,
+.finance-mini-goals .bar i {
+  display: block;
+  height: 100%;
+  background: var(--jarvis-red) !important;
+}
+
+.finance-decision-list {
+  display: grid;
+  gap: .38rem;
+}
+
+.finance-decision-list article {
+  padding: .56rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .30rem .65rem;
+  align-items: center;
+}
+
+.finance-decision-list article > div,
+.finance-decision-list p { grid-column: 1; }
+.finance-decision-list button { grid-column: 2; grid-row: 1 / 3; }
+
+.finance-source-note {
+  display: flex;
+  align-items: flex-start;
+  gap: .32rem;
+  padding-top: .45rem;
+  border-top: 1px solid rgba(255,255,255,.05);
+  color: #777;
+  font-size: .54rem;
+  line-height: 1.35;
+}
+
+.finance-mini-goals {
+  display: flex;
+  flex-direction: column;
+  gap: .52rem;
+}
+
+.finance-mini-goals > div > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: .4rem;
+  margin-bottom: .22rem;
+}
+
+.finance-mini-goals span,
+.finance-mini-goals b,
+.finance-mini-goals small {
+  font-size: .62rem;
+}
+
+.finance-mini-goals span { color: #ddd; }
+.finance-mini-goals b { color: #c32931; }
+.finance-mini-goals small { color: #888; }
+
+.finance-mini-proof {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-start !important;
+  gap: .28rem !important;
+  margin-top: .1rem;
+  color: #777;
+  font-size: .54rem;
+}
+
+@media (max-width: 1180px) {
+  .finance-subnav { grid-template-columns: repeat(3, 1fr); }
+  .finance-debt-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .finance-operating-grid,
+  .finance-goal-grid,
+  .finance-metrics-three { grid-template-columns: 1fr !important; }
+  .finance-stage-row { grid-template-columns: repeat(4, 1fr); }
+  .finance-subnav { grid-template-columns: repeat(2, 1fr); }
+  .finance-decision-list article { grid-template-columns: 1fr; }
+  .finance-decision-list button { grid-column: 1; grid-row: auto; }
+}
