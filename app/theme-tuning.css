@@ -23,10 +23,17 @@
   text-shadow: 0 0 8px rgba(183, 31, 38, .18) !important;
 }
 
-/* Main box titles such as MISSION CONTROL stay crisp white. */
+/* Main box titles return to Jarvis red. */
 .panel-head strong {
-  color: #f5f5f5 !important;
-  text-shadow: none !important;
+  color: var(--jarvis-red) !important;
+  text-shadow: 0 0 7px rgba(183, 31, 38, .18) !important;
+  font-size: 1.02rem !important;
+  letter-spacing: .08em !important;
+}
+
+.panel-head > div > span,
+.panel-head small {
+  font-size: .74rem !important;
 }
 
 .status-block i,
@@ -70,6 +77,73 @@
 
 .footerbar {
   border-top-color: rgba(183, 31, 38, .15) !important;
+}
+
+/* Raise readability across every information box without making the HUD bulky. */
+.panel-body,
+.mission-copy,
+.tiny-row,
+.goal-head,
+.event,
+.sector-feature,
+.domain-matrix button,
+.approval-row,
+.next-move,
+.finance-metric,
+.cashflow-strip,
+.account-role-card,
+.finance-roadmap,
+.chat-log,
+.command-box input {
+  font-size: 1.01rem !important;
+  line-height: 1.48 !important;
+}
+
+.tiny-row span,
+.goal-head span,
+.event p,
+.sector-feature small,
+.next-move p,
+.finance-metric small,
+.account-role-card p,
+.approval-row,
+.message p {
+  color: #dedede !important;
+}
+
+.tiny-row b,
+.goal-head b,
+.event span,
+.sector-feature strong,
+.domain-matrix button span,
+.domain-matrix button b,
+.next-move strong,
+.finance-metric strong,
+.cashflow-strip b,
+.account-role-card strong,
+.message p {
+  font-weight: 600 !important;
+}
+
+.message p {
+  font-size: 1rem !important;
+  line-height: 1.52 !important;
+}
+
+.finance-metric > span,
+.cashflow-strip span,
+.finance-section-head span,
+.account-role-top span,
+.finance-roadmap span {
+  font-size: .8rem !important;
+}
+
+.finance-metric strong {
+  font-size: 1.52rem !important;
+}
+
+.account-role-card > strong {
+  font-size: 1.02rem !important;
 }
 
 /* Institution names need to read immediately against the dark finance cards. */
