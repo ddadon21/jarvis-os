@@ -1,3 +1,4 @@
+import { anthropic } from "@ai-sdk/anthropic";
 import { generateText, gateway } from "ai";
 import {
   JarvisPulse,
@@ -10,6 +11,7 @@ import {
 } from "./jarvis-runtime";
 
 const MAX_OPPORTUNITIES = 5;
+const CLAUDE_RESEARCH_MODEL = "claude-opus-5";
 
 export async function runJarvisPulse(): Promise<JarvisPulse> {
   const previous = await getLatestPulse();
@@ -19,11 +21,7 @@ export async function runJarvisPulse(): Promise<JarvisPulse> {
         .join(" | ")}`
     : "No previous pulse exists. Establish the baseline without pretending this is exhaustive market coverage.";
 
-  try {
-    const result = await generateText({
-      model: "openai/gpt-5.6-sol",
-      temperature: 0.2,
-      prompt: `You are the background research lane inside JARVIS.
+  const prompt = `You are the background research lane inside JARVIS.
 
 Your task is to proactively research SentryOps opportunities without waiting for the user to ask.
 
@@ -64,20 +62,38 @@ Return ONLY JSON with this shape:
     "reason": "why this action is next",
     "domain": "SENTRYOPS"
   }
-}`,
-      tools: {
-        web_search: gateway.tools.exaSearch({
-          type: "auto",
-          numResults: 12,
-          userLocation: "US",
-          contents: {
-            text: { maxCharacters: 3500 },
-            highlights: { maxCharacters: 1800 },
-            maxAgeHours: 24,
+}`;
+
+  try {
+    const result = process.env.ANTHROPIC_API_KEY
+      ? await generateText({
+          model: anthropic(CLAUDE_RESEARCH_MODEL),
+          temperature: 0.2,
+          prompt,
+          tools: {
+            web_search: anthropic.tools.webSearch_20250305({
+              maxUses: 8,
+              userLocation: { type: "approximate", country: "US" },
+            }),
           },
-        }),
-      },
-    });
+        })
+      : await generateText({
+          model: "openai/gpt-5.6-sol",
+          temperature: 0.2,
+          prompt,
+          tools: {
+            web_search: gateway.tools.exaSearch({
+              type: "auto",
+              numResults: 12,
+              userLocation: "US",
+              contents: {
+                text: { maxCharacters: 3500 },
+                highlights: { maxCharacters: 1800 },
+                maxAgeHours: 24,
+              },
+            }),
+          },
+        });
 
     const parsed = parsePulse(result.text);
     const pulse: JarvisPulse = {
@@ -96,7 +112,7 @@ Return ONLY JSON with this shape:
       createRuntimeEvent({
         type: "research.pulse_completed",
         domain: "SENTRYOPS",
-        source: "jarvis.background",
+        source: process.env.ANTHROPIC_API_KEY ? "jarvis.background.anthropic" : "jarvis.background.gateway",
         importance: pulse.opportunities.some((item) => item.priority === "HIGH") ? "IMPORTANT" : "BACKGROUND",
         summary: pulse.summary,
       }),
