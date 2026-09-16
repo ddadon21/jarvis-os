@@ -1,0 +1,51 @@
+name: Build Jarvis Trading Observer
+
+on:
+  push:
+    branches:
+      - claude/jarvis-ai-backend-Iw0x3
+    paths:
+      - 'desktop/JarvisObserver/**'
+      - '.github/workflows/build-jarvis-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish single-file observer
+        shell: pwsh
+        run: >-
+          dotnet publish .\desktop\JarvisObserver\JarvisObserver.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishReadyToRun=true
+
+      - name: Create release bundle
+        shell: pwsh
+        run: |
+          $publish = '.\desktop\JarvisObserver\bin\Release\net8.0-windows\win-x64\publish'
+          New-Item -ItemType Directory -Force -Path '.\observer-release' | Out-Null
+          Copy-Item "$publish\JarvisObserver.exe" '.\observer-release\JarvisObserver.exe'
+          Copy-Item '.\desktop\JarvisObserver\README.md' '.\observer-release\README.md'
+
+      - name: Upload observer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JarvisObserver-win-x64
+          path: observer-release
+          if-no-files-found: error
+          retention-days: 30
