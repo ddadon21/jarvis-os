@@ -2,15 +2,9 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { loadJarvisState, mergeMemories, saveJarvisState } from "../lib/jarvis-state";
+import { loadJarvisState, saveJarvisState } from "../lib/jarvis-state";
 
 export type JarvisVoiceState = "STANDBY" | "LISTENING" | "THINKING" | "SPEAKING" | "ERROR";
-
-type ApiResponse = {
-  reply?: string;
-  memoryUpdates?: Array<{ domain?: string; fact?: string }>;
-  nextMove?: { title: string; reason: string; domain: "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE" | "CORE" };
-};
 
 type JarvisVoiceContextValue = {
   voiceEnabled: boolean;
@@ -19,8 +13,8 @@ type JarvisVoiceContextValue = {
   fullscreen: boolean;
   toggleVoice: () => void;
   toggleFullscreen: () => Promise<void>;
-  goAmbient: () => void;
-  goDashboard: () => void;
+  goHome: () => void;
+  goWork: () => void;
 };
 
 const JarvisVoiceContext = createContext<JarvisVoiceContextValue | null>(null);
@@ -30,6 +24,31 @@ export function useJarvisVoice() {
   const value = useContext(JarvisVoiceContext);
   if (!value) throw new Error("useJarvisVoice must be used inside JarvisVoiceProvider");
   return value;
+}
+
+function cleanForSpeech(text: string) {
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/[*_`#>-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function scoreVoice(voice: SpeechSynthesisVoice) {
+  const name = voice.name.toLowerCase();
+  const lang = voice.lang.toLowerCase();
+  let score = 0;
+
+  if (lang.startsWith("en-us")) score += 80;
+  else if (lang.startsWith("en-gb")) score += 65;
+  else if (lang.startsWith("en")) score += 45;
+
+  if (/natural|premium|enhanced|online/.test(name)) score += 70;
+  if (/guy|davis|andrew|christopher|mark|david|male/.test(name)) score += 45;
+  if (/microsoft|google/.test(name)) score += 20;
+  if (/zira|samantha|victoria|female/.test(name)) score -= 20;
+
+  return score;
 }
 
 export default function JarvisVoiceProvider({ children }: { children: React.ReactNode }) {
@@ -45,6 +64,10 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const speakingRef = useRef(false);
   const armedRef = useRef(false);
   const voiceStateRef = useRef<JarvisVoiceState>("STANDBY");
+  const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const pendingSpeechRef = useRef(0);
+  const streamDoneRef = useRef(true);
+  const speechBufferRef = useRef("");
 
   function setVoice(next: JarvisVoiceState) {
     voiceStateRef.current = next;
@@ -59,10 +82,22 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   }, []);
 
   useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+
+    const chooseVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (!voices.length) return;
+      preferredVoiceRef.current = [...voices].sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] ?? null;
+    };
+
+    chooseVoice();
+    window.speechSynthesis.addEventListener("voiceschanged", chooseVoice);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", chooseVoice);
+  }, []);
+
+  useEffect(() => {
     const remembered = window.localStorage.getItem(VOICE_STORAGE_KEY) === "true";
-    if (remembered) {
-      window.setTimeout(() => startVoice(true), 450);
-    }
+    if (remembered) window.setTimeout(() => startVoice(true), 450);
 
     return () => {
       voiceEnabledRef.current = false;
@@ -77,10 +112,13 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function restartRecognitionSoon(delay = 220) {
+  function restartRecognitionSoon(delay = 180) {
     if (!voiceEnabledRef.current || speakingRef.current) return;
+    if (voiceStateRef.current === "THINKING" || voiceStateRef.current === "SPEAKING") return;
+
     window.setTimeout(() => {
       if (!voiceEnabledRef.current || speakingRef.current) return;
+      if (voiceStateRef.current === "THINKING" || voiceStateRef.current === "SPEAKING") return;
       try {
         recognitionRef.current?.start?.();
       } catch {
@@ -89,13 +127,99 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }, delay);
   }
 
+  function finishSpeakingIfReady() {
+    if (!streamDoneRef.current || pendingSpeechRef.current > 0) return;
+    speakingRef.current = false;
+    setVoice("LISTENING");
+    setCaption("Say “Jarvis” or “Hey Jarvis”");
+    restartRecognitionSoon(120);
+  }
+
+  function queueSpeech(text: string) {
+    const spoken = cleanForSpeech(text);
+    if (!spoken || !("speechSynthesis" in window)) return;
+
+    if (!speakingRef.current) {
+      speakingRef.current = true;
+      setVoice("SPEAKING");
+      setCaption("JARVIS RESPONDING");
+      try {
+        recognitionRef.current?.stop?.();
+      } catch {
+        // Ignore stop races.
+      }
+    }
+
+    const utterance = new SpeechSynthesisUtterance(spoken);
+    const preferred = preferredVoiceRef.current;
+    if (preferred) utterance.voice = preferred;
+    utterance.lang = preferred?.lang || "en-US";
+    utterance.rate = 1.0;
+    utterance.pitch = 0.86;
+    utterance.volume = 1;
+
+    pendingSpeechRef.current += 1;
+    const done = () => {
+      pendingSpeechRef.current = Math.max(0, pendingSpeechRef.current - 1);
+      finishSpeakingIfReady();
+    };
+    utterance.onend = done;
+    utterance.onerror = done;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function flushSpeechBuffer(force = false) {
+    let buffer = speechBufferRef.current;
+
+    while (buffer.trim()) {
+      const sentenceMatch = buffer.match(/^([\s\S]*?[.!?])(?=\s|$)/);
+      if (sentenceMatch) {
+        queueSpeech(sentenceMatch[1]);
+        buffer = buffer.slice(sentenceMatch[0].length).trimStart();
+        continue;
+      }
+
+      if (!force && buffer.length >= 125) {
+        const searchArea = buffer.slice(0, 145);
+        const punctuationCut = Math.max(searchArea.lastIndexOf(", "), searchArea.lastIndexOf("; "), searchArea.lastIndexOf(": "));
+        const spaceCut = searchArea.lastIndexOf(" ");
+        const cut = punctuationCut >= 70 ? punctuationCut + 1 : spaceCut >= 90 ? spaceCut : -1;
+        if (cut > 0) {
+          queueSpeech(buffer.slice(0, cut));
+          buffer = buffer.slice(cut).trimStart();
+          continue;
+        }
+      }
+
+      if (force) {
+        queueSpeech(buffer);
+        buffer = "";
+      }
+      break;
+    }
+
+    speechBufferRef.current = buffer;
+  }
+
   async function askJarvis(command: string) {
     const clean = command.trim();
     if (!clean) return;
 
     armedRef.current = false;
+    speakingRef.current = false;
+    pendingSpeechRef.current = 0;
+    streamDoneRef.current = false;
+    speechBufferRef.current = "";
+    window.speechSynthesis?.cancel();
+
+    try {
+      recognitionRef.current?.stop?.();
+    } catch {
+      // Ignore recognition stop races.
+    }
+
     setVoice("THINKING");
-    setCaption(clean);
+    setCaption("JARVIS THINKING");
 
     const state = loadJarvisState();
     const userMessage = { role: "user" as const, content: clean, createdAt: new Date().toISOString() };
@@ -104,7 +228,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     window.dispatchEvent(new CustomEvent("jarvis-state-updated"));
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -112,76 +236,59 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
           activeDomain: state.activeDomain,
           goals: state.goals,
           memories: state.memories.map(({ domain, fact }) => ({ domain, fact })),
-          brain: "auto",
         }),
       });
 
-      const data = (await response.json()) as ApiResponse;
-      const reply = data.reply?.trim() || "I did not receive a usable response.";
-      const updatedMemories = Array.isArray(data.memoryUpdates)
-        ? mergeMemories(state.memories, data.memoryUpdates)
-        : state.memories;
+      if (!response.ok || !response.body) {
+        const message = await response.text().catch(() => "Voice fast lane unavailable.");
+        throw new Error(message || "Voice fast lane unavailable.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullReply = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+        fullReply += chunk;
+        speechBufferRef.current += chunk;
+        flushSpeechBuffer(false);
+      }
+
+      fullReply += decoder.decode();
+      flushSpeechBuffer(true);
+      streamDoneRef.current = true;
+
+      const reply = fullReply.trim() || "I did not receive a usable response.";
       const assistantMessage = { role: "assistant" as const, content: reply, createdAt: new Date().toISOString() };
 
       saveJarvisState({
         ...state,
         messages: [...nextMessages, assistantMessage].slice(-80),
-        memories: updatedMemories,
-        nextMove: data.nextMove?.title ? data.nextMove : state.nextMove,
       });
       window.dispatchEvent(new CustomEvent("jarvis-state-updated"));
 
-      speak(reply);
-    } catch {
+      if (pendingSpeechRef.current === 0) {
+        if ("speechSynthesis" in window && reply) queueSpeech(reply);
+        streamDoneRef.current = true;
+        finishSpeakingIfReady();
+      }
+    } catch (error) {
+      streamDoneRef.current = true;
+      speakingRef.current = false;
+      pendingSpeechRef.current = 0;
       setVoice("ERROR");
-      setCaption("VOICE LINK FAILED · CORE REMAINS ONLINE");
-      restartRecognitionSoon(600);
+      setCaption(error instanceof Error ? error.message.slice(0, 110).toUpperCase() : "VOICE LINK FAILED");
+      window.setTimeout(() => {
+        if (!voiceEnabledRef.current) return;
+        setVoice("LISTENING");
+        setCaption("Say “Jarvis” or “Hey Jarvis”");
+        restartRecognitionSoon(200);
+      }, 1400);
     }
-  }
-
-  function speak(text: string) {
-    if (!("speechSynthesis" in window)) {
-      setVoice("LISTENING");
-      setCaption(text);
-      restartRecognitionSoon();
-      return;
-    }
-
-    speakingRef.current = true;
-    try {
-      recognitionRef.current?.stop?.();
-    } catch {
-      // Ignore stop races.
-    }
-
-    const spoken = text
-      .replace(/```[\s\S]*?```/g, "")
-      .replace(/[*_`#>-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const utterance = new SpeechSynthesisUtterance(spoken);
-    utterance.rate = 1.06;
-    utterance.pitch = 0.92;
-    utterance.onstart = () => {
-      setVoice("SPEAKING");
-      setCaption("JARVIS RESPONDING");
-    };
-    utterance.onend = () => {
-      speakingRef.current = false;
-      setVoice("LISTENING");
-      setCaption("Say “Jarvis” or “Hey Jarvis”");
-      restartRecognitionSoon();
-    };
-    utterance.onerror = () => {
-      speakingRef.current = false;
-      setVoice("LISTENING");
-      setCaption("Say “Jarvis” or “Hey Jarvis”");
-      restartRecognitionSoon();
-    };
-
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
   }
 
   function handleFinalTranscript(raw: string) {
@@ -235,7 +342,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         setCaption("MICROPHONE PERMISSION REQUIRED");
         return;
       }
-      restartRecognitionSoon(500);
+      restartRecognitionSoon(350);
     };
     recognition.onend = () => restartRecognitionSoon();
     return recognition;
@@ -261,11 +368,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     try {
       recognition.start();
     } catch {
-      if (isRestore) {
-        restartRecognitionSoon(700);
-      } else {
-        restartRecognitionSoon();
-      }
+      restartRecognitionSoon(isRestore ? 500 : 160);
     }
   }
 
@@ -274,6 +377,8 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     setVoiceEnabled(false);
     armedRef.current = false;
     speakingRef.current = false;
+    pendingSpeechRef.current = 0;
+    streamDoneRef.current = true;
     window.localStorage.setItem(VOICE_STORAGE_KEY, "false");
     window.speechSynthesis?.cancel();
     try {
@@ -307,11 +412,11 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }
   }
 
-  function goAmbient() {
-    router.push("/ambient");
+  function goHome() {
+    router.push("/home");
   }
 
-  function goDashboard() {
+  function goWork() {
     router.push("/");
   }
 
@@ -323,29 +428,29 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       fullscreen,
       toggleVoice,
       toggleFullscreen,
-      goAmbient,
-      goDashboard,
+      goHome,
+      goWork,
     }),
     [caption, fullscreen, voiceEnabled, voiceState],
   );
 
-  const ambient = pathname === "/ambient";
+  const home = pathname === "/home" || pathname === "/ambient";
 
   return (
     <JarvisVoiceContext.Provider value={value}>
       {children}
-      <div className={`jarvis-global-controls ${ambient ? "ambient-controls" : ""}`}>
+      <div className={`jarvis-global-controls ${home ? "ambient-controls" : ""}`}>
         <button type="button" className={voiceEnabled ? "active" : ""} onClick={toggleVoice}>
           <span className="global-dot" /> {voiceEnabled ? "VOICE ON" : "VOICE OFF"}
         </button>
-        <button type="button" onClick={ambient ? goDashboard : goAmbient}>
-          {ambient ? "COMMAND CORE" : "AMBIENT"}
+        <button type="button" onClick={home ? goWork : goHome}>
+          {home ? "WORK" : "HOME"}
         </button>
         <button type="button" className={fullscreen ? "active" : ""} onClick={() => void toggleFullscreen()}>
           {fullscreen ? "EXIT FULLSCREEN" : "FULLSCREEN"}
         </button>
       </div>
-      {!ambient && voiceEnabled && (
+      {!home && voiceEnabled && (
         <div className={`jarvis-voice-status state-${voiceState.toLowerCase()}`}>
           <span>{voiceState}</span>
           <strong>{caption}</strong>
