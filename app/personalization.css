@@ -1,39 +1,303 @@
-.top-actions::before {
-  content: "HIMIE JOHNSON VENTURES";
-  color: var(--cyan);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .16em;
-  text-shadow: 0 0 10px rgba(0,229,255,.35);
-  white-space: nowrap;
+:root {
+  --bg: #030303;
+  --panel: rgba(8, 8, 8, .88);
+  --cyan: #ff2d2d;
+  --cyan2: #f5f5f5;
+  --dim: #6f6f6f;
+  --line: rgba(255, 255, 255, .11);
+  --muted: #8f8f8f;
+  --text: #f4f4f4;
+  --jarvis-red: #ff2d2d;
+  --jarvis-red-soft: #c82020;
+  --jarvis-white: #f5f5f5;
+  --jarvis-gray: #8a8a8a;
+  --jarvis-dark: #090909;
+  --goal-red: #ff3535;
+  --goal-yellow: #f2c94c;
+  --goal-green: #42d17b;
 }
 
-.profile-chip span {
-  font-size: 0;
+html,
+body {
+  background: #030303;
+  color: var(--jarvis-white);
 }
 
-.profile-chip span::after {
-  content: "DWIGHT";
-  font-size: 10px;
-  letter-spacing: .1em;
+.shell {
+  background: #030303 !important;
 }
 
-@media(max-width:1100px) {
-  .top-actions::before {
-    font-size: 10px;
-    letter-spacing: .1em;
+/* Barely-visible peg / web texture: black first, detail second. */
+.grid-overlay {
+  opacity: 1 !important;
+  background-image:
+    radial-gradient(circle, rgba(205, 205, 205, .14) 1px, transparent 1.4px),
+    repeating-linear-gradient(32deg, transparent 0 54px, rgba(255, 255, 255, .018) 55px 56px),
+    repeating-linear-gradient(148deg, transparent 0 54px, rgba(255, 255, 255, .014) 55px 56px) !important;
+  background-size: 22px 22px, 110px 110px, 110px 110px !important;
+  mask-image: radial-gradient(circle at 50% 42%, black 15%, rgba(0,0,0,.84) 55%, transparent 94%) !important;
+}
+
+.topbar {
+  border-bottom-color: rgba(255, 45, 45, .22) !important;
+  background: rgba(3, 3, 3, .95) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,.025);
+}
+
+.brand-mark,
+.brand,
+.panel-head strong,
+.mission-stat,
+.company-zone .brand-mark,
+.command-box svg,
+.command-box button,
+.sector-feature,
+.next-icon,
+.core-node,
+.domain-matrix svg {
+  color: var(--jarvis-red) !important;
+}
+
+.brand {
+  text-shadow: 0 0 12px rgba(255, 45, 45, .34) !important;
+}
+
+.company {
+  color: var(--jarvis-white) !important;
+  text-shadow: none !important;
+}
+
+.micro,
+.company-micro,
+.status-block,
+.panel-head span,
+.panel-head small,
+.command-label,
+.finance-titlebar span,
+.finance-section-head span,
+.finance-section-head small,
+.finance-sync,
+.footerbar,
+.approval-row,
+.next-move span,
+.account-role-top span,
+.finance-roadmap span {
+  color: #777 !important;
+}
+
+.status-block b,
+.tiny-row b,
+.finance-titlebar strong,
+.finance-metric strong,
+.cashflow-strip b,
+.finance-section-head strong,
+.account-role-card > strong,
+.finance-roadmap strong,
+.next-move strong,
+.message.user p {
+  color: var(--jarvis-white) !important;
+}
+
+.status-block i,
+.event i,
+.finance-sync i {
+  background: var(--jarvis-red) !important;
+  box-shadow: 0 0 9px rgba(255, 45, 45, .72) !important;
+}
+
+.panel {
+  border-color: rgba(255, 255, 255, .10) !important;
+  background: linear-gradient(180deg, rgba(12, 12, 12, .90), rgba(5, 5, 5, .82)) !important;
+  box-shadow: inset 0 0 32px rgba(255,255,255,.012), 0 18px 40px rgba(0,0,0,.24) !important;
+}
+
+.corner {
+  border-color: var(--jarvis-red) !important;
+}
+
+.panel-rule {
+  background: linear-gradient(90deg, rgba(255,45,45,.34), rgba(255,255,255,.06), transparent) !important;
+}
+
+.mission-copy,
+.message p,
+.event p,
+.sector-feature small,
+.next-move p,
+.account-role-card p,
+.finance-metric small {
+  color: #a5a5a5 !important;
+}
+
+.mission-stat span,
+.tiny-row,
+.goal-head,
+.event span,
+.sector-feature span,
+.domain-matrix span,
+.message-meta,
+.finance-metric span,
+.cashflow-strip span {
+  color: #707070 !important;
+}
+
+.mission-stat strong {
+  color: var(--jarvis-white) !important;
+  text-shadow: none !important;
+}
+
+/* Goal readiness is communicated visually, not with RED/YELLOW/GREEN words. */
+.goal-head {
+  font-size: 9px !important;
+  margin-bottom: 7px !important;
+}
+
+.goal-head span {
+  color: #d7d7d7 !important;
+}
+
+.goal-head b {
+  font-size: 10px !important;
+  letter-spacing: .05em;
+}
+
+.bar {
+  height: 6px !important;
+  background: #171717 !important;
+  border: 1px solid rgba(255,255,255,.055);
+  overflow: hidden;
+}
+
+.bar i {
+  height: 100%;
+  transition: width .35s ease, background .25s ease;
+  box-shadow: none !important;
+}
+
+.goal-risk .goal-head b { color: var(--goal-red) !important; }
+.goal-risk .bar i {
+  background: linear-gradient(90deg, #7b1111, var(--goal-red)) !important;
+  box-shadow: 0 0 9px rgba(255,53,53,.24) !important;
+}
+
+.goal-watch .goal-head b { color: var(--goal-yellow) !important; }
+.goal-watch .bar i {
+  background: linear-gradient(90deg, #8b6c16, var(--goal-yellow)) !important;
+  box-shadow: 0 0 9px rgba(242,201,76,.20) !important;
+}
+
+.goal-good .goal-head b { color: var(--goal-green) !important; }
+.goal-good .bar i {
+  background: linear-gradient(90deg, #176b3b, var(--goal-green)) !important;
+  box-shadow: 0 0 9px rgba(66,209,123,.20) !important;
+}
+
+.center-core {
+  border-left-color: rgba(255,255,255,.055) !important;
+  border-right-color: rgba(255,255,255,.055) !important;
+}
+
+.radar {
+  border-color: rgba(255, 45, 45, .32) !important;
+}
+
+.radar.inner {
+  border-color: rgba(255, 45, 45, .52) !important;
+}
+
+.sweep {
+  background: linear-gradient(var(--jarvis-red), transparent) !important;
+  box-shadow: 0 0 10px rgba(255,45,45,.62) !important;
+}
+
+.axis {
+  background: linear-gradient(transparent, rgba(255,255,255,.10), transparent) !important;
+}
+
+.core-node {
+  border-color: var(--jarvis-red) !important;
+  box-shadow: inset 0 0 28px rgba(255,45,45,.055), 0 0 20px rgba(255,45,45,.08) !important;
+}
+
+.core-node span {
+  color: #aaa !important;
+}
+
+.core-node strong {
+  color: var(--jarvis-white) !important;
+}
+
+.domain-switcher button,
+.domain-matrix button,
+.command-box,
+.finance-metric,
+.cashflow-strip,
+.account-role-card,
+.finance-roadmap {
+  background: rgba(8, 8, 8, .86) !important;
+  border-color: rgba(255,255,255,.10) !important;
+}
+
+.domain-switcher button {
+  color: #8b8b8b !important;
+}
+
+.domain-switcher button.active,
+.domain-matrix button.selected {
+  color: var(--jarvis-white) !important;
+  border-color: rgba(255,45,45,.64) !important;
+  background: rgba(50, 5, 5, .32) !important;
+  box-shadow: inset 0 0 18px rgba(255,45,45,.035), 0 0 14px rgba(255,45,45,.045) !important;
+}
+
+.domain-matrix b {
+  color: var(--jarvis-red) !important;
+}
+
+.command-box {
+  box-shadow: 0 0 24px rgba(255,45,45,.025) !important;
+}
+
+.command-box input {
+  color: var(--jarvis-white) !important;
+}
+
+.command-box input::placeholder {
+  color: #606060 !important;
+}
+
+.message {
+  border-left-color: #555 !important;
+}
+
+.message.user {
+  border-left-color: var(--jarvis-red) !important;
+}
+
+.finance-titlebar {
+  border-bottom-color: rgba(255,45,45,.22) !important;
+}
+
+.account-role-top b {
+  color: var(--jarvis-red) !important;
+  border-color: rgba(255,45,45,.22) !important;
+}
+
+.finance-roadmap {
+  color: var(--jarvis-red) !important;
+  background: linear-gradient(90deg, rgba(255,45,45,.055), rgba(8,8,8,.75)) !important;
+}
+
+.footerbar {
+  border-top-color: rgba(255,45,45,.18) !important;
+}
+
+@media (max-width: 760px) {
+  .grid-overlay {
+    background-size: 18px 18px, 90px 90px, 90px 90px !important;
   }
-}
 
-@media(max-width:760px) {
-  .top-actions::before {
-    content: "HJV";
-    font-size: 10px;
-    letter-spacing: .14em;
-  }
-
-  .profile-chip span,
-  .profile-chip span::after {
-    display: none;
+  .company {
+    color: var(--jarvis-white) !important;
   }
 }
