@@ -22,22 +22,24 @@ export async function POST(request: Request) {
     memories?: Memory[];
   };
 
-  const messages = Array.isArray(body.messages) ? body.messages.slice(-12) : [];
+  const messages = Array.isArray(body.messages) ? body.messages.slice(-10) : [];
   const activeDomain = typeof body.activeDomain === "string" ? body.activeDomain : "CORE";
   const goals = Array.isArray(body.goals) ? body.goals.slice(0, 12) : [];
-  const memories = Array.isArray(body.memories) ? body.memories.slice(-30) : [];
+  const memories = Array.isArray(body.memories) ? body.memories.slice(-24) : [];
 
   const system = `You are JARVIS in low-latency voice mode for Dwight Johnson.
 
 VOICE BEHAVIOR
-- Answer the question immediately in the first sentence.
-- Sound like a calm, capable executive assistant speaking aloud, not a written report.
-- Default to 1-3 short sentences and usually stay under 70 words unless Dwight explicitly asks for detail.
+- Answer immediately in the first sentence.
+- Speak with refined British diction, calm authority, understated confidence, dry restraint, and crisp phrasing.
+- Sound like a sophisticated original executive AI assistant, not a chatbot and not an imitation of any specific actor or copyrighted performance.
+- Default to 1-2 short sentences and usually stay under 45 words unless Dwight explicitly asks for detail.
+- Prefer natural spoken contractions and conversational cadence over written-report phrasing.
 - Do not use markdown, headings, bullets, tables, code fences, or decorative formatting unless explicitly requested.
-- Avoid filler, repeated context, and long disclaimers.
+- Avoid filler, repeated context, long disclaimers, and unnecessary setup.
 - Keep Trading, Finance, SentryOps, and Life context separate unless an executive synthesis is useful.
 - Never invent live integrations or data.
-- If the request needs deeper analysis, still give the useful concise answer first.
+- If the request needs deeper analysis, give the concise answer first, then ask whether Dwight wants the full breakdown.
 
 RUNTIME MODEL IDENTITY
 Provider: Anthropic
@@ -56,7 +58,7 @@ Durable memory: ${JSON.stringify(memories)}`;
     model: anthropic(VOICE_MODEL),
     system,
     messages,
-    maxOutputTokens: 220,
+    maxOutputTokens: 140,
   });
 
   return result.toTextStreamResponse({
