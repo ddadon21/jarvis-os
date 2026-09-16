@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { FinanceRuntimeState, RuntimeEvent } from "../lib/jarvis-runtime";
+import type { FinanceRuntimeState } from "../lib/jarvis-runtime";
 
 type Domain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE";
+type GoalEvent = { type: string };
 
 type GoalItem = {
   name: string;
@@ -24,11 +25,11 @@ function tone(goal: GoalItem) {
   return "goal-risk";
 }
 
-function hasEvent(events: RuntimeEvent[], type: string) {
+function hasEvent(events: GoalEvent[], type: string) {
   return events.some((event) => event.type === type);
 }
 
-export default function DomainGoals({ domain, events }: { domain: Domain; events: RuntimeEvent[] }) {
+export default function DomainGoals({ domain, events }: { domain: Domain; events: GoalEvent[] }) {
   const [finance, setFinance] = useState<FinanceRuntimeState | null>(null);
   const [bibleDone, setBibleDone] = useState(false);
 
@@ -41,9 +42,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
         if (!response.ok) return;
         const body = (await response.json()) as { state?: FinanceRuntimeState };
         if (!cancelled && body.state) setFinance(body.state);
-      } catch {
-        // Keep last known state.
-      }
+      } catch {}
     }
     void refresh();
     const timer = window.setInterval(refresh, 60_000);
@@ -87,11 +86,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     }
 
     const metrics = finance?.metrics;
-    if (!metrics) {
-      return [
-        { name: "FINANCE STATE", status: "LOADING", detail: "Reading the latest Finance runtime state.", progress: null, active: true },
-      ];
-    }
+    if (!metrics) return [{ name: "FINANCE STATE", status: "LOADING", detail: "Reading the latest Finance runtime state.", progress: null, active: true }];
 
     const step = metrics.personalNetWorth < 100_000 ? 5_000 : 10_000;
     const floor = Math.floor(Math.max(0, metrics.personalNetWorth) / step) * step;
@@ -123,10 +118,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     <div className="goal-list">
       {goals.map((goal) => (
         <div className={`goal ${tone(goal)}`} key={goal.name}>
-          <div className="goal-head">
-            <span>{goal.name}</span>
-            <b>{goal.progress == null ? goal.status : percentLabel(goal.progress)}</b>
-          </div>
+          <div className="goal-head"><span>{goal.name}</span><b>{goal.progress == null ? goal.status : percentLabel(goal.progress)}</b></div>
           {goal.progress != null && <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div>}
           <div className="tiny-row"><span>{goal.detail}</span>{domain === "LIFE" && goal.name === "READ BIBLE TODAY" ? <input aria-label="Mark Bible reading complete" type="checkbox" checked={bibleDone} onChange={toggleBible} /> : null}</div>
         </div>
