@@ -1,22 +1,49 @@
+import { getOrSeedFinanceState } from "../../../../lib/finance-live";
+import { getOrSeedWorkforceState } from "../../../../lib/jarvis-workforce";
+import { plaidFinanceConfigured } from "../../../../lib/plaid-finance";
 import { getLatestPulse, getRecentEvents } from "../../../../lib/jarvis-runtime";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const [pulse, events] = await Promise.all([getLatestPulse(), getRecentEvents()]);
+  const [pulse, events, workforce, finance] = await Promise.all([
+    getLatestPulse(),
+    getRecentEvents(),
+    getOrSeedWorkforceState(),
+    getOrSeedFinanceState(),
+  ]);
+
   const researchState = pulse?.status === "ERROR" ? "DEGRADED" : pulse ? "ACTIVE" : "STARTING";
+  const financeState = finance.mode === "DIRECT" ? "ACTIVE" : "SYNCED_SNAPSHOT";
+  const degraded = workforce.status === "DEGRADED" || pulse?.status === "ERROR";
 
   return Response.json({
     online: true,
-    mode: pulse?.status === "ERROR" ? "DEGRADED" : "ACTIVE",
+    mode: degraded ? "DEGRADED" : "ACTIVE",
+    workforce: {
+      enabled: true,
+      status: workforce.status,
+      lastCycleAt: workforce.lastCycleAt,
+      executiveSummary: workforce.executiveSummary,
+      agents: workforce.agents,
+      objectives: workforce.objectives.filter((objective) => objective.status === "ACTIVE").slice(0, 8),
+    },
     backgroundResearch: {
       enabled: true,
       latestPulse: pulse,
     },
-    events: events.slice(0, 12),
+    finance: {
+      mode: finance.mode,
+      source: finance.source,
+      asOf: finance.asOf,
+      directProviderConfigured: plaidFinanceConfigured(),
+      metrics: finance.metrics,
+      goals: finance.goals,
+    },
+    events: events.slice(0, 16),
     integrations: {
       trading: "PENDING",
-      finance: "PENDING",
+      finance: financeState,
       sentryopsResearch: researchState,
       life: "ACTIVE",
     },
@@ -24,12 +51,15 @@ export async function GET() {
       vercelGatewayCredentialPresent: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
       anthropicDirectCredentialPresent: Boolean(process.env.ANTHROPIC_API_KEY),
       openaiDirectCredentialPresent: Boolean(process.env.OPENAI_API_KEY),
+      directFinanceProviderConfigured: plaidFinanceConfigured(),
       secureDatabaseConfigured: Boolean(
         process.env.NEXT_PUBLIC_SUPABASE_URL &&
           process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
           process.env.SUPABASE_SERVICE_ROLE_KEY,
       ),
     },
-    note: "Sensitive financial and trading state will move to the secure database layer when those integrations are connected.",
+    note: finance.mode === "DIRECT"
+      ? "Jarvis is operating from the direct finance state and the autonomous workforce runtime."
+      : "Jarvis autonomous workforce is active. Finance is operating from the latest real synchronized snapshot until direct provider credentials are connected to the website.",
   });
 }
