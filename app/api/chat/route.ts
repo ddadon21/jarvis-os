@@ -1,3 +1,4 @@
+import { anthropic } from "@ai-sdk/anthropic";
 import { generateText } from "ai";
 
 export const runtime = "nodejs";
@@ -58,6 +59,7 @@ If there is no worthwhile memory update, return an empty array. If there is not 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
+type BrainPreference = "auto" | "claude" | "gpt";
 
 type JarvisResponse = {
   reply: string;
@@ -72,44 +74,67 @@ export async function POST(request: Request) {
       activeDomain?: string;
       goals?: Goal[];
       memories?: Memory[];
+      brain?: BrainPreference;
     };
 
     const messages = Array.isArray(body.messages) ? body.messages.slice(-24) : [];
     const activeDomain = typeof body.activeDomain === "string" ? body.activeDomain : "CORE";
     const goals = Array.isArray(body.goals) ? body.goals.slice(0, 20) : [];
     const memories = Array.isArray(body.memories) ? body.memories.slice(-60) : [];
+    const brainPreference: BrainPreference = body.brain === "claude" || body.brain === "gpt" ? body.brain : "auto";
 
     const context = `CURRENT JARVIS CONTEXT\nActive domain: ${activeDomain}\nKnown goals: ${JSON.stringify(goals)}\nDurable memory: ${JSON.stringify(memories)}`;
+    const directClaudeAvailable = Boolean(process.env.ANTHROPIC_API_KEY);
+    const useClaude = brainPreference === "claude" || (brainPreference === "auto" && directClaudeAvailable);
+
+    if (brainPreference === "claude" && !directClaudeAvailable) {
+      return Response.json(
+        {
+          reply: "Claude is wired into Jarvis, but the server does not have an Anthropic API credential yet. Add it to the deployment environment and redeploy; do not paste the key into chat or the Jarvis interface.",
+          memoryUpdates: [],
+          nextMove: {
+            title: "Connect Claude securely",
+            reason: "Jarvis already has the Claude provider path; it only needs the server-side Anthropic credential.",
+            domain: "CORE",
+          },
+          brain: "CLAUDE",
+        },
+        { status: 503 },
+      );
+    }
 
     const { text } = await generateText({
-      model: "openai/gpt-5.6-sol",
+      model: useClaude ? anthropic("claude-sonnet-4-6") : "openai/gpt-5.6-sol",
       system: `${SYSTEM_PROMPT}\n\n${context}`,
       messages,
       temperature: 0.25,
     });
 
     const parsed = parseResponse(text, activeDomain);
-    return Response.json(parsed);
+    return Response.json({ ...parsed, brain: useClaude ? "CLAUDE" : "GPT" });
   } catch (error) {
     console.error("Jarvis chat error", error);
     const errorText = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     const gatewayNeedsBilling = /credit card|customer_verification_required/i.test(errorText);
+    const anthropicAuthIssue = /anthropic|api key|authentication|unauthorized/i.test(errorText);
 
     return Response.json(
       {
         reply: gatewayNeedsBilling
-          ? "The interface and runtime are online, but the AI reasoning provider is locked until Vercel AI Gateway billing verification is enabled. Once that is activated, I can reason, research, and synthesize through this interface."
-          : "Core link unavailable. The interface is online, but the reasoning gateway could not complete this request.",
+          ? "The interface and runtime are online, but the current GPT gateway is locked by provider billing verification. A direct Claude connection can bypass that gateway once the server-side Anthropic credential is configured."
+          : anthropicAuthIssue
+            ? "Claude is wired into Jarvis, but its server-side provider credential is missing or invalid."
+            : "Core link unavailable. The interface is online, but the reasoning provider could not complete this request.",
         memoryUpdates: [],
         nextMove: {
-          title: gatewayNeedsBilling ? "Activate AI reasoning provider" : "Restore reasoning link",
-          reason: gatewayNeedsBilling
-            ? "Background research and conversational reasoning require an active model provider connection."
+          title: gatewayNeedsBilling || anthropicAuthIssue ? "Restore AI brain connection" : "Restore reasoning link",
+          reason: gatewayNeedsBilling || anthropicAuthIssue
+            ? "Jarvis needs at least one healthy model provider to answer through the command interface."
             : "Jarvis cannot safely synthesize or act until the model connection is healthy.",
           domain: "CORE",
         },
       },
-      { status: gatewayNeedsBilling ? 503 : 500 },
+      { status: 503 },
     );
   }
 }
