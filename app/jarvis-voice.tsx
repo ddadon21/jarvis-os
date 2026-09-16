@@ -39,14 +39,15 @@ function scoreVoice(voice: SpeechSynthesisVoice) {
   const lang = voice.lang.toLowerCase();
   let score = 0;
 
-  if (lang.startsWith("en-us")) score += 80;
-  else if (lang.startsWith("en-gb")) score += 65;
-  else if (lang.startsWith("en")) score += 45;
+  if (lang.startsWith("en-gb")) score += 105;
+  else if (lang.startsWith("en-au") || lang.startsWith("en-ie")) score += 68;
+  else if (lang.startsWith("en-us")) score += 48;
+  else if (lang.startsWith("en")) score += 35;
 
-  if (/natural|premium|enhanced|online/.test(name)) score += 70;
-  if (/guy|davis|andrew|christopher|mark|david|male/.test(name)) score += 45;
+  if (/natural|premium|enhanced|neural|online/.test(name)) score += 80;
+  if (/george|ryan|oliver|arthur|daniel|brian|thomas|male/.test(name)) score += 55;
   if (/microsoft|google/.test(name)) score += 20;
-  if (/zira|samantha|victoria|female/.test(name)) score -= 20;
+  if (/zira|samantha|victoria|female/.test(name)) score -= 30;
 
   return score;
 }
@@ -153,10 +154,10 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     const utterance = new SpeechSynthesisUtterance(spoken);
     const preferred = preferredVoiceRef.current;
     if (preferred) utterance.voice = preferred;
-    utterance.lang = preferred?.lang || "en-US";
-    utterance.rate = 1.0;
-    utterance.pitch = 0.86;
-    utterance.volume = 1;
+    utterance.lang = preferred?.lang || "en-GB";
+    utterance.rate = 0.94;
+    utterance.pitch = 0.78;
+    utterance.volume = 0.98;
 
     pendingSpeechRef.current += 1;
     const done = () => {
