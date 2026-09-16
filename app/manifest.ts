@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "JARVIS",
     short_name: "JARVIS",
     description: "Personal executive operating system",
-    start_url: "/",
+    start_url: "/home",
     scope: "/",
     display: "standalone",
     background_color: "#020305",
