@@ -16,6 +16,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!isAuthorized(request)) {
+    return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = (await request.json().catch(() => ({}))) as ObjectiveBody;
   const title = typeof body.title === "string" ? body.title.trim() : "";
   if (!title) return Response.json({ ok: false, error: "title is required" }, { status: 400 });
@@ -28,6 +32,19 @@ export async function POST(request: Request) {
   });
 
   return Response.json({ ok: true, objective });
+}
+
+function isAuthorized(request: Request) {
+  const configuredSecret = process.env.JARVIS_OBJECTIVE_SECRET || process.env.JARVIS_EVENT_SECRET;
+  const authorization = request.headers.get("authorization");
+  if (configuredSecret) return authorization === `Bearer ${configuredSecret}`;
+
+  if (process.env.VERCEL_ENV !== "production") {
+    const url = new URL(request.url);
+    return url.searchParams.get("manual") === "1";
+  }
+
+  return false;
 }
 
 function normalizeDomain(value: unknown): RuntimeDomain {
