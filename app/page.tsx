@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  Bell,
   Bot,
   BrainCircuit,
   BriefcaseBusiness,
@@ -116,6 +115,12 @@ type ApiResponse = {
   nextMove?: JarvisNextMove;
 };
 
+function goalTone(value: number) {
+  if (value >= 70) return "goal-good";
+  if (value >= 40) return "goal-watch";
+  return "goal-risk";
+}
+
 export default function Home() {
   const [time, setTime] = useState("--:--:--");
   const [domain, setDomain] = useState<Domain>(defaultState.activeDomain);
@@ -141,14 +146,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!hydrated) return;
-    saveJarvisState({
-      version: 1,
-      activeDomain: domain,
-      messages,
-      memories,
-      goals,
-      nextMove,
-    });
+    saveJarvisState({ version: 1, activeDomain: domain, messages, memories, goals, nextMove });
   }, [domain, goals, hydrated, memories, messages, nextMove]);
 
   useEffect(() => {
@@ -168,7 +166,7 @@ export default function Home() {
         const data = (await response.json()) as SystemStatus;
         if (!cancelled) setSystemStatus(data);
       } catch {
-        // The conversational interface remains usable even if background status is temporarily unavailable.
+        // Keep the command interface usable even when runtime status is unavailable.
       }
     }
 
@@ -215,11 +213,7 @@ export default function Home() {
     const text = input.trim();
     if (!text || busy) return;
 
-    const userMessage: ChatMessage = {
-      role: "user",
-      content: text,
-      createdAt: new Date().toISOString(),
-    };
+    const userMessage: ChatMessage = { role: "user", content: text, createdAt: new Date().toISOString() };
     const nextMessages = [...messages, userMessage];
 
     setMessages(nextMessages);
@@ -250,9 +244,7 @@ export default function Home() {
         setMemories((current) => mergeMemories(current, data.memoryUpdates ?? []));
       }
 
-      if (data.nextMove?.title) {
-        setNextMove(data.nextMove);
-      }
+      if (data.nextMove?.title) setNextMove(data.nextMove);
     } catch {
       setMessages((previous) => [
         ...previous,
@@ -309,9 +301,14 @@ export default function Home() {
           <Panel eyebrow="SYSTEM //" title="GOAL READINESS" corner="LIVE">
             <div className="goal-list">
               {goals.map((goal) => (
-                <div className="goal" key={goal.name}>
-                  <div className="goal-head"><span>{goal.name}</span><b>{goal.state}</b></div>
-                  <div className="bar"><i style={{ width: `${goal.value}%` }} /></div>
+                <div className={`goal ${goalTone(goal.value)}`} key={goal.name}>
+                  <div className="goal-head">
+                    <span>{goal.name}</span>
+                    <b>{Math.round(goal.value)}%</b>
+                  </div>
+                  <div className="bar" aria-label={`${goal.name} ${Math.round(goal.value)} percent complete`}>
+                    <i style={{ width: `${Math.max(0, Math.min(100, goal.value))}%` }} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -386,14 +383,10 @@ export default function Home() {
               })}
             </div>
             {domain === "FINANCE" && (
-              <div className="approval-row">
-                <ShieldCheck size={14} /> Phase 1 maps structure only · direct Plaid automation comes in Phase 2
-              </div>
+              <div className="approval-row"><ShieldCheck size={14} /> Phase 1 maps structure only · direct Plaid automation comes in Phase 2</div>
             )}
             {domain === "SENTRYOPS" && latestPulse && (
-              <div className="approval-row">
-                <Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}
-              </div>
+              <div className="approval-row"><Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}</div>
             )}
           </Panel>
 
