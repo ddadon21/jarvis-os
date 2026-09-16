@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.118",
     "@ai-sdk/gateway": "^4.0.81",
     "@vercel/functions": "^3.9.7",
     "ai": "^6.0.0",
