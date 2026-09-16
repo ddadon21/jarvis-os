@@ -109,6 +109,13 @@ const financeArchitecture = [
   { institution: "BOFA PERSONAL", role: "TEMPORARY SUBSCRIPTIONS", detail: "Netflix · Prime · smart-home · temporary bills" },
 ];
 
+const demoGoals: JarvisGoal[] = [
+  { name: "Debt Freedom", value: 24, state: "RED" },
+  { name: "$10K Liquid", value: 56, state: "YELLOW" },
+  { name: "Move Out", value: 84, state: "GREEN" },
+  { name: "GR Supra", value: 31, state: "RED" },
+];
+
 type ApiResponse = {
   reply?: string;
   memoryUpdates?: Array<{ domain?: string; fact?: string }>;
@@ -123,6 +130,7 @@ function goalTone(value: number) {
 
 export default function Home() {
   const [time, setTime] = useState("--:--:--");
+  const [date, setDate] = useState("--- -- ----");
   const [domain, setDomain] = useState<Domain>(defaultState.activeDomain);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -150,9 +158,18 @@ export default function Home() {
   }, [domain, goals, hydrated, memories, messages, nextMove]);
 
   useEffect(() => {
-    const update = () => setTime(new Date().toLocaleTimeString([], { hour12: false }));
-    update();
-    const timer = window.setInterval(update, 1000);
+    const updateClock = () => {
+      const now = new Date();
+      setTime(now.toLocaleTimeString([], { hour12: false }));
+      setDate(
+        now
+          .toLocaleDateString([], { month: "short", day: "2-digit", year: "numeric" })
+          .toUpperCase(),
+      );
+    };
+
+    updateClock();
+    const timer = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -207,6 +224,8 @@ export default function Home() {
   const runtimeEvents = systemStatus?.events ?? [];
   const latestPulse = systemStatus?.backgroundResearch.latestPulse;
   const systemMode = systemStatus?.online ? systemStatus.mode : "STARTING";
+  const financeIsLive = systemStatus?.integrations.finance === "ACTIVE";
+  const displayedGoals = financeIsLive ? goals : demoGoals;
 
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
@@ -272,6 +291,7 @@ export default function Home() {
         </div>
         <div className="top-center">
           <div className="status-block"><span>SYSTEM STATUS</span><b><i /> {systemMode}</b></div>
+          <div className="status-block"><span>LOCAL DATE</span><b>{date}</b></div>
           <div className="status-block"><span>LOCAL TIME</span><b>{time}</b></div>
         </div>
         <div className="company-zone">
@@ -298,9 +318,9 @@ export default function Home() {
             <div className="tiny-row"><span>Background monitor</span><b>{systemStatus?.backgroundResearch.enabled ? systemMode : "STARTING"}</b></div>
           </Panel>
 
-          <Panel eyebrow="SYSTEM //" title="GOAL READINESS" corner="LIVE">
+          <Panel eyebrow="SYSTEM //" title="GOAL READINESS" corner={financeIsLive ? "LIVE" : "DEMO"}>
             <div className="goal-list">
-              {goals.map((goal) => (
+              {displayedGoals.map((goal) => (
                 <div className={`goal ${goalTone(goal.value)}`} key={goal.name}>
                   <div className="goal-head">
                     <span>{goal.name}</span>
