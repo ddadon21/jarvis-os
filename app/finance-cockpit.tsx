@@ -3,6 +3,7 @@
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FinanceRuntimeState } from "../lib/jarvis-runtime";
+import { deriveFinanceFocus } from "../lib/finance-focus";
 import {
   FINANCE_ACCOUNT_PURPOSES,
   FINANCE_DEBTS,
@@ -31,7 +32,6 @@ function useFinanceRuntime() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function refresh() {
       try {
         const response = await fetch("/api/finance/state", { cache: "no-store" });
@@ -39,7 +39,7 @@ function useFinanceRuntime() {
         const body = (await response.json()) as { state?: FinanceRuntimeState };
         if (!cancelled && body.state) setState(body.state);
       } catch {
-        // Keep the last known snapshot visible if the runtime endpoint is temporarily unavailable.
+        // Keep the last known finance state visible.
       }
     }
 
@@ -67,6 +67,18 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
   const currentStage = runtime?.currentStage ?? FINANCE_SNAPSHOT.currentStage;
   const nextStage = runtime?.nextStage ?? FINANCE_SNAPSHOT.nextStage;
   const goals = runtime?.goals ?? FINANCE_GOALS;
+
+  const focus = runtime
+    ? deriveFinanceFocus(runtime)
+    : {
+        stage: "DEBT",
+        title: "CLEAR PERSONAL REVOLVING DEBT",
+        reason: `${money(metrics.personalDebt)} of personal revolving debt is the current financial drag.`,
+        nextStep: "Protect enough operating cash to avoid recreating debt, then route the next safe debt dollar to the RBFCU World Card first while its known APR and utilization remain the strongest debt signal.",
+        moneyInRule: "New money gets assigned before it gets spent.",
+        moneyOutRule: "Discretionary spending is challenged when it delays the active debt target.",
+        targetLabel: "RBFCU WORLD CARD",
+      };
 
   const debts = useMemo(() => {
     if (!runtime) return FINANCE_DEBTS.map((debt) => ({ ...debt, key: debt.name }));
@@ -114,81 +126,46 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
     ? runtime.source.includes("REALTIME") ? "DIRECT · REALTIME" : "DIRECT · AUTO"
     : "REAL SNAPSHOT";
 
-  const directive = metrics.personalDebt > 0
-    ? `Clear ${money(metrics.personalDebt)} of personal revolving debt while protecting enough cash to keep operating without creating new debt.`
-    : metrics.liquidity < 10_000
-      ? `Debt is controlled. Build liquid reserves from ${money(metrics.liquidity)} toward $10,000.`
-      : "Protect liquidity and route excess capital toward the next net-worth milestone and long-term assets.";
-
   return (
     <section className="finance-cockpit finance-operating-system">
       <div className="finance-titlebar">
         <div>
-          <span>HIMIE JOHNSON VENTURES // DWIGHT</span>
-          <strong>FINANCE // THE PATH</strong>
+          <span>DWIGHT // CAPITAL CONTROL</span>
+          <strong>FINANCE // $100M CASH PATH</strong>
         </div>
         <div className="finance-sync"><i /> {syncLabel}</div>
       </div>
 
       <div className="finance-metrics">
-        <Metric label="ADJUSTED NET WORTH" value={signedMoney(metrics.personalNetWorth)} note="Authorized-user debt is excluded from Dwight's working liability total." emphasis />
-        <Metric label="LIQUIDITY" value={money(metrics.liquidity)} note="Connected depository cash in the current Finance state." />
-        <Metric label="PERSONAL DEBT" value={money(metrics.personalDebt)} note={`${money(metrics.authorizedUserBalance)} authorized-user balance tracked separately.`} />
-        <Metric label="CURRENT STAGE" value={currentStage} note={`Next stage: ${nextStage}.`} />
-      </div>
-
-      <div className="finance-section-head">
-        <div>
-          <span>THE FINANCIAL PATH</span>
-          <strong>DEBT → STABILITY → RESERVES → CREDIT → CAPITAL → INVESTING → ASSETS</strong>
-        </div>
-        <small>ONE STAGE AT A TIME</small>
-      </div>
-
-      <div className="finance-stage-row">
-        {FINANCE_STAGES.map((stage) => (
-          <div key={stage} className={stage === currentStage ? "active" : ""}>
-            <span>{stage}</span>
-          </div>
-        ))}
+        <Metric label="ADJUSTED NET WORTH" value={signedMoney(metrics.personalNetWorth)} note="Authorized-user debt excluded." emphasis />
+        <Metric label="CASH" value={money(metrics.liquidity)} note="Current connected depository cash." />
+        <Metric label="PERSONAL DEBT" value={money(metrics.personalDebt)} note="Revolving debt Jarvis is actively attacking." />
+        <Metric label="STAGE" value={currentStage} note={`Next: ${nextStage}.`} />
       </div>
 
       <div className="finance-explainer">
-        <span>JARVIS DIRECTIVE // NOW</span>
-        <strong>{directive}</strong>
-        <p>
-          Jarvis recalculates this path from the Finance runtime state. When the direct provider is connected, balance changes will flow into this screen without rebuilding the site.
-        </p>
-      </div>
-
-      <div className="finance-operating-grid">
-        <article className="finance-action-card priority">
-          <span>NOW // {currentStage}</span>
-          <strong>{directive}</strong>
-          <p>Every new dollar is judged against the active stage before lifestyle expansion or lower-priority capital uses.</p>
-        </article>
-        <article className="finance-action-card">
-          <span>AFTER // STABILITY + RESERVES</span>
-          <strong>Build a real cash floor after debt is controlled.</strong>
-          <p>The goal is to stop depending on credit for normal life and create enough runway that one bad month does not reset progress.</p>
-        </article>
-        <article className="finance-action-card">
-          <span>THEN // CREDIT + CAPITAL</span>
-          <strong>Strengthen credit while cash begins to accumulate.</strong>
-          <p>Utilization falls, payment history stays clean, liquidity rises, and larger financial decisions become easier to evaluate.</p>
-        </article>
-        <article className="finance-action-card">
-          <span>DESTINATION // INVESTING + ASSETS</span>
-          <strong>Turn excess cash flow into ownership and compounding.</strong>
-          <p>$10K liquid, rolling net-worth milestones, $1M net worth, moving out, and the Supra become consequences of stronger finances—not distractions from them.</p>
-        </article>
+        <span>ONE FOCUS // {focus.stage}</span>
+        <strong>{focus.title}</strong>
+        <p>{focus.reason}</p>
+        <p><b>NEXT RIGHT STEP:</b> {focus.nextStep}</p>
+        <div className="tiny-row"><span>MONEY IN</span><b>{focus.moneyInRule}</b></div>
+        <div className="tiny-row"><span>MONEY OUT</span><b>{focus.moneyOutRule}</b></div>
       </div>
 
       <div className="finance-section-head">
-        <div><span>DEBT POSITION</span><strong>WHAT MUST BE CLEARED</strong></div>
-        <small>{money(metrics.personalDebt)} PERSONAL</small>
+        <div><span>PATH</span><strong>DEBT → STABILITY → RESERVES → CREDIT → CAPITAL → INVESTING → ASSETS</strong></div>
+        <small>ONE FOCUS AT A TIME</small>
+      </div>
+      <div className="finance-stage-row">
+        {FINANCE_STAGES.map((stage) => (
+          <div key={stage} className={stage === currentStage ? "active" : ""}><span>{stage}</span></div>
+        ))}
       </div>
 
+      <div className="finance-section-head">
+        <div><span>DEBT</span><strong>CURRENT TARGETS</strong></div>
+        <small>{money(metrics.personalDebt)} PERSONAL</small>
+      </div>
       <div className="finance-debt-grid">
         {debts.map((debt) => {
           const utilization = debt.limit ? Math.min(999, (debt.balance / debt.limit) * 100) : null;
@@ -196,58 +173,45 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
             <article className={`finance-debt-card ${debt.ownership === "AUTHORIZED_USER" ? "au" : ""}`} key={debt.key}>
               <div><span>{debt.name}</span><b>{debt.ownership}</b></div>
               <strong>{money(debt.balance)}</strong>
-              <p>{debt.apr == null ? "APR unavailable" : `${debt.apr.toFixed(1)}% APR`} · {debt.minimum == null ? "minimum unavailable" : `${money(debt.minimum)} minimum`} · due {debt.due ?? "unknown"}</p>
-              <small>{utilization == null ? "Utilization unavailable" : `${utilization.toFixed(1)}% utilization`}</small>
+              <p>{debt.apr == null ? "APR unknown" : `${debt.apr.toFixed(1)}% APR`} · {utilization == null ? "utilization unknown" : `${utilization.toFixed(1)}% utilization`}</p>
+              <small>{debt.minimum == null ? "Minimum unknown" : `${money(debt.minimum)} minimum`} · due {debt.due ?? "unknown"}</small>
             </article>
           );
         })}
       </div>
 
       <div className="finance-section-head">
-        <div><span>GOAL READINESS</span><strong>THE DESTINATIONS</strong></div>
-        <small>{runtime?.mode === "DIRECT" ? "AUTO-RECALCULATING" : "REAL SNAPSHOT"}</small>
+        <div><span>GOALS</span><strong>MEASURED DESTINATIONS</strong></div>
+        <small>{runtime?.mode === "DIRECT" ? "AUTO" : "SNAPSHOT"}</small>
       </div>
-
       <div className="finance-goal-grid">
         {goals.map((goal) => (
           <article key={goal.name} className={`finance-goal-card ${goalClass(goal.state)}`}>
             <div className="finance-goal-head"><span>{goal.name}</span><b>{goal.state}</b></div>
             <strong>{goal.current}</strong>
             <small>Target: {goal.target}</small>
-            {goal.progress != null && (
-              <div className="finance-goal-bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div>
-            )}
-            <p>{goal.progress == null ? "" : `${goal.progress.toFixed(1)}% · `}{goal.blocker}</p>
+            {goal.progress != null && <div className="finance-goal-bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div>}
+            <p>{goal.progress == null ? "" : `${goal.progress.toFixed(goal.progress < 1 ? 3 : 1)}% · `}{goal.blocker}</p>
           </article>
         ))}
       </div>
 
       <div className="finance-section-head">
-        <div><span>ACCOUNT ARCHITECTURE</span><strong>EVERY ACCOUNT HAS A JOB</strong></div>
-        <small>{runtime?.accountCount ?? FINANCE_SNAPSHOT.accountCount} ACCOUNTS</small>
+        <div><span>ACCOUNTS</span><strong>EVERY ACCOUNT HAS A JOB</strong></div>
+        <small>{runtime?.accountCount ?? FINANCE_SNAPSHOT.accountCount}</small>
       </div>
-
       <div className="account-role-grid">
         {accountGroups.map((account, index) => (
           <article className="account-role-card" key={`${account.institution}-${account.role}-${index}`}>
-            <div className="account-role-top"><span>{account.institution}</span><b>MAPPED</b></div>
-            <strong>{account.role}</strong>
+            <div className="account-role-top"><span>{account.institution}</span><b>{account.role}</b></div>
             <p>{account.detail}</p>
           </article>
         ))}
       </div>
 
-      <div className="finance-roadmap">
-        <ShieldCheck size={15} />
-        <div>
-          <span>HOW JARVIS OPERATES</span>
-          <strong>SEE THE MONEY → KNOW THE STAGE → IDENTIFY THE BLOCKER → ACT WITHIN AUTHORITY → MEASURE → REPEAT</strong>
-        </div>
-      </div>
-
       <div className="finance-source-note">
         <ShieldCheck size={13} />
-        <span>{runtime?.note ?? FINANCE_SNAPSHOT.note}</span>
+        <span>MONEY WATCH: Jarvis reviews material inflows and outflows against the active focus, critiques alignment, and changes the next step when the financial state changes. Website-direct transaction monitoring activates with the direct provider feed.</span>
       </div>
     </section>
   );
@@ -256,9 +220,7 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
 function Metric({ label, value, note, emphasis = false }: { label: string; value: string; note: string; emphasis?: boolean }) {
   return (
     <div className={`finance-metric ${emphasis ? "net-worth-metric" : ""}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{note}</small>
+      <span>{label}</span><strong>{value}</strong><small>{note}</small>
     </div>
   );
 }
@@ -266,7 +228,6 @@ function Metric({ label, value, note, emphasis = false }: { label: string; value
 export function FinanceGoalMiniList() {
   const runtime = useFinanceRuntime();
   const goals = runtime?.goals ?? FINANCE_GOALS;
-
   return (
     <div className="finance-mini-goals">
       {goals.slice(0, 4).map((goal) => (
@@ -275,7 +236,7 @@ export function FinanceGoalMiniList() {
           {goal.progress != null ? <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div> : <small>{goal.current}</small>}
         </div>
       ))}
-      <div className="finance-mini-proof"><CheckCircle2 size={12} /> {runtime?.mode === "DIRECT" ? "Direct Finance state · auto-recalculating" : "Real synchronized snapshot · direct feed ready"}</div>
+      <div className="finance-mini-proof"><CheckCircle2 size={12} /> ONE FOCUS · Jarvis leads from the active stage</div>
     </div>
   );
 }
