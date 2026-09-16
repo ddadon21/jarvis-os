@@ -11,6 +11,7 @@ import {
   FINANCE_SNAPSHOT,
   FINANCE_STAGES,
 } from "../lib/finance-snapshot";
+import styles from "./finance-focus.module.css";
 
 function money(value: number) {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -100,6 +101,15 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
       });
   }, [runtime]);
 
+  const activeDebt = useMemo(
+    () => debts.find((debt) => debt.name.toUpperCase().includes(focus.targetLabel.replace("RBFCU ", "").toUpperCase())) ?? null,
+    [debts, focus.targetLabel],
+  );
+
+  const activeUtilization = activeDebt?.limit
+    ? Math.min(999, (activeDebt.balance / activeDebt.limit) * 100)
+    : null;
+
   const accountGroups = useMemo(() => {
     if (!runtime) return FINANCE_ACCOUNT_PURPOSES.map((account) => ({ ...account }));
     const groups = new Map<string, { institution: string; role: string; detail: string }>();
@@ -139,18 +149,71 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
       <div className="finance-metrics">
         <Metric label="ADJUSTED NET WORTH" value={signedMoney(metrics.personalNetWorth)} note="Authorized-user debt excluded." emphasis />
         <Metric label="CASH" value={money(metrics.liquidity)} note="Current connected depository cash." />
-        <Metric label="PERSONAL DEBT" value={money(metrics.personalDebt)} note="Revolving debt Jarvis is actively attacking." />
+        <Metric label="PERSONAL DEBT" value={money(metrics.personalDebt)} note="Revolving debt Jarvis is attacking." />
         <Metric label="STAGE" value={currentStage} note={`Next: ${nextStage}.`} />
       </div>
 
-      <div className="finance-explainer">
-        <span>ONE FOCUS // {focus.stage}</span>
-        <strong>{focus.title}</strong>
-        <p>{focus.reason}</p>
-        <p><b>NEXT RIGHT STEP:</b> {focus.nextStep}</p>
-        <div className="tiny-row"><span>MONEY IN</span><b>{focus.moneyInRule}</b></div>
-        <div className="tiny-row"><span>MONEY OUT</span><b>{focus.moneyOutRule}</b></div>
-      </div>
+      <section className={styles.focusHero} aria-label="Jarvis current finance focus">
+        <div className={styles.focusTopline}>
+          <span>JARVIS // ONE FOCUS NOW</span>
+          <b>{focus.stage}</b>
+        </div>
+        <h2>{focus.title}</h2>
+        <p className={styles.why}>{focus.reason}</p>
+
+        <div className={styles.targetStrip}>
+          <span>CURRENT TARGET</span>
+          <strong>{focus.targetLabel}</strong>
+          {activeDebt && (
+            <small>
+              {money(activeDebt.balance)}
+              {activeDebt.apr != null ? ` · ${activeDebt.apr.toFixed(1)}% APR` : ""}
+              {activeUtilization != null ? ` · ${activeUtilization.toFixed(1)}% utilized` : ""}
+            </small>
+          )}
+        </div>
+
+        <div className={styles.nextStep}>
+          <span>NEXT RIGHT STEP</span>
+          <strong>{focus.nextStep}</strong>
+        </div>
+
+        <div className={styles.moneyRules}>
+          <div>
+            <span>WHEN MONEY COMES IN</span>
+            <p>{focus.moneyInRule}</p>
+          </div>
+          <div>
+            <span>WHEN MONEY GOES OUT</span>
+            <p>{focus.moneyOutRule}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.watchPanel} aria-label="Jarvis money watch rules">
+        <div className={styles.watchHeader}>
+          <div>
+            <span>JARVIS MONEY WATCH</span>
+            <strong>EVERY MATERIAL MONEY MOVE GETS JUDGED AGAINST THE ONE FOCUS</strong>
+          </div>
+          <small>HOURLY MONITOR ACTIVE</small>
+        </div>
+        <div className={styles.verdictGrid}>
+          <article className={styles.aligned}>
+            <b>ALIGNED</b>
+            <span>Debt payments, required obligations, and new income that is assigned before lifestyle spending.</span>
+          </article>
+          <article className={styles.review}>
+            <b>REVIEW</b>
+            <span>Transfers, ambiguous deposits, or business-account spending that needs context before Jarvis judges it.</span>
+          </article>
+          <article className={styles.misaligned}>
+            <b>MISALIGNED</b>
+            <span>Discretionary leakage or new revolving charges that slow the active target while debt remains.</span>
+          </article>
+        </div>
+        <p className={styles.watchNote}>ChatGPT-side account monitoring is active now. The website will show individual transaction judgments automatically once the direct transaction feed is connected.</p>
+      </section>
 
       <div className="finance-section-head">
         <div><span>PATH</span><strong>DEBT → STABILITY → RESERVES → CREDIT → CAPITAL → INVESTING → ASSETS</strong></div>
@@ -211,7 +274,7 @@ export default function FinanceCockpit(_: { onAsk?: (prompt: string) => void }) 
 
       <div className="finance-source-note">
         <ShieldCheck size={13} />
-        <span>MONEY WATCH: Jarvis reviews material inflows and outflows against the active focus, critiques alignment, and changes the next step when the financial state changes. Website-direct transaction monitoring activates with the direct provider feed.</span>
+        <span>Jarvis leads from the active stage, changes the focus only when the numbers justify it, and keeps $100M cash as the long-horizon destination.</span>
       </div>
     </section>
   );
