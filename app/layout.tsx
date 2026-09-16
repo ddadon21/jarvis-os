@@ -3,7 +3,9 @@ import "./globals.css";
 import "./personalization.css";
 import "./theme-tuning.css";
 import "./compact.css";
+import "./jarvis-shell-controls.css";
 import PwaRegister from "./pwa-register";
+import JarvisVoiceProvider from "./jarvis-voice";
 
 export const metadata: Metadata = {
   title: "JARVIS // Command Core",
@@ -35,7 +37,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <PwaRegister />
-        {children}
+        <JarvisVoiceProvider>{children}</JarvisVoiceProvider>
       </body>
     </html>
   );
