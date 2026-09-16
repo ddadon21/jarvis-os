@@ -63,7 +63,14 @@ type SystemStatus = {
     sentryopsResearch: string;
     life: string;
   };
+  providerCapabilities?: {
+    anthropicDirectCredentialPresent?: boolean;
+    openaiDirectCredentialPresent?: boolean;
+  };
 };
+
+type BrainMode = "auto" | "claude" | "gpt" | "dual";
+type ActiveBrain = "AUTO" | "CLAUDE" | "GPT" | "DUAL";
 
 const baseSectors = [
   {
@@ -126,11 +133,21 @@ const PROVISIONAL_FINANCE = {
   compounding: 2.71,
 };
 
+const BRAIN_MODES: Array<{ id: BrainMode; label: string }> = [
+  { id: "auto", label: "AUTO" },
+  { id: "claude", label: "CLAUDE" },
+  { id: "gpt", label: "GPT" },
+  { id: "dual", label: "DUAL" },
+];
+
 type ApiResponse = {
   reply?: string;
   memoryUpdates?: Array<{ domain?: string; fact?: string }>;
   nextMove?: JarvisNextMove;
-  brain?: "CLAUDE" | "GPT";
+  brain?: "CLAUDE" | "GPT" | "DUAL";
+  model?: string | null;
+  provider?: string | null;
+  dualReview?: { verdict?: "PASS" | "REVISE"; note?: string };
 };
 
 function goalTone(value: number) {
@@ -148,6 +165,10 @@ function formatCurrency(value: number) {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function isBrainMode(value: string | null): value is BrainMode {
+  return value === "auto" || value === "claude" || value === "gpt" || value === "dual";
+}
+
 export default function Home() {
   const [time, setTime] = useState("--:--:--");
   const [date, setDate] = useState("--- -- ----");
@@ -160,7 +181,11 @@ export default function Home() {
   const [goals, setGoals] = useState<JarvisGoal[]>(defaultState.goals);
   const [nextMove, setNextMove] = useState<JarvisNextMove>(defaultState.nextMove);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
-  const [activeBrain, setActiveBrain] = useState<"AUTO" | "CLAUDE" | "GPT">("AUTO");
+  const [brainMode, setBrainMode] = useState<BrainMode>("auto");
+  const [activeBrain, setActiveBrain] = useState<ActiveBrain>("AUTO");
+  const [activeModel, setActiveModel] = useState("Awaiting first response");
+  const [activeProvider, setActiveProvider] = useState("Router idle");
+  const [dualVerdict, setDualVerdict] = useState<"PASS" | "REVISE" | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -170,6 +195,10 @@ export default function Home() {
     setMemories(saved.memories);
     setGoals(saved.goals);
     setNextMove(saved.nextMove);
+
+    const savedBrainMode = window.localStorage.getItem("jarvis-brain-mode-v1");
+    if (isBrainMode(savedBrainMode)) setBrainMode(savedBrainMode);
+
     setHydrated(true);
   }, []);
 
@@ -177,6 +206,11 @@ export default function Home() {
     if (!hydrated) return;
     saveJarvisState({ version: 1, activeDomain: domain, messages, memories, goals, nextMove });
   }, [domain, goals, hydrated, memories, messages, nextMove]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    window.localStorage.setItem("jarvis-brain-mode-v1", brainMode);
+  }, [brainMode, hydrated]);
 
   useEffect(() => {
     const updateClock = () => {
@@ -248,6 +282,15 @@ export default function Home() {
   const financeIsLive = systemStatus?.integrations.finance === "ACTIVE";
   const displayedGoals = financeIsLive ? goals : demoGoals;
 
+  const brainRouterText =
+    brainMode === "auto"
+      ? "AUTO · Claude primary · GPT automatic failover"
+      : brainMode === "claude"
+        ? "CLAUDE · force Opus 5"
+        : brainMode === "gpt"
+          ? "GPT · force GPT-5.6 Sol"
+          : "DUAL · Claude primary · GPT independent review";
+
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
     const text = input.trim();
@@ -259,6 +302,7 @@ export default function Home() {
     setMessages(nextMessages);
     setInput("");
     setBusy(true);
+    setDualVerdict(null);
 
     try {
       const response = await fetch("/api/chat", {
@@ -269,14 +313,24 @@ export default function Home() {
           activeDomain: domain,
           goals,
           memories: memories.map(({ domain: memoryDomain, fact }) => ({ domain: memoryDomain, fact })),
-          brain: "auto",
+          financeSnapshot: {
+            ...PROVISIONAL_FINANCE,
+            targetNetWorth: NET_WORTH_TARGET,
+            status: "PHASE 1 PROVISIONAL SNAPSHOT · HISTORY SYNCING · NOT LIVE-LINKED",
+          },
+          brain: brainMode,
         }),
       });
 
       const data = (await response.json()) as ApiResponse;
       const reply = data.reply?.trim() || "No response returned from core.";
 
-      if (data.brain === "CLAUDE" || data.brain === "GPT") setActiveBrain(data.brain);
+      if (data.brain === "CLAUDE" || data.brain === "GPT" || data.brain === "DUAL") setActiveBrain(data.brain);
+      if (typeof data.model === "string" && data.model) setActiveModel(data.model);
+      if (typeof data.provider === "string" && data.provider) setActiveProvider(data.provider);
+      if (data.dualReview?.verdict === "PASS" || data.dualReview?.verdict === "REVISE") {
+        setDualVerdict(data.dualReview.verdict);
+      }
 
       setMessages((previous) => [
         ...previous,
@@ -435,6 +489,27 @@ export default function Home() {
           </Panel>
 
           <Panel eyebrow="SYSTEM //" title="JARVIS LINK" corner={`AI-${activeBrain}`} className="chat-panel">
+            <div className="brain-console">
+              <div className="brain-selector" aria-label="Jarvis brain mode">
+                {BRAIN_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={brainMode === mode.id ? "selected" : ""}
+                    onClick={() => setBrainMode(mode.id)}
+                    disabled={busy}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <div className="brain-runtime">
+                <span>LIVE ROUTE</span>
+                <strong>{activeProvider}</strong>
+                <small>{activeModel}{dualVerdict ? ` · REVIEW ${dualVerdict}` : ""}</small>
+              </div>
+            </div>
+
             <div className="chat-log">
               {messages.map((message, index) => (
                 <div key={`${message.role}-${message.createdAt ?? index}-${index}`} className={`message ${message.role}`}>
@@ -444,12 +519,12 @@ export default function Home() {
               ))}
               {busy && (
                 <div className="message assistant thinking">
-                  <div className="message-meta">JARVIS</div><p>Analyzing<span>...</span></p>
+                  <div className="message-meta">JARVIS</div><p>{brainMode === "dual" ? "Running dual review" : "Analyzing"}<span>...</span></p>
                 </div>
               )}
               <div ref={endRef} />
             </div>
-            <div className="approval-row"><BrainCircuit size={14} /> Brain router: Claude direct when connected · GPT fallback</div>
+            <div className="approval-row"><BrainCircuit size={14} /> {brainRouterText}</div>
           </Panel>
 
           <Panel eyebrow="SYSTEM //" title="NEXT MOVE" corner="PRIORITY">
@@ -468,7 +543,7 @@ export default function Home() {
       </section>
 
       <footer className="footerbar">
-        <span><Bot size={13} /> JARVIS CORE v0.3</span>
+        <span><Bot size={13} /> JARVIS CORE v0.4</span>
         <span><Radar size={13} /> OBSERVE → SYNTHESIZE → PRIORITIZE → ACT → LEARN</span>
         <span><LifeBuoy size={13} /> {systemMode === "DEGRADED" ? "MONITORING WITH LIMITATIONS" : "ALWAYS-ON EVENT MODE"}</span>
       </footer>
