@@ -23,17 +23,19 @@
   text-shadow: 0 0 8px rgba(183, 31, 38, .18) !important;
 }
 
-/* Main box titles return to Jarvis red. */
+/* Main box titles stay red, but use a tighter professional scale. */
 .panel-head strong {
   color: var(--jarvis-red) !important;
-  text-shadow: 0 0 7px rgba(183, 31, 38, .18) !important;
-  font-size: 1.02rem !important;
-  letter-spacing: .08em !important;
+  text-shadow: 0 0 6px rgba(183, 31, 38, .16) !important;
+  font-size: .90rem !important;
+  font-weight: 700 !important;
+  letter-spacing: .075em !important;
 }
 
 .panel-head > div > span,
 .panel-head small {
-  font-size: .74rem !important;
+  font-size: .64rem !important;
+  letter-spacing: .08em !important;
 }
 
 .status-block i,
@@ -79,24 +81,114 @@
   border-top-color: rgba(183, 31, 38, .15) !important;
 }
 
-/* Raise readability across every information box without making the HUD bulky. */
-.panel-body,
-.mission-copy,
-.tiny-row,
-.goal-head,
-.event,
-.sector-feature,
-.domain-matrix button,
-.approval-row,
-.next-move,
-.finance-metric,
-.cashflow-strip,
-.account-role-card,
-.finance-roadmap,
-.chat-log,
-.command-box input {
-  font-size: 1.01rem !important;
+/* Professional dashboard typography: readable without oversized UI text. */
+.panel-body {
+  font-size: .86rem !important;
+  line-height: 1.40 !important;
+}
+
+.mission-copy {
+  font-size: .90rem !important;
   line-height: 1.48 !important;
+}
+
+.tiny-row,
+.goal-head {
+  font-size: .82rem !important;
+  line-height: 1.35 !important;
+}
+
+.event {
+  font-size: .79rem !important;
+  line-height: 1.36 !important;
+}
+
+.sector-feature {
+  font-size: .84rem !important;
+  line-height: 1.38 !important;
+}
+
+.domain-matrix button {
+  font-size: .78rem !important;
+  line-height: 1.28 !important;
+}
+
+.approval-row {
+  font-size: .74rem !important;
+  line-height: 1.38 !important;
+}
+
+.next-move {
+  font-size: .84rem !important;
+  line-height: 1.40 !important;
+}
+
+.next-move p {
+  font-size: .79rem !important;
+  line-height: 1.43 !important;
+}
+
+.chat-log .message p {
+  font-size: .87rem !important;
+  line-height: 1.46 !important;
+}
+
+.message-meta {
+  font-size: .67rem !important;
+  letter-spacing: .07em !important;
+}
+
+.command-box input {
+  font-size: .90rem !important;
+}
+
+.finance-metric {
+  font-size: .82rem !important;
+  line-height: 1.36 !important;
+}
+
+.finance-metric > span,
+.cashflow-strip span,
+.finance-section-head span,
+.account-role-top span,
+.finance-roadmap span {
+  font-size: .70rem !important;
+  letter-spacing: .075em !important;
+}
+
+.finance-metric strong {
+  font-size: 1.34rem !important;
+  font-weight: 700 !important;
+}
+
+.finance-metric small {
+  font-size: .74rem !important;
+  line-height: 1.36 !important;
+}
+
+.cashflow-strip {
+  font-size: .78rem !important;
+  line-height: 1.34 !important;
+}
+
+.account-role-card {
+  font-size: .80rem !important;
+  line-height: 1.38 !important;
+}
+
+.account-role-card > strong {
+  font-size: .88rem !important;
+  font-weight: 700 !important;
+}
+
+.account-role-card p {
+  font-size: .75rem !important;
+  line-height: 1.42 !important;
+}
+
+.finance-roadmap {
+  font-size: .77rem !important;
+  line-height: 1.38 !important;
 }
 
 .tiny-row span,
@@ -125,32 +217,10 @@
   font-weight: 600 !important;
 }
 
-.message p {
-  font-size: 1rem !important;
-  line-height: 1.52 !important;
-}
-
-.finance-metric > span,
-.cashflow-strip span,
-.finance-section-head span,
-.account-role-top span,
-.finance-roadmap span {
-  font-size: .8rem !important;
-}
-
-.finance-metric strong {
-  font-size: 1.52rem !important;
-}
-
-.account-role-card > strong {
-  font-size: 1.02rem !important;
-}
-
 /* Institution names need to read immediately against the dark finance cards. */
 .account-role-top span {
   color: #f0f0f0 !important;
   font-weight: 700;
-  letter-spacing: .10em;
 }
 
 .account-role-top b {
