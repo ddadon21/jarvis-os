@@ -637,7 +637,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   }
 
   function goWork() {
-    router.push("/");
+    router.push("/work");
   }
 
   const value = useMemo<JarvisVoiceContextValue>(
