@@ -17,6 +17,21 @@ export type FinanceGoalReadiness = {
   blocker: string;
 };
 
+function formatWholeMoney(value: number) {
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+export function getNextNetWorthMilestone(netWorth: number) {
+  const step = netWorth < 100000 ? 5000 : 10000;
+  const floor = Math.max(0, Math.floor(Math.max(netWorth, 0) / step) * step);
+  const target = floor + step;
+  const progress = netWorth <= floor ? 0 : Math.min(100, ((netWorth - floor) / step) * 100);
+  return { floor, target, step, progress };
+}
+
+const CURRENT_PERSONAL_NET_WORTH = -277.10;
+export const NET_WORTH_MILESTONE = getNextNetWorthMilestone(CURRENT_PERSONAL_NET_WORTH);
+
 export const FINANCE_SNAPSHOT = {
   importedAt: "2026-09-15",
   source: "CHATGPT FINANCES",
@@ -24,7 +39,7 @@ export const FINANCE_SNAPSHOT = {
   accountCount: 11,
   transactionHistory: "FULL HISTORY READY",
   recurringHistory: "FULL HISTORY READY",
-  personalNetWorth: -277.10,
+  personalNetWorth: CURRENT_PERSONAL_NET_WORTH,
   providerNetWorth: -8483.07,
   liquidity: 822.29,
   investmentValue: 1.78,
@@ -35,7 +50,9 @@ export const FINANCE_SNAPSHOT = {
   creditsPostedThrough: "SEP 14",
   currentStage: "DEBT",
   nextStage: "STABILITY",
-  note: "Sanitized Phase 1 import. Connected data is usable in ChatGPT; Jarvis does not yet have an independent direct bank feed.",
+  nextNetWorthMilestone: NET_WORTH_MILESTONE.target,
+  netWorthMilestoneStep: NET_WORTH_MILESTONE.step,
+  note: "Phase 1 synchronized snapshot. Connected data is usable in ChatGPT; Jarvis does not yet have an independent direct bank feed, so the site does not auto-refresh balances by itself yet.",
 } as const;
 
 export const FINANCE_DEBTS: FinanceDebt[] = [
@@ -84,7 +101,7 @@ export const FINANCE_GOALS: FinanceGoalReadiness[] = [
     progress: null,
     current: "$1,101.17 personal debt",
     target: "$0",
-    blocker: "Store a debt-baseline date before showing a real payoff percentage.",
+    blocker: "Clear personal revolving balances while keeping enough operating cash to avoid recreating debt.",
   },
   {
     name: "$10K LIQUID",
@@ -93,6 +110,14 @@ export const FINANCE_GOALS: FinanceGoalReadiness[] = [
     current: "$822.29",
     target: "$10,000",
     blocker: "$9,177.71 remaining.",
+  },
+  {
+    name: "NET WORTH MILESTONE",
+    state: "RED",
+    progress: NET_WORTH_MILESTONE.progress,
+    current: "-$277.10",
+    target: formatWholeMoney(NET_WORTH_MILESTONE.target),
+    blocker: `Milestone rolls forward by ${formatWholeMoney(NET_WORTH_MILESTONE.step)} when reached; after $100,000 the step becomes $10,000.`,
   },
   {
     name: "MOVE OUT",
@@ -111,20 +136,12 @@ export const FINANCE_GOALS: FinanceGoalReadiness[] = [
     blocker: "Need purchase price, down payment, insurance and post-purchase liquidity rules.",
   },
   {
-    name: "$100K NET WORTH",
-    state: "RED",
-    progress: 0,
-    current: "-$277.10",
-    target: "$100,000",
-    blocker: "Debt elimination and positive capital accumulation come first.",
-  },
-  {
     name: "$1M NET WORTH",
     state: "RED",
     progress: 0,
     current: "-$277.10",
     target: "$1,000,000",
-    blocker: "Long-horizon goal; no decorative percentage while net worth is below zero.",
+    blocker: "Long-horizon destination; Jarvis tracks the smaller rolling milestones on the way there.",
   },
 ];
 
