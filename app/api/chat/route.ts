@@ -20,7 +20,7 @@ TRADING
 Learn how Dwight actually trades over time, journal real trades, collect structured observations, compare decisions to outcomes, identify his real edge, and eventually support shadow/paper models. Never pretend to have live broker or market access unless the relevant integration is actually connected. Never place a live trade unless an explicitly authorized execution tool exists.
 
 FINANCE
-Act like a disciplined CFO. Understand account purpose, cash flow, debt, credit, taxes, investments, and financial goals. Help allocate capital, track readiness for major purchases and moving, and distinguish affordability from smart timing. Never pretend account data is connected when it is not. Never ask for or retain passwords, card numbers, routing numbers, API secrets, authentication codes, or other credentials.
+Act like a disciplined CFO. Understand account purpose, cash flow, debt, credit, taxes, investments, and financial goals. Help allocate capital, track readiness for major purchases and moving, and distinguish affordability from smart timing. Never pretend account data is live when it is not. If a Phase 1 provisional finance snapshot is included in the request context, you may use it, but explicitly distinguish it from a live direct bank feed. Never ask for or retain passwords, card numbers, routing numbers, API secrets, authentication codes, or other credentials.
 
 SENTRYOPS
 Act like a founder-level strategy, research, product, and execution system. Separate firsthand user observations from publicly verified facts. Research agencies, contracts, vendors, competitors, procurement, workflows, pain points, and whitespace. Convert evidence into product hypotheses, build priorities, pilot strategy, and revenue actions.
@@ -39,6 +39,7 @@ CORE BEHAVIOR
 - Do not invent live account, broker, market, email, calendar, or business data.
 - Do not present mock dashboard numbers as real.
 - Never guess which foundation model is running. Use the runtime model identity injected into each request.
+- If a provisional finance snapshot is present, do not claim Jarvis has no financial context at all. Say the snapshot is available but not live-linked.
 
 PERSISTENT MEMORY RULES
 You may suggest short memory updates only for durable, non-secret facts that will improve future reasoning, such as goals, strategy rules, project decisions, preferences, or durable business context.
@@ -64,8 +65,20 @@ If there is no worthwhile memory update, return an empty array. If there is not 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
-type BrainPreference = "auto" | "claude" | "gpt";
+type BrainPreference = "auto" | "claude" | "gpt" | "dual";
 type ActiveBrain = "CLAUDE" | "GPT";
+type ResponseBrain = ActiveBrain | "DUAL";
+
+type FinanceSnapshot = {
+  personalNetWorth?: number;
+  providerNetWorth?: number;
+  liquidity?: number;
+  personalDebt?: number;
+  authorizedUserBalance?: number;
+  compounding?: number;
+  targetNetWorth?: number;
+  status?: string;
+};
 
 type JarvisResponse = {
   reply: string;
@@ -80,8 +93,14 @@ type BrainResult = {
   text: string;
 };
 
+type DualReview = {
+  verdict: "PASS" | "REVISE";
+  note: string;
+  correctedResponse?: JarvisResponse;
+};
+
 export async function POST(request: Request) {
-  let activeBrain: ActiveBrain | undefined;
+  let activeBrain: ResponseBrain | undefined;
   let activeModel: string | undefined;
 
   try {
@@ -90,6 +109,7 @@ export async function POST(request: Request) {
       activeDomain?: string;
       goals?: Goal[];
       memories?: Memory[];
+      financeSnapshot?: FinanceSnapshot;
       brain?: BrainPreference;
     };
 
@@ -97,7 +117,9 @@ export async function POST(request: Request) {
     const activeDomain = typeof body.activeDomain === "string" ? body.activeDomain : "CORE";
     const goals = Array.isArray(body.goals) ? body.goals.slice(0, 20) : [];
     const memories = Array.isArray(body.memories) ? body.memories.slice(-60) : [];
-    const brainPreference: BrainPreference = body.brain === "claude" || body.brain === "gpt" ? body.brain : "auto";
+    const financeSnapshot = body.financeSnapshot && typeof body.financeSnapshot === "object" ? body.financeSnapshot : null;
+    const brainPreference: BrainPreference =
+      body.brain === "claude" || body.brain === "gpt" || body.brain === "dual" ? body.brain : "auto";
 
     const directClaudeAvailable = Boolean(process.env.ANTHROPIC_API_KEY);
     const directOpenAIAvailable = Boolean(process.env.OPENAI_API_KEY);
@@ -108,6 +130,24 @@ export async function POST(request: Request) {
 
     if (brainPreference === "gpt" && !directOpenAIAvailable) {
       return missingProviderResponse("GPT", GPT_MODEL, "OpenAI");
+    }
+
+    if (brainPreference === "dual" && (!directClaudeAvailable || !directOpenAIAvailable)) {
+      return Response.json(
+        {
+          reply: "DUAL mode needs both direct providers online. Make sure ANTHROPIC_API_KEY and OPENAI_API_KEY are available to this deployment, then redeploy.",
+          memoryUpdates: [],
+          nextMove: {
+            title: "Finish dual-brain connection",
+            reason: "Jarvis needs both Claude and GPT available before it can run independent review mode.",
+            domain: "CORE",
+          },
+          brain: "DUAL",
+          model: `${CLAUDE_MODEL} + ${GPT_MODEL}`,
+          provider: "Anthropic + OpenAI",
+        },
+        { status: 503 },
+      );
     }
 
     if (!directClaudeAvailable && !directOpenAIAvailable) {
@@ -128,6 +168,30 @@ export async function POST(request: Request) {
       );
     }
 
+    const context = buildContext(activeDomain, goals, memories, financeSnapshot);
+
+    if (brainPreference === "dual") {
+      activeBrain = "DUAL";
+      activeModel = `${CLAUDE_MODEL} + ${GPT_MODEL}`;
+
+      const primary = await runBrain("CLAUDE", messages, context);
+      const primaryParsed = parseResponse(primary.text, activeDomain);
+      const review = await runDualReview(primaryParsed, messages, context, activeDomain);
+      const finalResponse = review.verdict === "REVISE" && review.correctedResponse
+        ? normalizeJarvisResponse(review.correctedResponse, activeDomain)
+        : primaryParsed;
+
+      return Response.json({
+        ...finalResponse,
+        brain: "DUAL",
+        provider: "Anthropic + OpenAI",
+        model: `${CLAUDE_MODEL} + ${GPT_MODEL}`,
+        primary: { brain: "CLAUDE", provider: "Anthropic", model: CLAUDE_MODEL },
+        reviewer: { brain: "GPT", provider: "OpenAI", model: GPT_MODEL },
+        dualReview: { verdict: review.verdict, note: review.note },
+      });
+    }
+
     const primaryBrain: ActiveBrain =
       brainPreference === "gpt"
         ? "GPT"
@@ -136,8 +200,6 @@ export async function POST(request: Request) {
           : directClaudeAvailable
             ? "CLAUDE"
             : "GPT";
-
-    const context = `CURRENT JARVIS CONTEXT\nActive domain: ${activeDomain}\nKnown goals: ${JSON.stringify(goals)}\nDurable memory: ${JSON.stringify(memories)}`;
 
     let result: BrainResult;
     try {
@@ -204,6 +266,14 @@ export async function POST(request: Request) {
   }
 }
 
+function buildContext(activeDomain: string, goals: Goal[], memories: Memory[], financeSnapshot: FinanceSnapshot | null) {
+  const financeContext = financeSnapshot
+    ? `\nPHASE 1 FINANCE SNAPSHOT (PROVISIONAL, NOT LIVE-LINKED): ${JSON.stringify(financeSnapshot)}\nThis snapshot was imported from connected finance data and may change as sync/backfill completes. Never describe it as a live direct bank feed.`
+    : "";
+
+  return `CURRENT JARVIS CONTEXT\nActive domain: ${activeDomain}\nKnown goals: ${JSON.stringify(goals)}\nDurable memory: ${JSON.stringify(memories)}${financeContext}`;
+}
+
 async function runBrain(brain: ActiveBrain, messages: ChatMessage[], context: string): Promise<BrainResult> {
   const isClaude = brain === "CLAUDE";
   const modelId = isClaude ? CLAUDE_MODEL : GPT_MODEL;
@@ -221,6 +291,59 @@ async function runBrain(brain: ActiveBrain, messages: ChatMessage[], context: st
   });
 
   return { brain, provider, model: modelId, text };
+}
+
+async function runDualReview(
+  primaryResponse: JarvisResponse,
+  messages: ChatMessage[],
+  context: string,
+  activeDomain: string,
+): Promise<DualReview> {
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const reviewPrompt = `You are the independent second-brain reviewer inside JARVIS.
+The primary answer was produced by Claude Opus 5. Your job is to check it for factual errors, unsupported certainty, missed constraints, domain leakage, finance/trading safety issues, or a clearly better next move.
+
+Do not rewrite merely for style. Only choose REVISE when there is a meaningful substantive issue.
+
+Current active domain: ${activeDomain}
+Latest user request: ${latestUserMessage}
+${context}
+
+PRIMARY STRUCTURED RESPONSE:
+${JSON.stringify(primaryResponse)}
+
+Return ONLY JSON with this shape:
+{
+  "verdict": "PASS" | "REVISE",
+  "note": "short private review summary",
+  "correctedResponse": {
+    "reply": "corrected final answer",
+    "memoryUpdates": [{"domain":"TRADING|FINANCE|SENTRYOPS|LIFE|CORE","fact":"durable fact"}],
+    "nextMove": {"title":"short action","reason":"concise reason","domain":"TRADING|FINANCE|SENTRYOPS|LIFE|CORE"}
+  }
+}
+If verdict is PASS, omit correctedResponse.`;
+
+  console.info("Jarvis dual reviewer request", { brain: "GPT", provider: "OpenAI", model: GPT_MODEL });
+
+  const { text } = await generateText({
+    model: openai(GPT_MODEL),
+    system: "You are a precise independent reviewer. Return only valid JSON.",
+    prompt: reviewPrompt,
+  });
+
+  const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
+  try {
+    const value = JSON.parse(cleaned) as Partial<DualReview>;
+    const verdict = value.verdict === "REVISE" ? "REVISE" : "PASS";
+    const note = typeof value.note === "string" ? value.note.trim().slice(0, 300) : "Independent review completed.";
+    const correctedResponse = value.correctedResponse
+      ? normalizeJarvisResponse(value.correctedResponse, activeDomain)
+      : undefined;
+    return { verdict, note, correctedResponse };
+  } catch {
+    return { verdict: "PASS", note: "Reviewer response was not structured; primary answer retained." };
+  }
 }
 
 function missingProviderResponse(brain: ActiveBrain, model: string, provider: "Anthropic" | "OpenAI") {
@@ -247,30 +370,7 @@ function parseResponse(text: string, activeDomain: string): JarvisResponse {
 
   try {
     const value = JSON.parse(cleaned) as Partial<JarvisResponse>;
-    const reply = typeof value.reply === "string" && value.reply.trim() ? value.reply.trim() : cleaned;
-    const memoryUpdates = Array.isArray(value.memoryUpdates)
-      ? value.memoryUpdates
-          .filter((item) => item && typeof item.fact === "string" && item.fact.trim())
-          .map((item) => ({
-            domain: normalizeDomain(item.domain, activeDomain),
-            fact: item.fact.trim().slice(0, 280),
-          }))
-          .slice(0, 6)
-      : [];
-
-    const nextMove = value.nextMove && typeof value.nextMove.title === "string"
-      ? {
-          title: value.nextMove.title.trim().slice(0, 120),
-          reason: typeof value.nextMove.reason === "string" ? value.nextMove.reason.trim().slice(0, 300) : "",
-          domain: normalizeDomain(value.nextMove.domain, activeDomain),
-        }
-      : {
-          title: "Continue current objective",
-          reason: "No stronger next move was produced from the available context.",
-          domain: normalizeDomain(activeDomain, "CORE"),
-        };
-
-    return { reply, memoryUpdates, nextMove };
+    return normalizeJarvisResponse(value, activeDomain, cleaned);
   } catch {
     return {
       reply: cleaned || "Jarvis returned an empty response.",
@@ -282,6 +382,33 @@ function parseResponse(text: string, activeDomain: string): JarvisResponse {
       },
     };
   }
+}
+
+function normalizeJarvisResponse(value: Partial<JarvisResponse>, activeDomain: string, fallbackReply = ""): JarvisResponse {
+  const reply = typeof value.reply === "string" && value.reply.trim() ? value.reply.trim() : fallbackReply || "Jarvis returned an empty response.";
+  const memoryUpdates = Array.isArray(value.memoryUpdates)
+    ? value.memoryUpdates
+        .filter((item) => item && typeof item.fact === "string" && item.fact.trim())
+        .map((item) => ({
+          domain: normalizeDomain(item.domain, activeDomain),
+          fact: item.fact.trim().slice(0, 280),
+        }))
+        .slice(0, 6)
+    : [];
+
+  const nextMove = value.nextMove && typeof value.nextMove.title === "string"
+    ? {
+        title: value.nextMove.title.trim().slice(0, 120),
+        reason: typeof value.nextMove.reason === "string" ? value.nextMove.reason.trim().slice(0, 300) : "",
+        domain: normalizeDomain(value.nextMove.domain, activeDomain),
+      }
+    : {
+        title: "Continue current objective",
+        reason: "No stronger next move was produced from the available context.",
+        domain: normalizeDomain(activeDomain, "CORE"),
+      };
+
+  return { reply, memoryUpdates, nextMove };
 }
 
 function normalizeDomain(value: unknown, fallback: string): string {
