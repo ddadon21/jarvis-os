@@ -17,6 +17,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
+import TradingCockpit from "./trading-cockpit";
 import {
   ChatMessage,
   Domain,
@@ -205,8 +206,8 @@ export default function WorkV2() {
           </Panel>
         </aside>
 
-        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""}`}>
-          {domain === "FINANCE" ? <FinanceCockpitV2 /> : (
+        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""}`}>
+          {domain === "FINANCE" ? <FinanceCockpitV2 /> : domain === "TRADING" ? <TradingCockpit /> : (
             <div className="core-visual">
               <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
               <div className="radar mid" /><div className="radar inner" />
