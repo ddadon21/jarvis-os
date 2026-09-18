@@ -83,6 +83,16 @@ function age(iso: string | null | undefined) {
 export default function TradingCockpit() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState(false);
+  const [mockWatching, setMockWatching] = useState(false);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("jarvis-observer-control-mock-v1");
+    setMockWatching(saved === "watching");
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("jarvis-observer-control-mock-v1", mockWatching ? "watching" : "paused");
+  }, [mockWatching]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,14 +127,16 @@ export default function TradingCockpit() {
   const sampleCount = (state?.recentTrades.length ?? 0) + (state?.openTrades.length ?? 0);
   const confidence = Math.round((observer?.confidence ?? 0) * 100);
 
+  const controlWatching = observing || mockWatching;
   const liveLabel = useMemo(() => {
     if (error) return "STATE ERROR";
+    if (!observing && mockWatching) return "WATCH ARMED · MOCK CONTROL";
     if (!observing) return "LOCAL / NOT PAIRED";
     if (status === "PENDING") return "WATCHING PENDING ORDER";
     if (status === "OPEN") return "WATCHING LIVE POSITION";
     if (status === "FLAT") return "WATCHING · FLAT";
     return "WATCHING";
-  }, [error, observing, status]);
+  }, [error, mockWatching, observing, status]);
 
   return (
     <section className="trading-cockpit">
@@ -133,15 +145,36 @@ export default function TradingCockpit() {
           <span className="trading-kicker"><Eye size={14} /> JARVIS TRADING OBSERVER</span>
           <h2>{liveLabel}</h2>
           <p>
-            Learn Dwight&apos;s real entries first. DEVIANT stays aligned to the demonstrated strategy and is refined from evidence, not guesses.
+            Learn Dwight&apos;s real entries first. DEVIANT stays aligned to the demonstrated strategy and is refined from evidence, not guesses. The red/white control is visual-only until desktop pairing is complete.
           </p>
         </div>
-        <div className={`trading-live-badge ${observing ? "is-live" : ""}`}>
-          <Radio size={16} />
-          <div>
-            <span>{observing ? "OBSERVER LINK" : "OBSERVER LINK"}</span>
-            <strong>{observing ? "LIVE" : "WAITING"}</strong>
-            <small>{age(state?.account.lastObservedAt)}</small>
+        <div className="observer-control-stack">
+          <button
+            type="button"
+            className={`observer-record-control ${controlWatching ? "is-watching" : "is-paused"} ${observing ? "is-real" : "is-mock"}`}
+            onClick={() => {
+              if (!observing) setMockWatching((current) => !current);
+            }}
+            aria-pressed={controlWatching}
+            aria-label={controlWatching ? "Pause observer" : "Start observer"}
+            title={observing ? "Live observer control will be wired after desktop pairing" : "Mock control for the upcoming desktop observer link"}
+          >
+            <span className="observer-record-ring">
+              <span className="observer-record-core" />
+            </span>
+            <span className="observer-control-copy">
+              <small>{observing ? "OBSERVER CONTROL" : "MOCK CONTROL"}</small>
+              <strong>{controlWatching ? "WATCHING" : "PAUSED"}</strong>
+              <em>{observing ? "DESKTOP LINK LIVE" : "PAIRING PENDING"}</em>
+            </span>
+          </button>
+          <div className={`trading-live-badge ${observing ? "is-live" : ""}`}>
+            <Radio size={16} />
+            <div>
+              <span>OBSERVER LINK</span>
+              <strong>{observing ? "LIVE" : "WAITING"}</strong>
+              <small>{age(state?.account.lastObservedAt)}</small>
+            </div>
           </div>
         </div>
       </div>
