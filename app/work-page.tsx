@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import FinanceCockpit, { FinanceGoalMiniList } from "./finance-cockpit";
+import TradingCockpit from "./trading-cockpit";
 import { FINANCE_DEBTS, FINANCE_GOALS, FINANCE_SNAPSHOT } from "../lib/finance-snapshot";
 import {
   ChatMessage,
@@ -224,9 +225,15 @@ export default function Work() {
   const sectors = useMemo(() => {
     const sentryStatus = systemStatus?.integrations.sentryopsResearch;
     const financeStatus = systemStatus?.integrations.finance;
+    const tradingStatus = systemStatus?.integrations.trading;
     const pulse = systemStatus?.backgroundResearch.latestPulse;
 
     return baseSectors.map((sector) => {
+      if (sector.id === "TRADING") {
+        if (tradingStatus === "ACTIVE") return { ...sector, stat: "LIVE", sub: "Desktop observer feeding Jarvis" };
+        if (tradingStatus === "DEGRADED") return { ...sector, stat: "DEGRADED", sub: "Observer link needs attention" };
+        return { ...sector, stat: "LEARNING", sub: "Observer local / pairing pending" };
+      }
       if (sector.id === "FINANCE" && financeStatus === "ACTIVE") {
         return { ...sector, stat: "LIVE", sub: "Direct finance feed active" };
       }
@@ -401,9 +408,11 @@ export default function Work() {
           </Panel>
         </aside>
 
-        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""}`}>
+        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""}`}>
           {domain === "FINANCE" ? (
             <FinanceCockpit onAsk={setInput} />
+          ) : domain === "TRADING" ? (
+            <TradingCockpit />
           ) : (
             <div className="core-visual">
               <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
@@ -453,6 +462,9 @@ export default function Work() {
             </div>
             {domain === "FINANCE" && (
               <div className="approval-row"><ShieldCheck size={14} /> Phase 1 account + history data is ready. Next: direct server-side finance feed, durable CFO state, and automated refresh.</div>
+            )}
+            {domain === "TRADING" && (
+              <div className="approval-row"><Eye size={14} /> Trading cockpit reads the Jarvis observer runtime directly. Live values appear only after the desktop observer is securely paired and accepted.</div>
             )}
             {domain === "SENTRYOPS" && latestPulse && (
               <div className="approval-row"><Radar size={14} /> Last pulse: {new Date(latestPulse.ranAt).toLocaleString()} · {latestPulse.status}</div>
