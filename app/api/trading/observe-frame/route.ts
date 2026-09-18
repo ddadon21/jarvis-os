@@ -141,7 +141,6 @@ Rules:
     body: JSON.stringify({
       model: CLAUDE_MODEL,
       max_tokens: 1000,
-      temperature: 0,
       messages: [{
         role: "user",
         content: [
