@@ -174,6 +174,35 @@ export async function ingestTradingObservation(input: TradingObservationInput): 
     }));
   }
 
+  const priorObserver = previous.observer;
+  const observer = next.observer;
+  if (observer && priorObserver?.status !== observer.status) {
+    await appendRuntimeEvent(createRuntimeEvent({
+      type: `trading.state_${observer.status.toLowerCase()}`,
+      domain: "TRADING",
+      source: "jarvis.trading.observer",
+      importance: observer.status === "OPEN" ? "TIME_SENSITIVE" : "NORMAL",
+      summary: summarizeObserverState(observer),
+    }));
+  }
+
+  if (observer && priorObserver && observer.status === "OPEN") {
+    const managementChanges: string[] = [];
+    if (changedNumber(priorObserver.quantity, observer.quantity)) managementChanges.push(`size ${displayNumber(priorObserver.quantity)} → ${displayNumber(observer.quantity)}`);
+    if (changedNumber(priorObserver.stopPrice, observer.stopPrice)) managementChanges.push(`stop ${displayNumber(priorObserver.stopPrice)} → ${displayNumber(observer.stopPrice)}`);
+    if (changedNumber(priorObserver.targetPrice, observer.targetPrice)) managementChanges.push(`target ${displayNumber(priorObserver.targetPrice)} → ${displayNumber(observer.targetPrice)}`);
+
+    if (managementChanges.length > 0) {
+      await appendRuntimeEvent(createRuntimeEvent({
+        type: "trading.position_managed",
+        domain: "TRADING",
+        source: "jarvis.trading.observer",
+        importance: "NORMAL",
+        summary: `${observer.symbol ?? "Position"} managed · ${managementChanges.join(" · ")}`,
+      }));
+    }
+  }
+
   return next;
 }
 
@@ -309,6 +338,28 @@ function normalizeObserver(
       ? input.evidence.filter((x): x is string => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 160))
       : previous?.evidence ?? [],
   };
+}
+
+function summarizeObserverState(observer: TradingObserverState) {
+  const symbol = observer.symbol ?? "Market";
+  if (observer.status === "PENDING") {
+    return `${symbol} pending ${observer.side ?? "order"}${observer.quantity == null ? "" : ` · ${observer.quantity}`}${observer.entryPrice == null ? "" : ` @ ${displayNumber(observer.entryPrice)}`}`;
+  }
+  if (observer.status === "OPEN") {
+    return `${symbol} ${observer.side ?? "position"} open${observer.quantity == null ? "" : ` · ${observer.quantity}`}${observer.entryPrice == null ? "" : ` @ ${displayNumber(observer.entryPrice)}`}`;
+  }
+  if (observer.status === "FLAT") return `${symbol} flat · no live position detected.`;
+  return `${symbol} observer state unknown · waiting for clearer evidence.`;
+}
+
+function changedNumber(before: number | null, after: number | null) {
+  if (before == null && after == null) return false;
+  if (before == null || after == null) return true;
+  return Math.abs(before - after) > 0.000001;
+}
+
+function displayNumber(value: number | null) {
+  return value == null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 
 function stageDirective(account: TradingAccountState) {
