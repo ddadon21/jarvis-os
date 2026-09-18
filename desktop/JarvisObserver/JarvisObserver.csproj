@@ -12,4 +12,8 @@
     <AssemblyName>JarvisObserver</AssemblyName>
     <RootNamespace>JarvisObserver</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
+  </ItemGroup>
 </Project>
