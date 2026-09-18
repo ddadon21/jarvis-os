@@ -189,3 +189,94 @@
   .trading-live-badge { min-width: 0; }
   .trading-symbol-row, .trading-prices { grid-template-columns: repeat(2, 1fr); }
 }
+
+
+/* Trading observer record control: mock now, real desktop control after pairing. */
+.observer-control-stack{
+  display:flex;
+  align-items:stretch;
+  gap:8px;
+}
+.observer-record-control{
+  appearance:none;
+  border:1px solid rgba(255,255,255,.13);
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.018));
+  color:#eef2f4;
+  min-width:210px;
+  padding:9px 11px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+  text-align:left;
+  transition:border-color .18s ease,box-shadow .18s ease,background .18s ease,transform .12s ease;
+}
+.observer-record-control:hover{transform:translateY(-1px);border-color:rgba(255,255,255,.25)}
+.observer-record-control:active{transform:translateY(0)}
+.observer-record-ring{
+  width:42px;
+  height:42px;
+  min-width:42px;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,.45);
+  display:grid;
+  place-items:center;
+  box-shadow:inset 0 0 18px rgba(255,255,255,.035),0 0 0 1px rgba(255,255,255,.025);
+  position:relative;
+}
+.observer-record-core{
+  width:24px;
+  height:24px;
+  border-radius:50%;
+  background:#f4f5f6;
+  box-shadow:0 0 16px rgba(255,255,255,.15);
+  transition:background .2s ease,box-shadow .2s ease,transform .2s ease,border-radius .2s ease;
+}
+.observer-record-control.is-watching{
+  border-color:rgba(183,31,38,.5);
+  background:linear-gradient(180deg,rgba(183,31,38,.09),rgba(183,31,38,.025));
+  box-shadow:inset 0 0 26px rgba(183,31,38,.055);
+}
+.observer-record-control.is-watching .observer-record-ring{
+  border-color:rgba(255,255,255,.62);
+  box-shadow:0 0 0 1px rgba(183,31,38,.14),0 0 22px rgba(183,31,38,.18),inset 0 0 18px rgba(183,31,38,.06);
+}
+.observer-record-control.is-watching .observer-record-core{
+  background:#b71f26;
+  box-shadow:0 0 18px rgba(183,31,38,.48);
+  animation:observerPulse 1.7s ease-in-out infinite;
+}
+.observer-record-control.is-paused .observer-record-core{
+  background:#f3f5f6;
+  box-shadow:0 0 14px rgba(255,255,255,.10);
+}
+.observer-control-copy{display:grid;gap:1px}
+.observer-control-copy small{
+  font-size:8px;
+  letter-spacing:.13em;
+  opacity:.5;
+}
+.observer-control-copy strong{
+  font-size:12px;
+  letter-spacing:.12em;
+}
+.observer-control-copy em{
+  font-style:normal;
+  font-size:8px;
+  letter-spacing:.08em;
+  opacity:.45;
+}
+.observer-record-control.is-watching .observer-control-copy strong{color:#fff}
+.observer-record-control.is-watching .observer-control-copy em{color:#d86b70;opacity:.85}
+.observer-record-control.is-mock .observer-control-copy small:after{
+  content:" · UI ONLY";
+  color:#8d969b;
+}
+@keyframes observerPulse{
+  0%,100%{transform:scale(.95);box-shadow:0 0 13px rgba(183,31,38,.34)}
+  50%{transform:scale(1);box-shadow:0 0 23px rgba(183,31,38,.58)}
+}
+@media(max-width:980px){
+  .observer-control-stack{flex-direction:column}
+  .observer-record-control,.trading-live-badge{min-width:0;width:100%}
+}
