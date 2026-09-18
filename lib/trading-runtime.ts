@@ -171,7 +171,7 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     propFirm: nullableClean(input.propFirm ?? priorAccount?.propFirm ?? null, 80),
     accountLabel: clean(input.accountLabel ?? priorAccount?.accountLabel ?? "CURRENT PROP ACCOUNT", 80),
     accountIdMasked: nullableClean(input.accountIdMasked ?? priorAccount?.accountIdMasked ?? null, 40),
-    connection: (input.provider || priorAccount?.connection === "OBSERVING") ? "OBSERVING" : "DISCONNECTED",
+    connection: isObservedProvider(input.provider ?? priorAccount?.provider) || priorAccount?.connection === "OBSERVING" ? "OBSERVING" : "DISCONNECTED",
     stage: input.stage ?? priorAccount?.stage ?? "PASS CURRENT ACCOUNT",
     startingBalance: safeNullable(input.startingBalance ?? priorAccount?.startingBalance ?? null),
     balance: safeNullable(input.balance ?? priorAccount?.balance ?? null),
@@ -181,7 +181,7 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     profitTarget: safeNullable(input.profitTarget ?? priorAccount?.profitTarget ?? null),
     dailyLossLimit: safeNullable(input.dailyLossLimit ?? priorAccount?.dailyLossLimit ?? null),
     maxLossLimit: safeNullable(input.maxLossLimit ?? priorAccount?.maxLossLimit ?? null),
-    lastObservedAt: observedAt,
+    lastObservedAt: isObservedProvider(input.provider ?? priorAccount?.provider) || priorAccount?.connection === "OBSERVING" ? observedAt : (priorAccount?.lastObservedAt ?? null),
   };
 
   const todayKey = observedAt.slice(0, 10);
@@ -257,4 +257,4 @@ function safeNullable(value: number | null) { return typeof value === "number" &
 function clean(value: string, max: number) { return String(value ?? "").trim().slice(0, max) || "UNKNOWN"; }
 function nullableClean(value: string | null, max: number) { const v = typeof value === "string" ? value.trim().slice(0, max) : ""; return v || null; }
 function normalizeDate(value: string | null | undefined) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null; }
-function signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function isObservedProvider(value: string | null | undefined) { const v = String(value ?? "").trim().toUpperCase(); return Boolean(v) && v !== "NOT CONNECTED" && v !== "UNKNOWN"; }\nfunction signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
