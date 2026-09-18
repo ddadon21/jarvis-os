@@ -74,7 +74,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.1", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -232,7 +232,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.0",
+            observerVersion = "0.4.1",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -242,7 +242,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.1");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -292,7 +292,7 @@ internal sealed class ObserverContext : ApplicationContext
             using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.1");
             using var res = await _http.SendAsync(req);
 
             if ((int)res.StatusCode == 401)
@@ -426,14 +426,10 @@ internal sealed class ObserverContext : ApplicationContext
 
     private void NormalizeServerUrl()
     {
-        const string current = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app";
-        const string access = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app/?_vercel_share=l9tTw3CrGse29v9lgKd3kihqnqGAseAA";
-        if (string.IsNullOrWhiteSpace(_config.ServerUrl) ||
-            _config.ServerUrl.Contains("jarvis-os-git-claude-jarvis-ai", StringComparison.OrdinalIgnoreCase))
-        {
-            _config.ServerUrl = current;
-        }
-        if (string.IsNullOrWhiteSpace(_config.AccessBootstrapUrl)) _config.AccessBootstrapUrl = access;
+        const string current = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+        const string access = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/?_vercel_share=1yQkOpuIMcr4tlwrP37nCgJTxmZmXj5A";
+        _config.ServerUrl = current;
+        _config.AccessBootstrapUrl = access;
     }
 
     private void SaveConfig()
@@ -687,10 +683,10 @@ internal sealed class ObserverContext : ApplicationContext
 internal sealed class ObserverConfig
 {
     [JsonPropertyName("serverUrl")]
-    public string? ServerUrl { get; set; } = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app";
+    public string? ServerUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
 
     [JsonPropertyName("accessBootstrapUrl")]
-    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app/?_vercel_share=l9tTw3CrGse29v9lgKd3kihqnqGAseAA";
+    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/?_vercel_share=1yQkOpuIMcr4tlwrP37nCgJTxmZmXj5A";
 
     [JsonPropertyName("tradingSecret")]
     public string? TradingSecret { get; set; }
