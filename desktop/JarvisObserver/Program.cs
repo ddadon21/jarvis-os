@@ -6,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using System.Windows.Automation;
 
 namespace JarvisObserver;
 
@@ -33,6 +35,9 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastSentUtc = DateTime.MinValue;
     private DateTime _lastSavedUtc = DateTime.MinValue;
     private DateTime _lastEventSavedUtc = DateTime.MinValue;
+    private DateTime _lastSemanticPollUtc = DateTime.MinValue;
+    private string? _latestSemanticText;
+    private string? _lastSemanticHash;
     private byte[]? _lastSignature;
     private string? _sessionDir;
     private int _frameNumber;
@@ -60,7 +65,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.2.0", mode = _config.CloudEnabled ? "CLOUD" : "LOCAL_ONLY" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.3.0", mode = _config.CloudEnabled ? "CLOUD" : "LOCAL_ONLY" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -99,6 +104,23 @@ internal sealed class ObserverContext : ApplicationContext
                 Log(new { type = "tradingview.detected", at = DateTime.UtcNow });
             }
 
+            var semanticNow = DateTime.UtcNow;
+            if (semanticNow - _lastSemanticPollUtc >= TimeSpan.FromMilliseconds(_config.SemanticPollMs))
+            {
+                _lastSemanticPollUtc = semanticNow;
+                var semantic = CaptureAccessibleText(target, _config.MaxSemanticChars);
+                if (!string.IsNullOrWhiteSpace(semantic))
+                {
+                    _latestSemanticText = semantic;
+                    var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(semantic)));
+                    if (!string.Equals(hash, _lastSemanticHash, StringComparison.Ordinal))
+                    {
+                        _lastSemanticHash = hash;
+                        SaveSemanticSnapshot(semantic, semanticNow, hash);
+                    }
+                }
+            }
+
             using var frame = CaptureWindow(target);
             if (frame is null)
             {
@@ -127,7 +149,7 @@ internal sealed class ObserverContext : ApplicationContext
 
             if (_config.CloudEnabled && now - _lastSentUtc >= TimeSpan.FromMilliseconds(_config.MinimumCloudIntervalMs))
             {
-                await UploadFrameAsync(jpg, now, difference);
+                await UploadFrameAsync(jpg, now, difference, _latestSemanticText);
                 _lastSentUtc = now;
             }
         }
@@ -151,6 +173,9 @@ internal sealed class ObserverContext : ApplicationContext
         _lastSentUtc = DateTime.MinValue;
         _lastSavedUtc = DateTime.MinValue;
         _lastEventSavedUtc = DateTime.MinValue;
+        _lastSemanticPollUtc = DateTime.MinValue;
+        _latestSemanticText = null;
+        _lastSemanticHash = null;
     }
 
     private void SaveFrame(byte[] jpg, DateTime at, double difference)
@@ -169,7 +194,23 @@ internal sealed class ObserverContext : ApplicationContext
         TrimSessionFrames(_sessionDir, _config.MaxLocalFrames);
     }
 
-    private async Task UploadFrameAsync(byte[] jpg, DateTime at, double difference)
+    private void SaveSemanticSnapshot(string semantic, DateTime at, string hash)
+    {
+        if (_sessionDir is null) return;
+        var safe = SanitizeSensitive(semantic);
+        var row = JsonSerializer.Serialize(new
+        {
+            at,
+            hash,
+            chars = safe.Length,
+            text = safe,
+        });
+        File.AppendAllText(Path.Combine(_sessionDir, "semantic.jsonl"), row + Environment.NewLine);
+        File.WriteAllText(Path.Combine(_sessionDir, "semantic-latest.txt"), safe);
+        Log(new { type = "semantic.changed", at, hash = hash[..Math.Min(12, hash.Length)], chars = safe.Length });
+    }
+
+    private async Task UploadFrameAsync(byte[] jpg, DateTime at, double difference, string? semanticText)
     {
         var endpoint = _config.ServerUrl!.TrimEnd('/') + "/api/trading/observe-frame";
         var body = JsonSerializer.Serialize(new
@@ -178,7 +219,8 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.2.0",
+            observerVersion = "0.3.0",
+            semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
@@ -256,6 +298,80 @@ internal sealed class ObserverContext : ApplicationContext
             }
         }
         return IntPtr.Zero;
+    }
+
+    private static string CaptureAccessibleText(IntPtr hwnd, int maxChars)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(hwnd);
+            if (root is null) return string.Empty;
+
+            var lines = new List<string>();
+            var queue = new Queue<(AutomationElement Element, int Depth)>();
+            queue.Enqueue((root, 0));
+            var walker = TreeWalker.ControlViewWalker;
+            var visited = 0;
+
+            while (queue.Count > 0 && visited < 1200)
+            {
+                var (element, depth) = queue.Dequeue();
+                visited++;
+
+                try
+                {
+                    var current = element.Current;
+                    var name = current.Name?.Trim() ?? string.Empty;
+                    var automationId = current.AutomationId?.Trim() ?? string.Empty;
+                    var control = current.ControlType?.ProgrammaticName?.Replace("ControlType.", "", StringComparison.Ordinal) ?? "Unknown";
+                    var value = string.Empty;
+
+                    if (!current.IsPassword && element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern valuePattern)
+                    {
+                        value = valuePattern.Current.Value?.Trim() ?? string.Empty;
+                    }
+
+                    var payload = string.Join(" | ", new[] { control, name, value, automationId }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                    if (!string.IsNullOrWhiteSpace(payload)) lines.Add(payload);
+                }
+                catch
+                {
+                    // UI Automation nodes can disappear while TradingView updates.
+                }
+
+                if (depth >= 8) continue;
+                try
+                {
+                    var child = walker.GetFirstChild(element);
+                    while (child is not null)
+                    {
+                        queue.Enqueue((child, depth + 1));
+                        child = walker.GetNextSibling(child);
+                    }
+                }
+                catch
+                {
+                    // Chromium accessibility tree may mutate during traversal.
+                }
+
+                if (lines.Sum(x => x.Length + 1) >= maxChars) break;
+            }
+
+            var combined = string.Join(Environment.NewLine, lines);
+            if (combined.Length > maxChars) combined = combined[..maxChars];
+            return SanitizeSensitive(combined);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string SanitizeSensitive(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        var maskedLongNumbers = Regex.Replace(text, @"\b\d{7,}\b", "[MASKED-ID]");
+        return maskedLongNumbers.Length > 16000 ? maskedLongNumbers[..16000] : maskedLongNumbers;
     }
 
     private static Bitmap? CaptureWindow(IntPtr hwnd)
@@ -423,6 +539,12 @@ internal sealed class ObserverConfig
 
     [JsonPropertyName("maxLocalFrames")]
     public int MaxLocalFrames { get; init; } = 600;
+
+    [JsonPropertyName("semanticPollMs")]
+    public int SemanticPollMs { get; init; } = 750;
+
+    [JsonPropertyName("maxSemanticChars")]
+    public int MaxSemanticChars { get; init; } = 12000;
 
     [JsonIgnore]
     public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && !string.IsNullOrWhiteSpace(TradingSecret);
