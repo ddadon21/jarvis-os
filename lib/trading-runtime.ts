@@ -3,6 +3,23 @@ import { appendRuntimeEvent, createRuntimeEvent } from "./jarvis-runtime";
 
 export type TradingConnectionState = "DISCONNECTED" | "CONNECTING" | "OBSERVING" | "DEGRADED";
 export type TradingStage = "PASS CURRENT ACCOUNT" | "FIRST PAYOUT" | "REPEAT PAYOUTS" | "SCALE FUNDED CAPITAL";
+export type TradingObserverStatus = "FLAT" | "PENDING" | "OPEN" | "UNKNOWN";
+
+export type TradingObserverState = {
+  status: TradingObserverStatus;
+  symbol: string | null;
+  side: "LONG" | "SHORT" | null;
+  quantity: number | null;
+  orderType: "LIMIT" | "STOP" | "MARKET" | null;
+  entryPrice: number | null;
+  currentPrice: number | null;
+  stopPrice: number | null;
+  targetPrice: number | null;
+  openPnl: number | null;
+  confidence: number;
+  observedAt: string | null;
+  evidence: string[];
+};
 
 export type TradingAccountState = {
   provider: string;
@@ -58,6 +75,7 @@ export type TradingRuntimeState = {
   };
   openTrades: JournalTrade[];
   recentTrades: JournalTrade[];
+  observer?: TradingObserverState;
   journalCount: number;
   today: {
     trades: number;
@@ -69,6 +87,8 @@ export type TradingRuntimeState = {
 };
 
 export type TradingObservationInput = {
+  connection?: TradingConnectionState;
+  observer?: Partial<TradingObserverState>;
   provider?: string;
   propFirm?: string | null;
   accountLabel?: string;
@@ -116,6 +136,7 @@ export async function getTradingState(): Promise<TradingRuntimeState> {
   if (existing) return existing;
   const initial = buildState({
     provider: "NOT CONNECTED",
+    connection: "DISCONNECTED",
     accountLabel: "CURRENT PROP ACCOUNT",
     stage: "PASS CURRENT ACCOUNT",
     trades: [],
@@ -166,12 +187,15 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
   const openTrades = allTrades.filter((trade) => trade.status === "OPEN").sort(sortNewest);
   const recentTrades = allTrades.filter((trade) => trade.status === "CLOSED").sort(sortNewest).slice(0, 100);
 
+  const connection = input.connection ?? priorAccount?.connection ?? "DISCONNECTED";
+  const observer = normalizeObserver(input.observer, previous?.observer, connection === "OBSERVING" ? observedAt : null);
+
   const account: TradingAccountState = {
     provider: clean(input.provider ?? priorAccount?.provider ?? "NOT CONNECTED", 60),
     propFirm: nullableClean(input.propFirm ?? priorAccount?.propFirm ?? null, 80),
     accountLabel: clean(input.accountLabel ?? priorAccount?.accountLabel ?? "CURRENT PROP ACCOUNT", 80),
     accountIdMasked: nullableClean(input.accountIdMasked ?? priorAccount?.accountIdMasked ?? null, 40),
-    connection: isObservedProvider(input.provider ?? priorAccount?.provider) || priorAccount?.connection === "OBSERVING" ? "OBSERVING" : "DISCONNECTED",
+    connection,
     stage: input.stage ?? priorAccount?.stage ?? "PASS CURRENT ACCOUNT",
     startingBalance: safeNullable(input.startingBalance ?? priorAccount?.startingBalance ?? null),
     balance: safeNullable(input.balance ?? priorAccount?.balance ?? null),
@@ -181,7 +205,7 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     profitTarget: safeNullable(input.profitTarget ?? priorAccount?.profitTarget ?? null),
     dailyLossLimit: safeNullable(input.dailyLossLimit ?? priorAccount?.dailyLossLimit ?? null),
     maxLossLimit: safeNullable(input.maxLossLimit ?? priorAccount?.maxLossLimit ?? null),
-    lastObservedAt: isObservedProvider(input.provider ?? priorAccount?.provider) || priorAccount?.connection === "OBSERVING" ? observedAt : (priorAccount?.lastObservedAt ?? null),
+    lastObservedAt: connection === "OBSERVING" ? observedAt : (priorAccount?.lastObservedAt ?? null),
   };
 
   const todayKey = observedAt.slice(0, 10);
@@ -201,6 +225,7 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     },
     openTrades,
     recentTrades,
+    observer,
     journalCount: recentTrades.length + openTrades.length,
     today: {
       trades: todayTrades.length,
