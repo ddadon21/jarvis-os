@@ -61,6 +61,17 @@ type TradingState = {
 
 type ApiResponse = { state: TradingState; observing: boolean };
 
+type ObserverLink = {
+  deviceId: string;
+  deviceName: string;
+  pairedAt: string;
+  lastHeartbeatAt: string | null;
+  lastFrameAt: string | null;
+  command: "WATCH" | "PAUSE";
+  observerVersion: string | null;
+  online: boolean;
+};
+
 function money(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -83,16 +94,53 @@ function age(iso: string | null | undefined) {
 export default function TradingCockpit() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState(false);
-  const [mockWatching, setMockWatching] = useState(false);
+  const [controllerToken, setControllerToken] = useState("");
+  const [link, setLink] = useState<ObserverLink | null>(null);
+  const [pairCode, setPairCode] = useState("");
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairError, setPairError] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("jarvis-observer-control-mock-v1");
-    setMockWatching(saved === "watching");
+    const saved = window.localStorage.getItem("jarvis-observer-controller-v1") ?? "";
+    setControllerToken(saved);
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("jarvis-observer-control-mock-v1", mockWatching ? "watching" : "paused");
-  }, [mockWatching]);
+    if (!controllerToken) {
+      setLink(null);
+      return;
+    }
+    let cancelled = false;
+
+    async function refreshLink() {
+      try {
+        const response = await fetch("/api/trading/link/status", {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${controllerToken}` },
+        });
+        if (response.status === 401) {
+          window.localStorage.removeItem("jarvis-observer-controller-v1");
+          if (!cancelled) {
+            setControllerToken("");
+            setLink(null);
+          }
+          return;
+        }
+        if (!response.ok) return;
+        const payload = await response.json() as { link?: ObserverLink };
+        if (!cancelled && payload.link) setLink(payload.link);
+      } catch {
+        // Trading state polling continues even if link status is temporarily unavailable.
+      }
+    }
+
+    void refreshLink();
+    const timer = window.setInterval(refreshLink, 2_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [controllerToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,16 +175,61 @@ export default function TradingCockpit() {
   const sampleCount = (state?.recentTrades.length ?? 0) + (state?.openTrades.length ?? 0);
   const confidence = Math.round((observer?.confidence ?? 0) * 100);
 
-  const controlWatching = observing || mockWatching;
+  const controlWatching = link?.command === "WATCH";
+  const paired = Boolean(controllerToken && link);
   const liveLabel = useMemo(() => {
     if (error) return "STATE ERROR";
-    if (!observing && mockWatching) return "WATCH ARMED · MOCK CONTROL";
-    if (!observing) return "LOCAL / NOT PAIRED";
+    if (!paired) return "PAIR DESKTOP OBSERVER";
+    if (!link?.online) return "DESKTOP OFFLINE";
+    if (controlWatching && !observing) return "WATCHING · WAITING FOR VERIFIED FRAME";
+    if (!controlWatching) return "OBSERVER PAUSED";
     if (status === "PENDING") return "WATCHING PENDING ORDER";
     if (status === "OPEN") return "WATCHING LIVE POSITION";
     if (status === "FLAT") return "WATCHING · FLAT";
     return "WATCHING";
-  }, [error, mockWatching, observing, status]);
+  }, [controlWatching, error, link?.online, observing, paired, status]);
+
+  async function confirmPairing() {
+    const code = pairCode.trim().toUpperCase();
+    if (!code || pairBusy) return;
+    setPairBusy(true);
+    setPairError(null);
+    try {
+      const response = await fetch("/api/trading/pair/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; pair?: { controllerToken?: string } };
+      const token = payload.pair?.controllerToken;
+      if (!response.ok || !token) throw new Error(payload.error || "Pairing failed.");
+      window.localStorage.setItem("jarvis-observer-controller-v1", token);
+      setControllerToken(token);
+      setPairCode("");
+    } catch (pairingError) {
+      setPairError(pairingError instanceof Error ? pairingError.message : "Pairing failed.");
+    } finally {
+      setPairBusy(false);
+    }
+  }
+
+  async function setWatching(nextWatching: boolean) {
+    if (!controllerToken) return;
+    try {
+      const response = await fetch("/api/trading/control", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${controllerToken}`,
+        },
+        body: JSON.stringify({ command: nextWatching ? "WATCH" : "PAUSE" }),
+      });
+      const payload = await response.json() as { link?: ObserverLink };
+      if (response.ok && payload.link) setLink(payload.link);
+    } catch {
+      // Link poll will recover the true command state.
+    }
+  }
 
   return (
     <section className="trading-cockpit">
@@ -145,38 +238,52 @@ export default function TradingCockpit() {
           <span className="trading-kicker"><Eye size={14} /> JARVIS TRADING OBSERVER</span>
           <h2>{liveLabel}</h2>
           <p>
-            Learn Dwight&apos;s real entries first. DEVIANT stays aligned to the demonstrated strategy and is refined from evidence, not guesses. The red/white control is visual-only until desktop pairing is complete.
+            Learn Dwight&apos;s real entries first. DEVIANT stays aligned to the demonstrated strategy and is refined from evidence, not guesses.
           </p>
         </div>
         <div className="observer-control-stack">
           <button
             type="button"
-            className={`observer-record-control ${controlWatching ? "is-watching" : "is-paused"} ${observing ? "is-real" : "is-mock"}`}
-            onClick={() => {
-              if (!observing) setMockWatching((current) => !current);
-            }}
+            className={`observer-record-control ${controlWatching ? "is-watching" : "is-paused"} ${paired ? "is-real" : "is-mock"}`}
+            onClick={() => void setWatching(!controlWatching)}
             aria-pressed={controlWatching}
             aria-label={controlWatching ? "Pause observer" : "Start observer"}
-            title={observing ? "Live observer control will be wired after desktop pairing" : "Mock control for the upcoming desktop observer link"}
+            title={paired ? "Control the paired Windows observer" : "Pair the Windows observer first"}
+            disabled={!paired}
           >
             <span className="observer-record-ring">
               <span className="observer-record-core" />
             </span>
             <span className="observer-control-copy">
-              <small>{observing ? "OBSERVER CONTROL" : "MOCK CONTROL"}</small>
+              <small>{paired ? "OBSERVER CONTROL" : "PAIR REQUIRED"}</small>
               <strong>{controlWatching ? "WATCHING" : "PAUSED"}</strong>
-              <em>{observing ? "DESKTOP LINK LIVE" : "PAIRING PENDING"}</em>
+              <em>{paired ? (link?.online ? "DESKTOP LINK ONLINE" : "DESKTOP OFFLINE") : "ENTER PAIR CODE BELOW"}</em>
             </span>
           </button>
-          <div className={`trading-live-badge ${observing ? "is-live" : ""}`}>
+          <div className={`trading-live-badge ${paired && link?.online ? "is-live" : ""}`}>
             <Radio size={16} />
             <div>
               <span>OBSERVER LINK</span>
-              <strong>{observing ? "LIVE" : "WAITING"}</strong>
-              <small>{age(state?.account.lastObservedAt)}</small>
+              <strong>{paired ? (link?.online ? "ONLINE" : "PAIRED") : "WAITING"}</strong>
+              <small>{paired ? `${link?.observerVersion ?? "OBSERVER"} · ${age(link?.lastHeartbeatAt)}` : "PAIRING REQUIRED"}</small>
             </div>
           </div>
         </div>
+        {!paired && (
+          <div className="observer-pair-row">
+            <input
+              value={pairCode}
+              onChange={(event) => setPairCode(event.target.value.toUpperCase())}
+              placeholder="PAIR CODE FROM DESKTOP"
+              maxLength={12}
+              aria-label="Observer pairing code"
+            />
+            <button type="button" onClick={() => void confirmPairing()} disabled={pairBusy || pairCode.trim().length < 6}>
+              {pairBusy ? "PAIRING..." : "PAIR OBSERVER"}
+            </button>
+            {pairError && <small>{pairError}</small>}
+          </div>
+        )}
       </div>
 
       <div className="trading-grid">
