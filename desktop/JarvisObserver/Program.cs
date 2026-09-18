@@ -38,6 +38,9 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastSavedUtc = DateTime.MinValue;
     private DateTime _lastEventSavedUtc = DateTime.MinValue;
     private DateTime _lastSemanticPollUtc = DateTime.MinValue;
+    private DateTime _lastControlPollUtc = DateTime.MinValue;
+    private DateTime _lastPairAttemptUtc = DateTime.MinValue;
+    private string? _pairDialogShownForCode;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
     private byte[]? _lastSignature;
@@ -50,9 +53,12 @@ internal sealed class ObserverContext : ApplicationContext
         Directory.CreateDirectory(_root);
         _configPath = Path.Combine(_root, "config.json");
         _config = ObserverConfig.Load(_configPath);
+        NormalizeServerUrl();
+        SaveConfig();
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open observer folder", null, (_, _) => OpenFolder(_root));
+        menu.Items.Add("Show pairing code", null, (_, _) => ShowPairingCode());
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
@@ -67,7 +73,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.3.0", mode = _config.CloudEnabled ? "CLOUD" : "LOCAL_ONLY" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -83,9 +89,12 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task TickAsync()
     {
-        if (_paused || Interlocked.Exchange(ref _busy, 1) == 1) return;
+        if (Interlocked.Exchange(ref _busy, 1) == 1) return;
         try
         {
+            await EnsurePairingAndControlAsync();
+            if (_paused) return;
+
             var target = FindTradingViewWindow();
             if (target == IntPtr.Zero)
             {
@@ -222,12 +231,18 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.3.0",
+            observerVersion = "0.4.0",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.TradingSecret);
+        var bearer = !string.IsNullOrWhiteSpace(_config.DeviceToken) ? _config.DeviceToken : _config.TradingSecret;
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        if (!string.IsNullOrWhiteSpace(_config.DeviceId))
+        {
+            req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
+            req.Headers.Add("x-jarvis-observer-version", "0.4.0");
+        }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
         var responseText = await res.Content.ReadAsStringAsync();
@@ -251,6 +266,156 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
+    private async Task EnsurePairingAndControlAsync()
+    {
+        if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out _)) return;
+
+        var now = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken))
+        {
+            if (now - _lastPairAttemptUtc >= TimeSpan.FromSeconds(8))
+            {
+                _lastPairAttemptUtc = now;
+                await RequestPairingAsync();
+            }
+            return;
+        }
+
+        if (now - _lastControlPollUtc < TimeSpan.FromSeconds(2)) return;
+        _lastControlPollUtc = now;
+
+        try
+        {
+            var endpoint = _config.ServerUrl!.TrimEnd('/') + "/api/trading/device/control";
+            using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
+            req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
+            req.Headers.Add("x-jarvis-observer-version", "0.4.0");
+            using var res = await _http.SendAsync(req);
+
+            if ((int)res.StatusCode == 401)
+            {
+                ShowPairingCode();
+                return;
+            }
+
+            if (!res.IsSuccessStatusCode) return;
+
+            var json = await res.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var link = doc.RootElement.GetProperty("link");
+            var command = link.TryGetProperty("command", out var commandNode) ? commandNode.GetString() : "PAUSE";
+            var nextPaused = !string.Equals(command, "WATCH", StringComparison.OrdinalIgnoreCase);
+            if (_paused != nextPaused)
+            {
+                _paused = nextPaused;
+                Log(new { type = _paused ? "observer.remote_paused" : "observer.remote_watch", at = DateTime.UtcNow });
+            }
+
+            if (!string.IsNullOrWhiteSpace(_config.PairingCode))
+            {
+                _config.PairingCode = null;
+                _config.PairingExpiresAt = null;
+                SaveConfig();
+            }
+
+            _tray.Text = _paused
+                ? "Jarvis Trading Observer — paused"
+                : (_tradingViewDetected ? "Jarvis Trading Observer — ACTIVE" : "Jarvis Trading Observer — WATCHING");
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("control.link.unavailable:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+        }
+    }
+
+    private async Task RequestPairingAsync()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_config.PairingCode) &&
+                DateTime.TryParse(_config.PairingExpiresAt, out var expiry) &&
+                expiry.ToUniversalTime() > DateTime.UtcNow)
+            {
+                ShowPairingCode();
+                return;
+            }
+
+            var endpoint = _config.ServerUrl!.TrimEnd('/') + "/api/trading/pair/start";
+            var body = JsonSerializer.Serialize(new { deviceName = Environment.MachineName + " · Dwight PC" });
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+            using var res = await _http.SendAsync(req);
+            if (!res.IsSuccessStatusCode)
+            {
+                LogRateLimited("pair.start.failed:" + (int)res.StatusCode, TimeSpan.FromSeconds(30));
+                return;
+            }
+
+            var json = await res.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var pair = doc.RootElement.GetProperty("pair");
+            _config.DeviceId = pair.GetProperty("deviceId").GetString();
+            _config.DeviceToken = pair.GetProperty("deviceToken").GetString();
+            _config.PairingCode = pair.GetProperty("code").GetString();
+            _config.PairingExpiresAt = pair.GetProperty("expiresAt").GetString();
+            SaveConfig();
+
+            try
+            {
+                File.WriteAllText(Path.Combine(_root, "pairing-code.txt"),
+                    $"Open Jarvis → Trading and enter this one-time code: {_config.PairingCode}{Environment.NewLine}Expires: {_config.PairingExpiresAt}");
+            }
+            catch { }
+
+            ShowPairingCode(force: true);
+            Log(new { type = "observer.pairing_ready", at = DateTime.UtcNow, code = _config.PairingCode, expiresAt = _config.PairingExpiresAt });
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("pair.start.error:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+        }
+    }
+
+    private void ShowPairingCode(bool force = false)
+    {
+        if (string.IsNullOrWhiteSpace(_config.PairingCode)) return;
+        if (!force && string.Equals(_pairDialogShownForCode, _config.PairingCode, StringComparison.Ordinal)) return;
+        _pairDialogShownForCode = _config.PairingCode;
+
+        _tray.ShowBalloonTip(
+            8000,
+            "PAIR JARVIS OBSERVER",
+            $"Enter {_config.PairingCode} in Jarvis → Trading. After pairing, the red/white button controls this observer.",
+            ToolTipIcon.Info);
+
+        if (force)
+        {
+            MessageBox.Show(
+                $"Enter this one-time code in Jarvis → Trading:{Environment.NewLine}{Environment.NewLine}{_config.PairingCode}{Environment.NewLine}{Environment.NewLine}Once paired, use the red/white button in Jarvis to Watch or Pause.",
+                "Pair Jarvis Trading Observer",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+    private void NormalizeServerUrl()
+    {
+        const string current = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app";
+        if (string.IsNullOrWhiteSpace(_config.ServerUrl) ||
+            _config.ServerUrl.Contains("jarvis-os-git-claude-jarvis-ai", StringComparison.OrdinalIgnoreCase))
+        {
+            _config.ServerUrl = current;
+        }
+    }
+
+    private void SaveConfig()
+    {
+        try { File.WriteAllText(_configPath, JsonSerializer.Serialize(_config, ObserverConfig.JsonOptions)); } catch { }
+    }
+
     private void TogglePause()
     {
         _paused = !_paused;
@@ -262,7 +427,7 @@ internal sealed class ObserverContext : ApplicationContext
     private void EnsureConfigExists()
     {
         if (File.Exists(_configPath)) return;
-        File.WriteAllText(_configPath, JsonSerializer.Serialize(_config, ObserverConfig.JsonOptions));
+        SaveConfig();
     }
 
     private void Log(object value)
@@ -497,40 +662,52 @@ internal sealed class ObserverContext : ApplicationContext
 internal sealed class ObserverConfig
 {
     [JsonPropertyName("serverUrl")]
-    public string? ServerUrl { get; init; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+    public string? ServerUrl { get; set; } = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app";
 
     [JsonPropertyName("tradingSecret")]
-    public string? TradingSecret { get; init; }
+    public string? TradingSecret { get; set; }
+
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; set; }
+
+    [JsonPropertyName("deviceToken")]
+    public string? DeviceToken { get; set; }
+
+    [JsonPropertyName("pairingCode")]
+    public string? PairingCode { get; set; }
+
+    [JsonPropertyName("pairingExpiresAt")]
+    public string? PairingExpiresAt { get; set; }
 
     [JsonPropertyName("minimumCloudIntervalMs")]
-    public int MinimumCloudIntervalMs { get; init; } = 1500;
+    public int MinimumCloudIntervalMs { get; set; } = 1500;
 
     [JsonPropertyName("heartbeatSeconds")]
-    public int HeartbeatSeconds { get; init; } = 10;
+    public int HeartbeatSeconds { get; set; } = 10;
 
     [JsonPropertyName("localSnapshotSeconds")]
-    public int LocalSnapshotSeconds { get; init; } = 5;
+    public int LocalSnapshotSeconds { get; set; } = 5;
 
     [JsonPropertyName("minimumLocalEventIntervalMs")]
-    public int MinimumLocalEventIntervalMs { get; init; } = 1000;
+    public int MinimumLocalEventIntervalMs { get; set; } = 1000;
 
     [JsonPropertyName("visualChangeThreshold")]
-    public double VisualChangeThreshold { get; init; } = 0.003;
+    public double VisualChangeThreshold { get; set; } = 0.003;
 
     [JsonPropertyName("jpegQuality")]
-    public long JpegQuality { get; init; } = 62;
+    public long JpegQuality { get; set; } = 62;
 
     [JsonPropertyName("maxLocalFrames")]
-    public int MaxLocalFrames { get; init; } = 600;
+    public int MaxLocalFrames { get; set; } = 600;
 
     [JsonPropertyName("semanticPollMs")]
-    public int SemanticPollMs { get; init; } = 750;
+    public int SemanticPollMs { get; set; } = 750;
 
     [JsonPropertyName("maxSemanticChars")]
-    public int MaxSemanticChars { get; init; } = 12000;
+    public int MaxSemanticChars { get; set; } = 12000;
 
     [JsonIgnore]
-    public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && !string.IsNullOrWhiteSpace(TradingSecret);
+    public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && (!string.IsNullOrWhiteSpace(DeviceToken) || !string.IsNullOrWhiteSpace(TradingSecret));
 
     public static JsonSerializerOptions JsonOptions { get; } = new() { WriteIndented = true };
 
