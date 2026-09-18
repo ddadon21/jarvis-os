@@ -1,0 +1,36 @@
+name: Build Jarvis Web
+
+on:
+  push:
+    branches:
+      - claude/jarvis-ai-backend-Iw0x3
+    paths:
+      - 'app/**'
+      - 'lib/**'
+      - 'package.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - '.github/workflows/build-jarvis-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
