@@ -7,8 +7,9 @@ const MAX_BASE64_CHARS = 8_000_000;
 
 type FrameRead = {
   brokerPanelVisible: boolean;
-  positionStatus: "FLAT" | "OPEN" | "UNKNOWN";
+  positionStatus: "FLAT" | "PENDING" | "OPEN" | "UNKNOWN";
   symbol: string | null;
+  orderType: "LIMIT" | "STOP" | "MARKET" | null;
   side: "LONG" | "SHORT" | null;
   quantity: number | null;
   entryPrice: number | null;
@@ -92,8 +93,9 @@ ${JSON.stringify({ account: previous.account, openTrades: previous.openTrades })
 Return ONLY valid JSON with exactly this shape:
 {
   "brokerPanelVisible": true,
-  "positionStatus": "FLAT|OPEN|UNKNOWN",
+  "positionStatus": "FLAT|PENDING|OPEN|UNKNOWN",
   "symbol": "MNQ" | null,
+  "orderType": "LIMIT|STOP|MARKET" | null,
   "side": "LONG|SHORT" | null,
   "quantity": 2 | null,
   "entryPrice": 12345.25 | null,
@@ -111,8 +113,7 @@ Return ONLY valid JSON with exactly this shape:
 
 Rules:
 - confidence is 0 to 1.
-- Set positionStatus OPEN only when the broker UI visibly shows a non-zero live position.
-- Set FLAT only when the broker UI visibly indicates no position/zero/flat.
+- Set positionStatus OPEN only when the broker UI visibly shows a non-zero live position.\n- Set PENDING when a working entry order is visibly resting but no live position is shown. A visible label such as Buy/Sell + quantity + Limit/Stop is strong pending-order evidence.\n- Set FLAT only when the broker UI visibly indicates no position and no working entry order.
 - tradeRealizedPnl must be the result of the just-closed trade only if the UI makes that explicit; otherwise null.
 - Stop/target must correspond to the live position or its working exit orders, not random chart labels.
 - Never fabricate strategy reasoning, setup quality, HTF bias, liquidity, confidence level, or rule adherence.`;
@@ -211,8 +212,9 @@ function normalizeFrameRead(value: unknown): FrameRead {
   const v = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   return {
     brokerPanelVisible: v.brokerPanelVisible === true,
-    positionStatus: v.positionStatus === "OPEN" || v.positionStatus === "FLAT" ? v.positionStatus : "UNKNOWN",
+    positionStatus: v.positionStatus === "OPEN" || v.positionStatus === "PENDING" || v.positionStatus === "FLAT" ? v.positionStatus : "UNKNOWN",
     symbol: cleanString(v.symbol, 24),
+    orderType: v.orderType === "LIMIT" || v.orderType === "STOP" || v.orderType === "MARKET" ? v.orderType : null,
     side: v.side === "LONG" || v.side === "SHORT" ? v.side : null,
     quantity: numberOrNull(v.quantity),
     entryPrice: numberOrNull(v.entryPrice),
