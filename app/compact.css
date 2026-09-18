@@ -352,3 +352,51 @@
   .jarvis-presence{min-height:78px}
   .jarvis-presence-orb{width:64px;height:64px;min-width:64px}
 }
+
+
+.observer-record-control:disabled{
+  cursor:not-allowed;
+  opacity:.68;
+  transform:none!important;
+}
+.observer-pair-row{
+  display:grid;
+  grid-template-columns:minmax(180px,1fr) auto;
+  gap:7px;
+  align-items:center;
+  margin-top:-4px;
+}
+.observer-pair-row input{
+  min-width:0;
+  height:34px;
+  border:1px solid rgba(255,255,255,.13);
+  background:rgba(0,0,0,.28);
+  color:#f2f2f2;
+  padding:0 10px;
+  font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.12em;
+  outline:none;
+}
+.observer-pair-row input:focus{border-color:rgba(183,31,38,.52);box-shadow:0 0 0 1px rgba(183,31,38,.12)}
+.observer-pair-row button{
+  height:34px;
+  border:1px solid rgba(183,31,38,.44);
+  background:rgba(183,31,38,.09);
+  color:#f2f2f2;
+  padding:0 12px;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.1em;
+  cursor:pointer;
+}
+.observer-pair-row button:disabled{opacity:.4;cursor:not-allowed}
+.observer-pair-row small{
+  grid-column:1/-1;
+  color:#d86b70;
+  font-size:9px;
+  letter-spacing:.04em;
+}
+@media(max-width:760px){
+  .observer-pair-row{grid-template-columns:1fr}
+  .observer-pair-row small{grid-column:auto}
+}
