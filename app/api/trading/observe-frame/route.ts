@@ -46,6 +46,7 @@ export async function POST(request: Request) {
     visualDifference?: number;
     source?: string;
     observerVersion?: string;
+    semanticText?: string | null;
   };
 
   if (!body || typeof body.imageBase64 !== "string" || body.imageBase64.length === 0 || body.imageBase64.length > MAX_BASE64_CHARS) {
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
 
   const capturedAt = normalizeDate(body.capturedAt) ?? new Date().toISOString();
   const previous = await getTradingState();
-  const frame = await inspectFrame(body.imageBase64, anthropicKey, previous);
+  const frame = await inspectFrame(body.imageBase64, anthropicKey, previous, typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null);
 
   if (!frame.brokerPanelVisible || frame.confidence < 0.55) {
     return Response.json({
@@ -75,20 +76,24 @@ export async function POST(request: Request) {
     state: {
       connection: state.account.connection,
       activeGoal: state.activeGoal,
+      observer: state.observer,
       openTrades: state.openTrades,
       today: state.today,
     },
   });
 }
 
-async function inspectFrame(imageBase64: string, apiKey: string, previous: Awaited<ReturnType<typeof getTradingState>>): Promise<FrameRead> {
+async function inspectFrame(imageBase64: string, apiKey: string, previous: Awaited<ReturnType<typeof getTradingState>>, semanticText: string | null): Promise<FrameRead> {
   const prompt = `You are the visual parser for Jarvis Trading Observer.
 Inspect ONLY what is visibly shown in this TradingView Desktop screenshot, especially the Tradovate broker/order/position panel.
 
 Do not infer hidden values. Do not guess a trade from chart direction alone. If a value is not clearly readable, return null. Account numbers must never be returned. Ignore unrelated windows if any appear.
 
 Previous Jarvis trading state, provided only to help distinguish an existing position from a new one:
-${JSON.stringify({ account: previous.account, openTrades: previous.openTrades })}
+${JSON.stringify({ account: previous.account, observer: previous.observer, openTrades: previous.openTrades })}
+
+Windows accessibility text from the SAME TradingView window may be included below. Treat it as supporting evidence only and prefer exact values when it clearly labels broker/order/position state. Never treat unrelated watchlist quotes as a position.
+${semanticText ?? "(no accessibility text available)"}
 
 Return ONLY valid JSON with exactly this shape:
 {
@@ -113,7 +118,9 @@ Return ONLY valid JSON with exactly this shape:
 
 Rules:
 - confidence is 0 to 1.
-- Set positionStatus OPEN only when the broker UI visibly shows a non-zero live position.\n- Set PENDING when a working entry order is visibly resting but no live position is shown. A visible label such as Buy/Sell + quantity + Limit/Stop is strong pending-order evidence.\n- Set FLAT only when the broker UI visibly indicates no position and no working entry order.
+- Set positionStatus OPEN only when the broker UI visibly shows a non-zero live position.
+- Set PENDING when a working entry order is visibly resting but no live position is shown. A visible label such as Buy/Sell + quantity + Limit/Stop is strong pending-order evidence.
+- Set FLAT only when the broker UI visibly indicates no position and no working entry order.
 - tradeRealizedPnl must be the result of the just-closed trade only if the UI makes that explicit; otherwise null.
 - Stop/target must correspond to the live position or its working exit orders, not random chart labels.
 - Never fabricate strategy reasoning, setup quality, HTF bias, liquidity, confidence level, or rule adherence.`;
@@ -188,6 +195,22 @@ function mapFrameToObservation(frame: FrameRead, observedAt: string, previousOpe
   }
 
   return {
+    connection: "OBSERVING",
+    observer: {
+      status: frame.positionStatus,
+      symbol: frame.symbol,
+      side: frame.side,
+      quantity: frame.quantity,
+      orderType: frame.orderType,
+      entryPrice: frame.entryPrice,
+      currentPrice: frame.currentPrice,
+      stopPrice: frame.stopPrice,
+      targetPrice: frame.targetPrice,
+      openPnl: frame.openPnl,
+      confidence: frame.confidence,
+      observedAt,
+      evidence: frame.evidence,
+    },
     provider: "Tradovate via TradingView Desktop",
     propFirm: "Lucid Trading",
     accountLabel: "CURRENT PROP ACCOUNT",
