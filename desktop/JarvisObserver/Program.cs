@@ -7,7 +7,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using System.Windows.Automation;
+using FlaUI.Core.AutomationElements;
+using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
@@ -26,6 +27,7 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly System.Threading.Timer _timer;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(25) };
+    private readonly UIA3Automation _automation = new();
     private readonly string _root;
     private readonly string _configPath;
     private ObserverConfig _config;
@@ -75,6 +77,7 @@ internal sealed class ObserverContext : ApplicationContext
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
+        _automation.Dispose();
         base.ExitThreadCore();
     }
 
@@ -300,58 +303,38 @@ internal sealed class ObserverContext : ApplicationContext
         return IntPtr.Zero;
     }
 
-    private static string CaptureAccessibleText(IntPtr hwnd, int maxChars)
+    private string CaptureAccessibleText(IntPtr hwnd, int maxChars)
     {
         try
         {
-            var root = AutomationElement.FromHandle(hwnd);
-            if (root is null) return string.Empty;
-
+            AutomationElement root = _automation.FromHandle(hwnd);
             var lines = new List<string>();
-            var queue = new Queue<(AutomationElement Element, int Depth)>();
-            queue.Enqueue((root, 0));
-            var walker = TreeWalker.ControlViewWalker;
-            var visited = 0;
+            var elements = root.FindAllDescendants();
 
-            while (queue.Count > 0 && visited < 1200)
+            foreach (var element in elements.Take(1200))
             {
-                var (element, depth) = queue.Dequeue();
-                visited++;
-
                 try
                 {
-                    var current = element.Current;
-                    var name = current.Name?.Trim() ?? string.Empty;
-                    var automationId = current.AutomationId?.Trim() ?? string.Empty;
-                    var control = current.ControlType?.ProgrammaticName?.Replace("ControlType.", "", StringComparison.Ordinal) ?? "Unknown";
-                    var value = string.Empty;
+                    if (element.Properties.IsPassword.ValueOrDefault) continue;
 
-                    if (!current.IsPassword && element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern valuePattern)
+                    var control = element.Properties.LocalizedControlType.ValueOrDefault?.Trim()
+                        ?? element.ControlType.ToString();
+                    var name = element.Properties.Name.ValueOrDefault?.Trim() ?? string.Empty;
+                    var automationId = element.Properties.AutomationId.ValueOrDefault?.Trim() ?? string.Empty;
+                    var help = element.Properties.HelpText.ValueOrDefault?.Trim() ?? string.Empty;
+                    var itemStatus = element.Properties.ItemStatus.ValueOrDefault?.Trim() ?? string.Empty;
+
+                    var payload = string.Join(" | ", new[] { control, name, automationId, help, itemStatus }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+                    if (!string.IsNullOrWhiteSpace(payload))
                     {
-                        value = valuePattern.Current.Value?.Trim() ?? string.Empty;
-                    }
-
-                    var payload = string.Join(" | ", new[] { control, name, value, automationId }.Where(x => !string.IsNullOrWhiteSpace(x)));
-                    if (!string.IsNullOrWhiteSpace(payload)) lines.Add(payload);
-                }
-                catch
-                {
-                    // UI Automation nodes can disappear while TradingView updates.
-                }
-
-                if (depth >= 8) continue;
-                try
-                {
-                    var child = walker.GetFirstChild(element);
-                    while (child is not null)
-                    {
-                        queue.Enqueue((child, depth + 1));
-                        child = walker.GetNextSibling(child);
+                        lines.Add(payload);
                     }
                 }
                 catch
                 {
-                    // Chromium accessibility tree may mutate during traversal.
+                    // TradingView's accessibility tree can mutate during a live update.
                 }
 
                 if (lines.Sum(x => x.Length + 1) >= maxChars) break;
