@@ -282,4 +282,4 @@ function safeNullable(value: number | null) { return typeof value === "number" &
 function clean(value: string, max: number) { return String(value ?? "").trim().slice(0, max) || "UNKNOWN"; }
 function nullableClean(value: string | null, max: number) { const v = typeof value === "string" ? value.trim().slice(0, max) : ""; return v || null; }
 function normalizeDate(value: string | null | undefined) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null; }
-function isObservedProvider(value: string | null | undefined) { const v = String(value ?? "").trim().toUpperCase(); return Boolean(v) && v !== "NOT CONNECTED" && v !== "UNKNOWN"; }\nfunction signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
