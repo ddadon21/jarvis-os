@@ -32,6 +32,7 @@ internal sealed class ObserverContext : ApplicationContext
     private bool _tradingViewDetected;
     private DateTime _lastSentUtc = DateTime.MinValue;
     private DateTime _lastSavedUtc = DateTime.MinValue;
+    private DateTime _lastEventSavedUtc = DateTime.MinValue;
     private byte[]? _lastSignature;
     private string? _sessionDir;
     private int _frameNumber;
@@ -59,8 +60,8 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.1.0", mode = _config.CloudEnabled ? "CLOUD" : "LOCAL_ONLY" });
-        _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(1500));
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.2.0", mode = _config.CloudEnabled ? "CLOUD" : "LOCAL_ONLY" });
+        _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
     protected override void ExitThreadCore()
@@ -115,10 +116,13 @@ internal sealed class ObserverContext : ApplicationContext
             if (!meaningfulVisualChange && !heartbeatDue) return;
 
             var jpg = EncodeJpeg(frame, _config.JpegQuality);
-            if (now - _lastSavedUtc >= TimeSpan.FromSeconds(_config.LocalSnapshotSeconds))
+            var eventSaveDue = meaningfulVisualChange && now - _lastEventSavedUtc >= TimeSpan.FromMilliseconds(_config.MinimumLocalEventIntervalMs);
+            var snapshotDue = now - _lastSavedUtc >= TimeSpan.FromSeconds(_config.LocalSnapshotSeconds);
+            if (eventSaveDue || snapshotDue)
             {
                 SaveFrame(jpg, now, difference);
                 _lastSavedUtc = now;
+                if (eventSaveDue) _lastEventSavedUtc = now;
             }
 
             if (_config.CloudEnabled && now - _lastSentUtc >= TimeSpan.FromMilliseconds(_config.MinimumCloudIntervalMs))
@@ -146,6 +150,7 @@ internal sealed class ObserverContext : ApplicationContext
         _lastSignature = null;
         _lastSentUtc = DateTime.MinValue;
         _lastSavedUtc = DateTime.MinValue;
+        _lastEventSavedUtc = DateTime.MinValue;
     }
 
     private void SaveFrame(byte[] jpg, DateTime at, double difference)
@@ -173,7 +178,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.1.0",
+            observerVersion = "0.2.0",
         });
 
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
@@ -189,6 +194,11 @@ internal sealed class ObserverContext : ApplicationContext
             accepted = res.IsSuccessStatusCode,
             response = responseText.Length > 500 ? responseText[..500] : responseText,
         });
+
+        if (res.IsSuccessStatusCode)
+        {
+            try { File.WriteAllText(Path.Combine(_root, "live-state.json"), responseText); } catch { }
+        }
 
         if (!res.IsSuccessStatusCode && (int)res.StatusCode is 401 or 503)
         {
@@ -394,22 +404,25 @@ internal sealed class ObserverConfig
     public string? TradingSecret { get; init; }
 
     [JsonPropertyName("minimumCloudIntervalMs")]
-    public int MinimumCloudIntervalMs { get; init; } = 5000;
+    public int MinimumCloudIntervalMs { get; init; } = 1500;
 
     [JsonPropertyName("heartbeatSeconds")]
-    public int HeartbeatSeconds { get; init; } = 20;
+    public int HeartbeatSeconds { get; init; } = 10;
 
     [JsonPropertyName("localSnapshotSeconds")]
-    public int LocalSnapshotSeconds { get; init; } = 10;
+    public int LocalSnapshotSeconds { get; init; } = 5;
+
+    [JsonPropertyName("minimumLocalEventIntervalMs")]
+    public int MinimumLocalEventIntervalMs { get; init; } = 1000;
 
     [JsonPropertyName("visualChangeThreshold")]
-    public double VisualChangeThreshold { get; init; } = 0.018;
+    public double VisualChangeThreshold { get; init; } = 0.003;
 
     [JsonPropertyName("jpegQuality")]
     public long JpegQuality { get; init; } = 62;
 
     [JsonPropertyName("maxLocalFrames")]
-    public int MaxLocalFrames { get; init; } = 300;
+    public int MaxLocalFrames { get; init; } = 600;
 
     [JsonIgnore]
     public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && !string.IsNullOrWhiteSpace(TradingSecret);
