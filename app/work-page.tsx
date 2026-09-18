@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Crosshair,
+  Eye,
   Gauge,
   LifeBuoy,
   Mic,
