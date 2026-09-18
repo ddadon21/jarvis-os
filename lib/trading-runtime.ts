@@ -268,6 +268,49 @@ function normalizeTrade(input: Partial<JournalTrade> & { symbol: string; side: "
   };
 }
 
+function normalizeObserver(
+  input: Partial<TradingObserverState> | undefined,
+  previous: TradingObserverState | undefined,
+  observedAt: string | null,
+): TradingObserverState {
+  const status: TradingObserverStatus =
+    input?.status === "FLAT" || input?.status === "PENDING" || input?.status === "OPEN" || input?.status === "UNKNOWN"
+      ? input.status
+      : previous?.status ?? "UNKNOWN";
+
+  const side =
+    input?.side === "LONG" || input?.side === "SHORT"
+      ? input.side
+      : input?.side === null
+        ? null
+        : previous?.side ?? null;
+
+  const orderType =
+    input?.orderType === "LIMIT" || input?.orderType === "STOP" || input?.orderType === "MARKET"
+      ? input.orderType
+      : input?.orderType === null
+        ? null
+        : previous?.orderType ?? null;
+
+  return {
+    status,
+    symbol: input?.symbol === null ? null : nullableClean(input?.symbol ?? previous?.symbol ?? null, 40),
+    side,
+    quantity: input?.quantity === null ? null : safeNullable(input?.quantity ?? previous?.quantity ?? null),
+    orderType,
+    entryPrice: input?.entryPrice === null ? null : safeNullable(input?.entryPrice ?? previous?.entryPrice ?? null),
+    currentPrice: input?.currentPrice === null ? null : safeNullable(input?.currentPrice ?? previous?.currentPrice ?? null),
+    stopPrice: input?.stopPrice === null ? null : safeNullable(input?.stopPrice ?? previous?.stopPrice ?? null),
+    targetPrice: input?.targetPrice === null ? null : safeNullable(input?.targetPrice ?? previous?.targetPrice ?? null),
+    openPnl: input?.openPnl === null ? null : safeNullable(input?.openPnl ?? previous?.openPnl ?? null),
+    confidence: Math.max(0, Math.min(1, safeNumber(input?.confidence ?? previous?.confidence ?? 0))),
+    observedAt: normalizeDate(input?.observedAt ?? observedAt ?? previous?.observedAt ?? null),
+    evidence: Array.isArray(input?.evidence)
+      ? input.evidence.filter((x): x is string => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 160))
+      : previous?.evidence ?? [],
+  };
+}
+
 function stageDirective(account: TradingAccountState) {
   if (account.stage === "PASS CURRENT ACCOUNT") return "Protect the account first. Jarvis should learn the setups you actually take, enforce prop rules, and optimize for passing without forcing trades.";
   if (account.stage === "FIRST PAYOUT") return "Preserve the funded account and build payout eligibility without violating consistency or drawdown rules.";
