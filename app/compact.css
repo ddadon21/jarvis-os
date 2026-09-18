@@ -280,3 +280,75 @@
   .observer-control-stack{flex-direction:column}
   .observer-record-control,.trading-live-badge{min-width:0;width:100%}
 }
+
+
+/* Right-rail Jarvis presence: keep the core visible while domain cockpits occupy center stage. */
+.jarvis-presence-panel{
+  flex:0 0 auto!important;
+  min-height:0!important;
+  border:0!important;
+  border-top:1px solid rgba(183,31,38,.28)!important;
+  border-bottom:1px solid rgba(255,255,255,.07)!important;
+  background:linear-gradient(180deg,rgba(12,13,15,.42),rgba(4,6,8,.18))!important;
+}
+.jarvis-presence-panel .panel-body{padding:9px 10px 10px!important}
+.jarvis-presence{
+  display:flex;
+  align-items:center;
+  gap:11px;
+  min-height:92px;
+}
+.jarvis-presence-orb{
+  width:78px;
+  height:78px;
+  min-width:78px;
+  border-radius:50%;
+  position:relative;
+  display:grid;
+  place-items:center;
+  background:radial-gradient(circle,rgba(183,31,38,.13),rgba(0,0,0,.48) 68%);
+  box-shadow:0 0 28px rgba(183,31,38,.14),inset 0 0 26px rgba(183,31,38,.07);
+}
+.jarvis-presence-ring{
+  position:absolute;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,.22);
+}
+.jarvis-presence-ring.outer{
+  inset:4px;
+  border-top-color:#b71f26;
+  border-right-color:rgba(183,31,38,.16);
+  animation:spin 9s linear infinite;
+}
+.jarvis-presence-ring.inner{
+  inset:16px;
+  border-style:dashed;
+  border-color:rgba(183,31,38,.42);
+  animation:spin 13s linear infinite reverse;
+}
+.jarvis-presence-core{
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.45);
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.08em;
+  color:#f2f2f2;
+  box-shadow:0 0 18px rgba(183,31,38,.16);
+}
+.jarvis-presence-copy{display:grid;gap:2px;min-width:0}
+.jarvis-presence-copy strong{font-size:.76rem;letter-spacing:.11em}
+.jarvis-presence-copy span{font-size:.55rem;letter-spacing:.10em;color:#c34a50}
+.jarvis-presence-copy small{font-size:.52rem;line-height:1.3;opacity:.55;overflow:hidden;text-overflow:ellipsis}
+.right-column>.jarvis-presence-panel + .chat-panel{margin-top:0!important}
+.right-column>.chat-panel{max-height:320px!important}
+.right-column>.chat-panel .chat-log{height:160px!important}
+.right-column>.chat-panel + .panel{flex:0 0 auto!important}
+.footerbar{display:none!important}
+@media(max-width:980px){
+  .jarvis-presence{min-height:78px}
+  .jarvis-presence-orb{width:64px;height:64px;min-width:64px}
+}
