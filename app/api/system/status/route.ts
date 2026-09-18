@@ -2,20 +2,23 @@ import { getOrSeedFinanceState } from "../../../../lib/finance-live";
 import { getOrSeedWorkforceState } from "../../../../lib/jarvis-workforce";
 import { plaidFinanceConfigured } from "../../../../lib/plaid-finance";
 import { getLatestPulse, getRecentEvents } from "../../../../lib/jarvis-runtime";
+import { getTradingState } from "../../../../lib/trading-runtime";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const [pulse, events, workforce, finance] = await Promise.all([
+  const [pulse, events, workforce, finance, trading] = await Promise.all([
     getLatestPulse(),
     getRecentEvents(),
     getOrSeedWorkforceState(),
     getOrSeedFinanceState(),
+    getTradingState(),
   ]);
 
   const researchState = pulse?.status === "ERROR" ? "DEGRADED" : pulse ? "ACTIVE" : "STARTING";
   const financeState = finance.mode === "DIRECT" ? "ACTIVE" : "SYNCED_SNAPSHOT";
-  const degraded = workforce.status === "DEGRADED" || pulse?.status === "ERROR";
+  const tradingState = trading.account.connection === "OBSERVING" ? "ACTIVE" : trading.account.connection === "DEGRADED" ? "DEGRADED" : "PENDING";
+  const degraded = workforce.status === "DEGRADED" || pulse?.status === "ERROR" || trading.account.connection === "DEGRADED";
 
   return Response.json({
     online: true,
@@ -41,8 +44,15 @@ export async function GET() {
       goals: finance.goals,
     },
     events: events.slice(0, 16),
+    trading: {
+      connection: trading.account.connection,
+      lastObservedAt: trading.account.lastObservedAt,
+      observer: trading.observer ?? null,
+      today: trading.today,
+      stage: trading.account.stage,
+    },
     integrations: {
-      trading: "PENDING",
+      trading: tradingState,
       finance: financeState,
       sentryopsResearch: researchState,
       life: "ACTIVE",
