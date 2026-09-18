@@ -41,6 +41,7 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastControlPollUtc = DateTime.MinValue;
     private DateTime _lastPairAttemptUtc = DateTime.MinValue;
     private string? _pairDialogShownForCode;
+    private bool _deploymentAccessPrimed;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
     private byte[]? _lastSignature;
@@ -269,6 +270,7 @@ internal sealed class ObserverContext : ApplicationContext
     private async Task EnsurePairingAndControlAsync()
     {
         if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out _)) return;
+        await EnsureDeploymentAccessAsync();
 
         var now = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken))
@@ -326,6 +328,27 @@ internal sealed class ObserverContext : ApplicationContext
         catch (Exception ex)
         {
             LogRateLimited("control.link.unavailable:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+        }
+    }
+
+    private async Task EnsureDeploymentAccessAsync()
+    {
+        if (_deploymentAccessPrimed) return;
+        if (string.IsNullOrWhiteSpace(_config.AccessBootstrapUrl))
+        {
+            _deploymentAccessPrimed = true;
+            return;
+        }
+
+        try
+        {
+            using var res = await _http.GetAsync(_config.AccessBootstrapUrl);
+            _deploymentAccessPrimed = res.IsSuccessStatusCode || (int)res.StatusCode is >= 300 and < 400;
+            Log(new { type = "deployment.access", at = DateTime.UtcNow, status = (int)res.StatusCode, primed = _deploymentAccessPrimed });
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("deployment.access.error:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
         }
     }
 
@@ -404,11 +427,13 @@ internal sealed class ObserverContext : ApplicationContext
     private void NormalizeServerUrl()
     {
         const string current = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app";
+        const string access = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app/?_vercel_share=l9tTw3CrGse29v9lgKd3kihqnqGAseAA";
         if (string.IsNullOrWhiteSpace(_config.ServerUrl) ||
             _config.ServerUrl.Contains("jarvis-os-git-claude-jarvis-ai", StringComparison.OrdinalIgnoreCase))
         {
             _config.ServerUrl = current;
         }
+        if (string.IsNullOrWhiteSpace(_config.AccessBootstrapUrl)) _config.AccessBootstrapUrl = access;
     }
 
     private void SaveConfig()
@@ -663,6 +688,9 @@ internal sealed class ObserverConfig
 {
     [JsonPropertyName("serverUrl")]
     public string? ServerUrl { get; set; } = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app";
+
+    [JsonPropertyName("accessBootstrapUrl")]
+    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-8qvyfl0w7-dwights-projects-8a9a094f.vercel.app/?_vercel_share=l9tTw3CrGse29v9lgKd3kihqnqGAseAA";
 
     [JsonPropertyName("tradingSecret")]
     public string? TradingSecret { get; set; }
