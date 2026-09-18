@@ -1,4 +1,5 @@
 import { getTradingState, ingestTradingObservation, type JournalTrade, type TradingObservationInput } from "../../../../lib/trading-runtime";
+import { authenticateObserverDevice, markObserverFrame } from "../../../../lib/trading-device-link";
 
 export const runtime = "nodejs";
 
@@ -26,13 +27,15 @@ type FrameRead = {
 };
 
 export async function POST(request: Request) {
-  const secret = process.env.JARVIS_TRADING_SECRET;
-  if (!secret) {
-    return Response.json({ ok: false, error: "Trading observer cloud link is locked until JARVIS_TRADING_SECRET is configured." }, { status: 503 });
-  }
+  const auth = request.headers.get("authorization");
+  const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+  const deviceId = request.headers.get("x-jarvis-device-id");
+  const legacySecret = process.env.JARVIS_TRADING_SECRET;
+  const legacyAuthorized = Boolean(legacySecret && bearer === legacySecret);
+  const deviceAuthorized = deviceId && bearer ? await authenticateObserverDevice(deviceId, bearer) : null;
 
-  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
-    return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!legacyAuthorized && !deviceAuthorized) {
+    return Response.json({ ok: false, error: "Observer device is not securely paired." }, { status: 401 });
   }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -68,6 +71,9 @@ export async function POST(request: Request) {
 
   const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
   const state = await ingestTradingObservation(observation);
+  if (deviceId && bearer && deviceAuthorized) {
+    await markObserverFrame(deviceId, bearer, body.observerVersion ?? null);
+  }
 
   return Response.json({
     ok: true,
