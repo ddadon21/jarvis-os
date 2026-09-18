@@ -21,6 +21,6 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Too many trade events in one request." }, { status: 400 });
   }
 
-  const state = await ingestTradingObservation(body);
+  const state = await ingestTradingObservation({ ...body, connection: "OBSERVING" });
   return Response.json({ ok: true, state });
 }
