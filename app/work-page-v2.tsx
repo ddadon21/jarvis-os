@@ -229,8 +229,19 @@ export default function WorkV2() {
         </section>
 
         <aside className="right-column">
-          <Panel title="DOMAIN" corner={currentSector.signal}>
-            <div className="sector-feature"><SectorIcon /><div><span>{currentSector.title}</span><strong>{currentSector.signal}</strong><small>{domain === "FINANCE" ? "CFO watches money, debt, credit, capital and lifestyle readiness." : domain === "TRADING" ? "Pass → funded → payout → consistency → scale." : domain === "SENTRYOPS" ? "Prototype → pilot → first customer → repeatable sales." : "Daily alignment with the larger plan."}</small></div></div>
+          <Panel title="JARVIS" corner={systemMode} className="jarvis-presence-panel">
+            <div className="jarvis-presence">
+              <div className="jarvis-presence-orb" aria-label="Jarvis core presence">
+                <span className="jarvis-presence-ring outer" />
+                <span className="jarvis-presence-ring inner" />
+                <span className="jarvis-presence-core">J</span>
+              </div>
+              <div className="jarvis-presence-copy">
+                <strong>{busy ? "THINKING" : "ONLINE"}</strong>
+                <span>{domain} MODE</span>
+                <small>{activeProvider} · {activeModel}</small>
+              </div>
+            </div>
           </Panel>
 
           <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
@@ -242,11 +253,11 @@ export default function WorkV2() {
             </div>
           </Panel>
 
-          <Panel title="NEXT MOVE" corner="HIDDEN"><div /></Panel>
+          <Panel title="DOMAIN" corner={currentSector.signal}>
+            <div className="sector-feature"><SectorIcon /><div><span>{currentSector.title}</span><strong>{currentSector.signal}</strong><small>{domain === "FINANCE" ? "CFO watches money, debt, credit, capital and lifestyle readiness." : domain === "TRADING" ? "Pass → funded → payout → consistency → scale." : domain === "SENTRYOPS" ? "Prototype → pilot → first customer → repeatable sales." : "Daily alignment with the larger plan."}</small></div></div>
+          </Panel>
         </aside>
       </section>
-
-      <footer className="footerbar"><span><Bot size={13} /> JARVIS CORE v0.6</span><span><Radar size={13} /> OBSERVE → PLAN → ACT → MEASURE → ADAPT</span><span><LifeBuoy size={13} /> {systemStatus?.workforce?.status ?? "ALWAYS-ON"}</span></footer>
     </main>
   );
 }
