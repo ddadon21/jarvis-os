@@ -64,6 +64,7 @@ internal sealed class ObserverContext : ApplicationContext
         _configPath = Path.Combine(_root, "config.json");
         _config = ObserverConfig.Load(_configPath);
         NormalizeServerUrl();
+        NormalizePerformanceConfig();
         SaveConfig();
 
         var menu = new ContextMenuStrip();
@@ -697,6 +698,14 @@ internal sealed class ObserverContext : ApplicationContext
         const string current = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
         _config.ServerUrl = current;
         _config.AccessBootstrapUrl = null;
+    }
+
+    private void NormalizePerformanceConfig()
+    {
+        // Upgrade older local configs to the responsive v0.4.5 observation cadence.
+        _config.MinimumCloudIntervalMs = Math.Min(_config.MinimumCloudIntervalMs, 700);
+        _config.HeartbeatSeconds = Math.Min(_config.HeartbeatSeconds, 3);
+        _config.SemanticPollMs = Math.Min(_config.SemanticPollMs, 500);
     }
 
     private void SaveConfig()
