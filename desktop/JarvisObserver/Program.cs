@@ -60,6 +60,7 @@ internal sealed class ObserverContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open observer folder", null, (_, _) => OpenFolder(_root));
         menu.Items.Add("Show / New pairing code", null, async (_, _) => await ShowOrCreatePairingCodeAsync());
+        menu.Items.Add("Set / replace Vercel access key", null, (_, _) => PromptAndStoreVercelBypassSecret(showSuccess: true));
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
@@ -74,7 +75,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.3", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.4", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -232,17 +233,18 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.3",
+            observerVersion = "0.4.4",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        ApplyVercelBypassHeaders(req);
         var bearer = !string.IsNullOrWhiteSpace(_config.DeviceToken) ? _config.DeviceToken : _config.TradingSecret;
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.3");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.4");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -270,7 +272,7 @@ internal sealed class ObserverContext : ApplicationContext
     private async Task EnsurePairingAndControlAsync()
     {
         if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out _)) return;
-        await EnsureDeploymentAccessAsync();
+        if (string.IsNullOrWhiteSpace(_config.VercelBypassSecret)) return;
 
         var now = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken))
@@ -290,9 +292,10 @@ internal sealed class ObserverContext : ApplicationContext
         {
             var endpoint = _config.ServerUrl!.TrimEnd('/') + "/api/trading/device/control";
             using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.3");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.4");
             using var res = await _http.SendAsync(req);
 
             if ((int)res.StatusCode == 401)
@@ -377,6 +380,7 @@ internal sealed class ObserverContext : ApplicationContext
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
             };
+            ApplyVercelBypassHeaders(req);
             using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode)
             {
@@ -434,6 +438,11 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task ShowOrCreatePairingCodeAsync()
     {
+        if (string.IsNullOrWhiteSpace(_config.VercelBypassSecret) && !PromptAndStoreVercelBypassSecret(showSuccess: false))
+        {
+            return;
+        }
+
         var hasValidCode =
             !string.IsNullOrWhiteSpace(_config.PairingCode) &&
             DateTime.TryParse(_config.PairingExpiresAt, out var expiry) &&
@@ -446,21 +455,97 @@ internal sealed class ObserverContext : ApplicationContext
         }
 
         ClearPairingState();
-        _deploymentAccessPrimed = false;
-        await EnsureDeploymentAccessAsync();
-        if (!_deploymentAccessPrimed)
-        {
-            Log(new { type = "pair.bootstrap.failed", at = DateTime.UtcNow });
-            MessageBox.Show(
-                "Jarvis Observer could not establish secure access to the Jarvis server.\n\nNo pairing request was sent. Open the Observer folder and check observer.jsonl.",
-                "Jarvis Observer connection failed",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-            return;
-        }
-
         _lastPairAttemptUtc = DateTime.UtcNow;
         await RequestPairingAsync(forceNew: true);
+    }
+
+    private void ApplyVercelBypassHeaders(HttpRequestMessage req)
+    {
+        if (string.IsNullOrWhiteSpace(_config.VercelBypassSecret)) return;
+        req.Headers.Remove("x-vercel-protection-bypass");
+        req.Headers.TryAddWithoutValidation("x-vercel-protection-bypass", _config.VercelBypassSecret.Trim());
+        req.Headers.Remove("x-vercel-set-bypass-cookie");
+        req.Headers.TryAddWithoutValidation("x-vercel-set-bypass-cookie", "true");
+    }
+
+    private bool PromptAndStoreVercelBypassSecret(bool showSuccess)
+    {
+        var value = PromptSecret(
+            "Paste the Vercel Protection Bypass for Automation secret for jarvis-os.\n\nThis stays on this PC and is sent only to Vercel as the protection-bypass header.",
+            "Jarvis Observer — Vercel access key");
+
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        _config.VercelBypassSecret = value.Trim();
+        _config.AccessBootstrapUrl = null;
+        _deploymentAccessPrimed = true;
+        SaveConfig();
+        Log(new { type = "vercel.bypass.saved", at = DateTime.UtcNow });
+
+        if (showSuccess)
+        {
+            MessageBox.Show(
+                "Vercel access key saved locally. Use Show / New pairing code to pair Observer with Jarvis.",
+                "Jarvis Observer",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        return true;
+    }
+
+    private static string? PromptSecret(string prompt, string title)
+    {
+        using var form = new Form
+        {
+            Width = 560,
+            Height = 230,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            Text = title,
+            StartPosition = FormStartPosition.CenterScreen,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            TopMost = true,
+        };
+
+        var label = new Label
+        {
+            Left = 18,
+            Top = 18,
+            Width = 505,
+            Height = 70,
+            Text = prompt,
+        };
+        var box = new TextBox
+        {
+            Left = 18,
+            Top = 95,
+            Width = 505,
+            UseSystemPasswordChar = true,
+        };
+        var ok = new Button
+        {
+            Text = "Save",
+            Left = 338,
+            Width = 88,
+            Top = 135,
+            DialogResult = DialogResult.OK,
+        };
+        var cancel = new Button
+        {
+            Text = "Cancel",
+            Left = 435,
+            Width = 88,
+            Top = 135,
+            DialogResult = DialogResult.Cancel,
+        };
+
+        form.Controls.Add(label);
+        form.Controls.Add(box);
+        form.Controls.Add(ok);
+        form.Controls.Add(cancel);
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+
+        return form.ShowDialog() == DialogResult.OK ? box.Text : null;
     }
 
     private void ClearPairingState()
@@ -506,9 +591,8 @@ internal sealed class ObserverContext : ApplicationContext
     private void NormalizeServerUrl()
     {
         const string current = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
-        const string access = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/?_vercel_share=q9WCnf9dLRjQoNMCfucDrXIx4Cab8AdG";
         _config.ServerUrl = current;
-        _config.AccessBootstrapUrl = access;
+        _config.AccessBootstrapUrl = null;
     }
 
     private void SaveConfig()
@@ -769,6 +853,9 @@ internal sealed class ObserverConfig
 
     [JsonPropertyName("tradingSecret")]
     public string? TradingSecret { get; set; }
+
+    [JsonPropertyName("vercelBypassSecret")]
+    public string? VercelBypassSecret { get; set; }
 
     [JsonPropertyName("deviceId")]
     public string? DeviceId { get; set; }
