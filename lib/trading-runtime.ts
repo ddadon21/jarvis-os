@@ -368,7 +368,7 @@ function normalizeObserver(
 
   return {
     status,
-    symbol: input?.symbol === null ? null : nullableClean(input?.symbol ?? previous?.symbol ?? null, 40),
+    symbol: normalizeObserverSymbol(input?.symbol === null ? null : nullableClean(input?.symbol ?? previous?.symbol ?? null, 40)),
     side,
     quantity: input?.quantity === null ? null : safeNullable(input?.quantity ?? previous?.quantity ?? null),
     orderType,
@@ -473,6 +473,14 @@ function summarizeObserverState(observer: TradingObserverState) {
   }
   if (observer.status === "FLAT") return `${symbol} flat · no live position detected.`;
   return `${symbol} observer state unknown · waiting for clearer evidence.`;
+}
+
+function normalizeObserverSymbol(value: string | null) {
+  if (!value) return null;
+  const symbol = value.trim().toUpperCase();
+  const reserved = new Set(["CLASS", "BUTTON", "GROUP", "TEXT", "ORDER", "ORDERS", "POSITION", "POSITIONS", "BUY", "SELL", "UNKNOWN"]);
+  if (!symbol || reserved.has(symbol)) return null;
+  return symbol.slice(0, 40);
 }
 
 function changedNumber(before: number | null, after: number | null) {
