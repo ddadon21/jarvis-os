@@ -400,3 +400,34 @@
   .observer-pair-row{grid-template-columns:1fr}
   .observer-pair-row small{grid-column:auto}
 }
+
+
+/* Trading payout analytics */
+.trading-payouts{grid-column:2}
+.payout-range-tabs{display:flex;gap:4px}
+.payout-range-tabs button{
+  border:1px solid rgba(255,255,255,.09);
+  background:rgba(255,255,255,.018);
+  color:#aeb5b9;
+  padding:4px 6px;
+  font-size:8px;
+  font-weight:700;
+  letter-spacing:.08em;
+  cursor:pointer;
+}
+.payout-range-tabs button.active{
+  border-color:rgba(183,31,38,.48);
+  background:rgba(183,31,38,.10);
+  color:#fff;
+}
+.payout-total{
+  display:grid;
+  gap:3px;
+  padding:2px 0 11px;
+  margin-bottom:10px;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.payout-total span{font-size:8px;letter-spacing:.12em;opacity:.52}
+.payout-total strong{font-size:1.35rem;letter-spacing:.02em}
+.payout-total small{font-size:9px;opacity:.55}
+@media(max-width:1180px){.trading-payouts{grid-column:auto}}
