@@ -430,6 +430,15 @@ internal sealed class ObserverContext : ApplicationContext
                 _config.PairingCode = null;
                 _config.PairingExpiresAt = null;
                 SaveConfig();
+                try
+                {
+                    var pairingFile = Path.Combine(_root, "pairing-code.txt");
+                    if (File.Exists(pairingFile)) File.Delete(pairingFile);
+                }
+                catch
+                {
+                    // A stale local helper file must never affect a healthy link.
+                }
             }
 
             _tray.Text = _paused
@@ -524,7 +533,7 @@ internal sealed class ObserverContext : ApplicationContext
             catch { }
 
             ShowPairingCode(force: true);
-            Log(new { type = "observer.pairing_ready", at = DateTime.UtcNow, code = _config.PairingCode, expiresAt = _config.PairingExpiresAt });
+            Log(new { type = "observer.pairing_ready", at = DateTime.UtcNow, expiresAt = _config.PairingExpiresAt });
         }
         catch (Exception ex)
         {
