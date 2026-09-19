@@ -89,7 +89,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.7", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.8", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
@@ -320,7 +320,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.7",
+            observerVersion = "0.4.8",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -331,7 +331,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.7");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.8");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -390,7 +390,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.7");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.8");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -837,10 +837,11 @@ internal sealed class ObserverContext : ApplicationContext
         try
         {
             AutomationElement root = _automation.FromHandle(hwnd);
+            var priorityLines = new List<string>();
             var lines = new List<string>();
             var elements = root.FindAllDescendants();
 
-            foreach (var element in elements.Take(1200))
+            foreach (var element in elements.Take(2400))
             {
                 try
                 {
@@ -852,11 +853,70 @@ internal sealed class ObserverContext : ApplicationContext
                     var automationId = element.Properties.AutomationId.ValueOrDefault?.Trim() ?? string.Empty;
                     var help = element.Properties.HelpText.ValueOrDefault?.Trim() ?? string.Empty;
                     var itemStatus = element.Properties.ItemStatus.ValueOrDefault?.Trim() ?? string.Empty;
+                    var className = element.Properties.ClassName.ValueOrDefault?.Trim() ?? string.Empty;
 
-                    var payload = string.Join(" | ", new[] { control, name, automationId, help, itemStatus }
-                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+                    var value = string.Empty;
+                    try
+                    {
+                        if (element.Patterns.Value.TryGetPattern(out var valuePattern))
+                        {
+                            value = valuePattern.Value.Value?.Trim() ?? string.Empty;
+                        }
+                    }
+                    catch
+                    {
+                        // Some TradingView elements expose a transient Value pattern.
+                    }
 
-                    if (!string.IsNullOrWhiteSpace(payload))
+                    var selection = string.Empty;
+                    try
+                    {
+                        if (element.Patterns.SelectionItem.TryGetPattern(out var selectionPattern) && selectionPattern.IsSelected.Value)
+                        {
+                            selection = "selected";
+                        }
+                    }
+                    catch
+                    {
+                        // Selection state can disappear while TradingView re-renders.
+                    }
+
+                    var toggle = string.Empty;
+                    try
+                    {
+                        if (element.Patterns.Toggle.TryGetPattern(out var togglePattern))
+                        {
+                            toggle = $"toggle={togglePattern.ToggleState.Value}";
+                        }
+                    }
+                    catch
+                    {
+                        // Toggle is optional.
+                    }
+
+                    var payload = string.Join(" | ", new[]
+                    {
+                        control,
+                        name,
+                        automationId,
+                        help,
+                        itemStatus,
+                        string.IsNullOrWhiteSpace(value) ? string.Empty : $"value={value}",
+                        selection,
+                        toggle,
+                        string.IsNullOrWhiteSpace(className) ? string.Empty : $"class={className}",
+                    }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+                    if (string.IsNullOrWhiteSpace(payload)) continue;
+
+                    if (Regex.IsMatch(
+                        payload,
+                        @"\b(buy|sell|limit|stop|market|order|position|quantity|qty|price|cancel|working|filled|flatten|reverse|bracket|take profit|stop loss|pnl|profit|loss)\b",
+                        RegexOptions.IgnoreCase))
+                    {
+                        priorityLines.Add(payload);
+                    }
+                    else
                     {
                         lines.Add(payload);
                     }
@@ -865,11 +925,17 @@ internal sealed class ObserverContext : ApplicationContext
                 {
                     // TradingView's accessibility tree can mutate during a live update.
                 }
-
-                if (lines.Sum(x => x.Length + 1) >= maxChars) break;
             }
 
-            var combined = string.Join(Environment.NewLine, lines);
+            // Execution state must never be pushed out of the semantic snapshot by
+            // unrelated chart/watchlist elements. Priority lines go first and are
+            // deduplicated while preserving their first observed order.
+            var ordered = priorityLines
+                .Concat(lines)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            var combined = string.Join(Environment.NewLine, ordered);
             if (combined.Length > maxChars) combined = combined[..maxChars];
             return SanitizeSensitive(combined);
         }
