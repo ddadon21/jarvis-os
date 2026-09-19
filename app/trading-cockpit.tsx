@@ -227,7 +227,7 @@ export default function TradingCockpit() {
       ? "OFFLINE"
       : !controlWatching
         ? "PAUSED"
-        : !observing
+        : !observing || !frameFresh
           ? "WAITING"
           : status;
   const liveLabel = useMemo(() => {
