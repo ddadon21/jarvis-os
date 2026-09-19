@@ -48,6 +48,15 @@ internal sealed class ObserverContext : ApplicationContext
     private string? _sessionDir;
     private int _frameNumber;
 
+    // Cloud interpretation must never block the 500ms local observation loop.
+    // Keep only the newest pending frame while one cloud request is in flight.
+    private readonly object _cloudQueueGate = new();
+    private byte[]? _pendingCloudFrame;
+    private DateTime _pendingCloudAt;
+    private double _pendingCloudDifference;
+    private string? _pendingCloudSemanticText;
+    private bool _cloudUploadWorkerRunning;
+
     public ObserverContext()
     {
         _root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "JarvisObserver");
@@ -75,7 +84,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.4", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.5", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -163,7 +172,7 @@ internal sealed class ObserverContext : ApplicationContext
 
             if (_config.CloudEnabled && now - _lastSentUtc >= TimeSpan.FromMilliseconds(_config.MinimumCloudIntervalMs))
             {
-                await UploadFrameAsync(jpg, now, difference, _latestSemanticText);
+                QueueCloudFrame(jpg, now, difference, _latestSemanticText);
                 _lastSentUtc = now;
             }
         }
@@ -224,6 +233,61 @@ internal sealed class ObserverContext : ApplicationContext
         Log(new { type = "semantic.changed", at, hash = hash[..Math.Min(12, hash.Length)], chars = safe.Length });
     }
 
+    private void QueueCloudFrame(byte[] jpg, DateTime at, double difference, string? semanticText)
+    {
+        lock (_cloudQueueGate)
+        {
+            // Latest-frame-wins: if vision is still processing an older frame, replace
+            // any queued intermediate frame with the newest state of TradingView.
+            _pendingCloudFrame = jpg;
+            _pendingCloudAt = at;
+            _pendingCloudDifference = difference;
+            _pendingCloudSemanticText = semanticText;
+
+            if (_cloudUploadWorkerRunning) return;
+            _cloudUploadWorkerRunning = true;
+        }
+
+        _ = DrainCloudQueueAsync();
+    }
+
+    private async Task DrainCloudQueueAsync()
+    {
+        while (true)
+        {
+            byte[]? frame;
+            DateTime at;
+            double difference;
+            string? semanticText;
+
+            lock (_cloudQueueGate)
+            {
+                if (_pendingCloudFrame is null)
+                {
+                    _cloudUploadWorkerRunning = false;
+                    return;
+                }
+
+                frame = _pendingCloudFrame;
+                at = _pendingCloudAt;
+                difference = _pendingCloudDifference;
+                semanticText = _pendingCloudSemanticText;
+
+                _pendingCloudFrame = null;
+                _pendingCloudSemanticText = null;
+            }
+
+            try
+            {
+                await UploadFrameAsync(frame, at, difference, semanticText);
+            }
+            catch (Exception ex)
+            {
+                Log(new { type = "cloud.upload.error", at = DateTime.UtcNow, error = ex.Message });
+            }
+        }
+    }
+
     private async Task UploadFrameAsync(byte[] jpg, DateTime at, double difference, string? semanticText)
     {
         var endpoint = _config.ServerUrl!.TrimEnd('/') + "/api/trading/observe-frame";
@@ -233,7 +297,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.4",
+            observerVersion = "0.4.5",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -244,7 +308,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.4");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.5");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -295,7 +359,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.4");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.5");
             using var res = await _http.SendAsync(req);
 
             if ((int)res.StatusCode == 401)
@@ -913,10 +977,10 @@ internal sealed class ObserverConfig
     public string? PairingExpiresAt { get; set; }
 
     [JsonPropertyName("minimumCloudIntervalMs")]
-    public int MinimumCloudIntervalMs { get; set; } = 1500;
+    public int MinimumCloudIntervalMs { get; set; } = 700;
 
     [JsonPropertyName("heartbeatSeconds")]
-    public int HeartbeatSeconds { get; set; } = 10;
+    public int HeartbeatSeconds { get; set; } = 3;
 
     [JsonPropertyName("localSnapshotSeconds")]
     public int LocalSnapshotSeconds { get; set; } = 5;
@@ -934,7 +998,7 @@ internal sealed class ObserverConfig
     public int MaxLocalFrames { get; set; } = 600;
 
     [JsonPropertyName("semanticPollMs")]
-    public int SemanticPollMs { get; set; } = 750;
+    public int SemanticPollMs { get; set; } = 500;
 
     [JsonPropertyName("maxSemanticChars")]
     public int MaxSemanticChars { get; set; } = 12000;
