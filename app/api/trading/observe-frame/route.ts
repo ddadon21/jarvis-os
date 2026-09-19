@@ -98,7 +98,7 @@ export async function POST(request: Request) {
 
   const capturedAt = normalizeDate(body.capturedAt) ?? new Date().toISOString();
 
-  const semanticText = typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null;
+  const semanticText = typeof body.semanticText === "string" ? body.semanticText.slice(0, 20000) : null;
   if (semanticText) {
     const executionLines = semanticText
       .split(/\r?\n/)
@@ -414,17 +414,23 @@ function semanticNumberNearLabel(lines: string[], label: RegExp, radius: number)
   for (let i = 0; i < lines.length; i++) {
     if (!label.test(lines[i])) continue;
     const candidates = lines.slice(Math.max(0, i - radius), Math.min(lines.length, i + radius + 1));
+
     for (const candidate of candidates) {
-      const valueMatch = candidate.match(/\bvalue=\s*(-?\d[\d,]*(?:\.\d+)?)\b/i);
+      const valueMatch = candidate.match(/(?:^|\|\s*)value=\s*(-?\d[\d,]*(?:\.\d+)?)\s*(?:\||$)/i);
       if (valueMatch) {
         const n = Number(valueMatch[1].replace(/,/g, ""));
-        if (Number.isFinite(n)) return n;
+        if (Number.isFinite(n) && n > 0) return n;
       }
     }
+
     for (const candidate of candidates) {
-      const numericParts = candidate.match(/-?\d[\d,]*(?:\.\d+)?/g) ?? [];
-      for (const raw of numericParts) {
-        const n = Number(raw.replace(/,/g, ""));
+      const segments = candidate
+        .split("|")
+        .map((part) => part.trim())
+        .filter((part) => part && !/^class=/i.test(part));
+      for (const part of segments) {
+        if (!/^-?\d[\d,]*(?:\.\d+)?$/.test(part)) continue;
+        const n = Number(part.replace(/,/g, ""));
         if (Number.isFinite(n) && n > 0) return n;
       }
     }
