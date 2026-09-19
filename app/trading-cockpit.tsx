@@ -463,7 +463,11 @@ export default function TradingCockpit() {
             <Metric label="CURRENT" value={liveStateFresh ? number(observer?.currentPrice) : "—"} />
             <Metric label="STOP" value={liveStateFresh ? number(observer?.stopPrice ?? current?.stopPrice) : "—"} />
             <Metric label="TARGET" value={liveStateFresh ? number(observer?.targetPrice ?? current?.targetPrice) : "—"} />
-            <Metric label="OPEN P&L" value={liveStateFresh ? money(observer?.openPnl ?? state?.account.openPnl) : "—"} strong />
+            <Metric
+              label="OPEN P&L"
+              value={liveStateFresh && status === "OPEN" ? money(observer?.openPnl ?? state?.account.openPnl) : "—"}
+              strong
+            />
             <Metric label="VISION CONF." value={liveStateFresh ? `${confidence}%` : "—"} />
           </div>
         </article>
