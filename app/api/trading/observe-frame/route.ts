@@ -119,6 +119,16 @@ export async function POST(request: Request) {
   }
 
   const previous = await getTradingState();
+  const previousPendingAgeMs =
+    previous.observer?.status === "PENDING" && previous.observer.observedAt
+      ? Date.parse(capturedAt) - Date.parse(previous.observer.observedAt)
+      : Number.POSITIVE_INFINITY;
+  const preserveRecentPending =
+    !semanticExecution &&
+    previous.observer?.status === "PENDING" &&
+    Number.isFinite(previousPendingAgeMs) &&
+    previousPendingAgeMs >= 0 &&
+    previousPendingAgeMs < 12_000;
 
   if (semanticExecution?.frame.positionStatus === "PENDING") {
     const frame = semanticExecution.frame;
@@ -156,7 +166,30 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown observer vision error.";
     console.error("Observer frame parse degraded:", message);
-    frame = semanticExecution?.frame ?? {
+    frame = semanticExecution?.frame ?? (preserveRecentPending && previous.observer ? {
+      brokerPanelVisible: true,
+      positionStatus: "PENDING",
+      symbol: previous.observer.symbol,
+      orderType: previous.observer.orderType,
+      side: previous.observer.side,
+      quantity: previous.observer.quantity,
+      entryPrice: previous.observer.entryPrice,
+      currentPrice: previous.observer.currentPrice,
+      stopPrice: previous.observer.stopPrice,
+      targetPrice: previous.observer.targetPrice,
+      openPnl: previous.observer.openPnl,
+      tradeRealizedPnl: null,
+      balance: null,
+      equity: null,
+      confidence: Math.max(0.7, previous.observer.confidence * 0.9),
+      evidence: [
+        ...previous.observer.evidence.slice(0, 5),
+        "Holding the recently confirmed working order through a brief inconclusive TradingView frame.",
+      ].slice(0, 8),
+      note: "Recent working-order confirmation retained briefly while the current frame is inconclusive.",
+      intentState: "ORDER_WORKING",
+      orderTicketVisible: previous.observer.orderTicketVisible ?? true,
+    } : {
       brokerPanelVisible: false,
       positionStatus: "UNKNOWN",
       symbol: null,
@@ -176,7 +209,7 @@ export async function POST(request: Request) {
       note: message.slice(0, 300),
       intentState: "UNKNOWN",
       orderTicketVisible: false,
-    };
+    });
 
     const state = await ingestTradingObservation({
       connection: "OBSERVING",
@@ -192,7 +225,9 @@ export async function POST(request: Request) {
         targetPrice: frame.targetPrice,
         openPnl: frame.openPnl,
         confidence: frame.confidence,
-        observedAt: capturedAt,
+        observedAt: preserveRecentPending && frame.positionStatus === "PENDING"
+          ? previous.observer?.observedAt ?? capturedAt
+          : capturedAt,
         evidence: frame.evidence,
         intentState: frame.intentState,
         orderTicketVisible: frame.orderTicketVisible,
@@ -205,7 +240,9 @@ export async function POST(request: Request) {
       accepted: Boolean(semanticExecution),
       reason: semanticExecution
         ? "Visual parsing was unavailable; Jarvis preserved high-confidence TradingView semantic execution state."
-        : "Frame received, but visual parsing was inconclusive.",
+        : preserveRecentPending
+          ? "Visual parsing was inconclusive; Jarvis retained the recently confirmed working order briefly."
+          : "Frame received, but visual parsing was inconclusive.",
       frame,
       state: {
         connection: state.account.connection,
