@@ -4,6 +4,33 @@ import { appendRuntimeEvent, createRuntimeEvent } from "./jarvis-runtime";
 export type TradingConnectionState = "DISCONNECTED" | "CONNECTING" | "OBSERVING" | "DEGRADED";
 export type TradingStage = "PASS CURRENT ACCOUNT" | "FIRST PAYOUT" | "REPEAT PAYOUTS" | "SCALE FUNDED CAPITAL";
 export type TradingObserverStatus = "FLAT" | "PENDING" | "OPEN" | "UNKNOWN";
+export type TradingIntentState = "NONE" | "PREPARING" | "ORDER_WORKING" | "POSITION_OPEN" | "UNKNOWN";
+export type TradingRuleSeverity = "WARNING" | "VIOLATION";
+
+export type TradingRuleAlert = {
+  id: string;
+  rule: "TRADE_COUNT" | "RISK_LIMIT";
+  severity: TradingRuleSeverity;
+  title: string;
+  message: string;
+  observedAt: string;
+  symbol: string | null;
+  side: "LONG" | "SHORT" | null;
+  tradeNumber: number | null;
+  plannedRisk: number | null;
+};
+
+export type TradingGuardrailState = {
+  rules: {
+    maxTradesPerDay: number;
+    riskTargetDollars: number;
+  };
+  todayTradeCount: number;
+  remainingTrades: number;
+  plannedRisk: number | null;
+  activeAlert: TradingRuleAlert | null;
+  eventsToday: TradingRuleAlert[];
+};
 
 export type TradingObserverState = {
   status: TradingObserverStatus;
@@ -19,6 +46,8 @@ export type TradingObserverState = {
   confidence: number;
   observedAt: string | null;
   evidence: string[];
+  intentState?: TradingIntentState;
+  orderTicketVisible?: boolean;
 };
 
 export type TradingAccountState = {
@@ -76,6 +105,7 @@ export type TradingRuntimeState = {
   openTrades: JournalTrade[];
   recentTrades: JournalTrade[];
   observer?: TradingObserverState;
+  guardrails: TradingGuardrailState;
   journalCount: number;
   today: {
     trades: number;
@@ -203,6 +233,18 @@ export async function ingestTradingObservation(input: TradingObservationInput): 
     }
   }
 
+  const priorAlertId = previous.guardrails?.activeAlert?.id ?? null;
+  const nextAlert = next.guardrails.activeAlert;
+  if (nextAlert && nextAlert.id !== priorAlertId) {
+    await appendRuntimeEvent(createRuntimeEvent({
+      type: `trading.rule_${nextAlert.rule.toLowerCase()}`,
+      domain: "TRADING",
+      source: "jarvis.trading.guardrail",
+      importance: "TIME_SENSITIVE",
+      summary: `${nextAlert.title} · ${nextAlert.message}`,
+    }));
+  }
+
   return next;
 }
 
@@ -238,7 +280,9 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
   };
 
   const todayKey = observedAt.slice(0, 10);
-  const todayTrades = recentTrades.filter((trade) => (trade.closedAt ?? trade.openedAt).slice(0, 10) === todayKey);
+  const todayClosedTrades = recentTrades.filter((trade) => (trade.closedAt ?? trade.openedAt).slice(0, 10) === todayKey);
+  const todayEntries = [...openTrades, ...recentTrades].filter((trade) => trade.openedAt.slice(0, 10) === todayKey);
+  const guardrails = buildGuardrails(observer, todayEntries, previous?.guardrails, observedAt);
   const progress = account.profitTarget && account.closedPnl > 0 ? Math.max(0, Math.min(100, (account.closedPnl / account.profitTarget) * 100)) : null;
 
   return {
@@ -255,12 +299,13 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     openTrades,
     recentTrades,
     observer,
+    guardrails,
     journalCount: recentTrades.length + openTrades.length,
     today: {
-      trades: todayTrades.length,
-      wins: todayTrades.filter((trade) => (trade.realizedPnl ?? 0) > 0).length,
-      losses: todayTrades.filter((trade) => (trade.realizedPnl ?? 0) < 0).length,
-      realizedPnl: Math.round(sumPnl(todayTrades) * 100) / 100,
+      trades: todayEntries.length,
+      wins: todayClosedTrades.filter((trade) => (trade.realizedPnl ?? 0) > 0).length,
+      losses: todayClosedTrades.filter((trade) => (trade.realizedPnl ?? 0) < 0).length,
+      realizedPnl: Math.round(sumPnl(todayClosedTrades) * 100) / 100,
     },
     note: account.connection === "OBSERVING"
       ? "Observation mode only. Jarvis records and analyzes; order placement is disabled by design."
@@ -338,6 +383,76 @@ function normalizeObserver(
       ? input.evidence.filter((x): x is string => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 160))
       : previous?.evidence ?? [],
   };
+}
+
+function buildGuardrails(
+  observer: TradingObserverState,
+  todayEntries: JournalTrade[],
+  previous: TradingGuardrailState | undefined,
+  observedAt: string,
+): TradingGuardrailState {
+  const maxTradesPerDay = 2;
+  const riskTargetDollars = 500;
+  const todayTradeCount = todayEntries.length;
+  const remainingTrades = Math.max(0, maxTradesPerDay - todayTradeCount);
+  const plannedRisk = estimatePlannedRisk(observer);
+  const preparing = observer.intentState === "PREPARING" || observer.status === "PENDING";
+  let activeAlert: TradingRuleAlert | null = null;
+
+  if (preparing && todayTradeCount >= maxTradesPerDay) {
+    activeAlert = {
+      id: `${observedAt.slice(0, 10)}:TRADE_COUNT:${todayTradeCount + 1}`,
+      rule: "TRADE_COUNT",
+      severity: "VIOLATION",
+      title: "TRADE LIMIT",
+      message: `${todayTradeCount}/${maxTradesPerDay} trades already used today. This setup would exceed your daily trade rule.`,
+      observedAt,
+      symbol: observer.symbol,
+      side: observer.side,
+      tradeNumber: todayTradeCount + 1,
+      plannedRisk,
+    };
+  } else if (preparing && plannedRisk != null && plannedRisk > riskTargetDollars) {
+    activeAlert = {
+      id: `${observedAt.slice(0, 10)}:RISK_LIMIT:${Math.round(plannedRisk)}`,
+      rule: "RISK_LIMIT",
+      severity: "WARNING",
+      title: "RISK LIMIT",
+      message: `Planned risk is about ${Math.round(plannedRisk)}. Your current risk target is ${riskTargetDollars}.`,
+      observedAt,
+      symbol: observer.symbol,
+      side: observer.side,
+      tradeNumber: todayTradeCount + 1,
+      plannedRisk,
+    };
+  }
+
+  const previousEvents = (previous?.eventsToday ?? []).filter((event) => event.observedAt.slice(0, 10) === observedAt.slice(0, 10));
+  const eventsToday = [...previousEvents];
+  if (activeAlert && !eventsToday.some((event) => event.id === activeAlert!.id)) eventsToday.push(activeAlert);
+
+  return {
+    rules: { maxTradesPerDay, riskTargetDollars },
+    todayTradeCount,
+    remainingTrades,
+    plannedRisk,
+    activeAlert,
+    eventsToday: eventsToday.slice(-50),
+  };
+}
+
+function estimatePlannedRisk(observer: TradingObserverState): number | null {
+  if (observer.entryPrice == null || observer.stopPrice == null || observer.quantity == null || observer.quantity <= 0 || !observer.symbol) return null;
+  const symbol = observer.symbol.toUpperCase().replace(/[^A-Z]/g, "");
+  const pointValue =
+    symbol.startsWith("MNQ") ? 2 :
+    symbol.startsWith("NQ") ? 20 :
+    symbol.startsWith("MYM") ? 0.5 :
+    symbol.startsWith("YM") ? 5 :
+    null;
+  if (pointValue == null) return null;
+  const risk = Math.abs(observer.entryPrice - observer.stopPrice) * pointValue * observer.quantity;
+  return Number.isFinite(risk) ? Math.round(risk * 100) / 100 : null;
 }
 
 function summarizeObserverState(observer: TradingObserverState) {
