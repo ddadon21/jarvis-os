@@ -57,8 +57,52 @@ export async function POST(request: Request) {
   }
 
   const capturedAt = normalizeDate(body.capturedAt) ?? new Date().toISOString();
+
+  // A valid, authenticated screenshot reached Jarvis. Record that transport-level
+  // success independently from whether the vision model can interpret the frame.
+  if (deviceId && bearer && deviceAuthorized) {
+    await markObserverFrame(deviceId, bearer, body.observerVersion ?? null);
+  }
+
   const previous = await getTradingState();
-  const frame = await inspectFrame(body.imageBase64, anthropicKey, previous, typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null);
+  let frame: FrameRead;
+  try {
+    frame = await inspectFrame(
+      body.imageBase64,
+      anthropicKey,
+      previous,
+      typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown observer vision error.";
+    console.error("Observer frame parse degraded:", message);
+    frame = {
+      brokerPanelVisible: false,
+      positionStatus: "UNKNOWN",
+      symbol: null,
+      orderType: null,
+      side: null,
+      quantity: null,
+      entryPrice: null,
+      currentPrice: null,
+      stopPrice: null,
+      targetPrice: null,
+      openPnl: null,
+      tradeRealizedPnl: null,
+      balance: null,
+      equity: null,
+      confidence: 0,
+      evidence: ["Frame reached Jarvis but visual parsing did not produce a reliable structured result."],
+      note: message.slice(0, 300),
+    };
+
+    return Response.json({
+      ok: true,
+      accepted: false,
+      reason: "Frame received, but visual parsing was inconclusive.",
+      frame,
+    });
+  }
 
   if (!frame.brokerPanelVisible || frame.confidence < 0.55) {
     return Response.json({
@@ -71,9 +115,6 @@ export async function POST(request: Request) {
 
   const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
   const state = await ingestTradingObservation(observation);
-  if (deviceId && bearer && deviceAuthorized) {
-    await markObserverFrame(deviceId, bearer, body.observerVersion ?? null);
-  }
 
   return Response.json({
     ok: true,
