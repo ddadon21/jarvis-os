@@ -59,7 +59,7 @@ internal sealed class ObserverContext : ApplicationContext
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open observer folder", null, (_, _) => OpenFolder(_root));
-        menu.Items.Add("Show pairing code", null, (_, _) => ShowPairingCode());
+        menu.Items.Add("Show / New pairing code", null, async (_, _) => await ShowOrCreatePairingCodeAsync());
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
@@ -74,7 +74,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.1", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.2", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -232,7 +232,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.1",
+            observerVersion = "0.4.2",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -242,7 +242,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.1");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.2");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -292,12 +292,18 @@ internal sealed class ObserverContext : ApplicationContext
             using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.1");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.2");
             using var res = await _http.SendAsync(req);
 
             if ((int)res.StatusCode == 401)
             {
-                ShowPairingCode();
+                Log(new { type = "observer.pairing_invalid", at = DateTime.UtcNow });
+                ClearPairingState();
+                if (DateTime.UtcNow - _lastPairAttemptUtc >= TimeSpan.FromSeconds(3))
+                {
+                    _lastPairAttemptUtc = DateTime.UtcNow;
+                    await RequestPairingAsync(forceNew: true);
+                }
                 return;
             }
 
@@ -352,15 +358,16 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
-    private async Task RequestPairingAsync()
+    private async Task RequestPairingAsync(bool forceNew = false)
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(_config.PairingCode) &&
+            if (!forceNew &&
+                !string.IsNullOrWhiteSpace(_config.PairingCode) &&
                 DateTime.TryParse(_config.PairingExpiresAt, out var expiry) &&
                 expiry.ToUniversalTime() > DateTime.UtcNow)
             {
-                ShowPairingCode();
+                ShowPairingCode(force: true);
                 return;
             }
 
@@ -400,6 +407,42 @@ internal sealed class ObserverContext : ApplicationContext
         {
             LogRateLimited("pair.start.error:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
         }
+    }
+
+    private async Task ShowOrCreatePairingCodeAsync()
+    {
+        var hasValidCode =
+            !string.IsNullOrWhiteSpace(_config.PairingCode) &&
+            DateTime.TryParse(_config.PairingExpiresAt, out var expiry) &&
+            expiry.ToUniversalTime() > DateTime.UtcNow;
+
+        if (hasValidCode)
+        {
+            ShowPairingCode(force: true);
+            return;
+        }
+
+        ClearPairingState();
+        _lastPairAttemptUtc = DateTime.UtcNow;
+        await RequestPairingAsync(forceNew: true);
+    }
+
+    private void ClearPairingState()
+    {
+        _config.DeviceId = null;
+        _config.DeviceToken = null;
+        _config.PairingCode = null;
+        _config.PairingExpiresAt = null;
+        _pairDialogShownForCode = null;
+        _paused = true;
+        SaveConfig();
+
+        try
+        {
+            var pairingFile = Path.Combine(_root, "pairing-code.txt");
+            if (File.Exists(pairingFile)) File.Delete(pairingFile);
+        }
+        catch { }
     }
 
     private void ShowPairingCode(bool force = false)
