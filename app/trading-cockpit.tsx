@@ -214,7 +214,9 @@ export default function TradingCockpit() {
 
   const controlWatching = link?.command === "WATCH";
   const paired = Boolean(controllerToken && link);
-  const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing;
+  const frameAgeMs = link?.lastFrameAt ? Date.now() - Date.parse(link.lastFrameAt) : Number.POSITIVE_INFINITY;
+  const frameFresh = Number.isFinite(frameAgeMs) && frameAgeMs < 10_000;
+  const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing && frameFresh;
   const displayStatus = !paired
     ? "UNLINKED"
     : !link?.online
@@ -228,13 +230,13 @@ export default function TradingCockpit() {
     if (error) return "STATE ERROR";
     if (!paired) return "PAIR DESKTOP OBSERVER";
     if (!link?.online) return "DESKTOP OFFLINE";
-    if (controlWatching && !observing) return "WATCHING · WAITING FOR VERIFIED FRAME";
     if (!controlWatching) return "OBSERVER PAUSED";
+    if (controlWatching && (!observing || !frameFresh)) return "WATCHING · WAITING FOR FRESH FRAME";
     if (status === "PENDING") return "WATCHING PENDING ORDER";
     if (status === "OPEN") return "WATCHING LIVE POSITION";
     if (status === "FLAT") return "WATCHING · FLAT";
     return "WATCHING";
-  }, [controlWatching, error, link?.online, observing, paired, status]);
+  }, [controlWatching, error, frameFresh, link?.online, observing, paired, status]);
 
   async function confirmPairing() {
     const code = pairCode.trim().toUpperCase();
