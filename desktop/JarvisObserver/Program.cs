@@ -34,8 +34,8 @@ internal sealed class ObserverContext : ApplicationContext
     private ObserverConfig _config;
     private int _captureBusy;
     private int _controlBusy;
-    private bool _paused = true;
-    private bool _tradingViewDetected;
+    private volatile bool _paused = true;
+    private volatile bool _tradingViewDetected;
     private DateTime _lastSentUtc = DateTime.MinValue;
     private DateTime _lastSavedUtc = DateTime.MinValue;
     private DateTime _lastEventSavedUtc = DateTime.MinValue;
@@ -53,6 +53,8 @@ internal sealed class ObserverContext : ApplicationContext
     // Cloud interpretation must never block the 500ms local observation loop.
     // Keep only the newest pending frame while one cloud request is in flight.
     private readonly object _cloudQueueGate = new();
+    private readonly object _logGate = new();
+    private readonly object _configGate = new();
     private byte[]? _pendingCloudFrame;
     private DateTime _pendingCloudAt;
     private double _pendingCloudDifference;
@@ -745,7 +747,10 @@ internal sealed class ObserverContext : ApplicationContext
 
     private void SaveConfig()
     {
-        try { File.WriteAllText(_configPath, JsonSerializer.Serialize(_config, ObserverConfig.JsonOptions)); } catch { }
+        lock (_configGate)
+        {
+            try { File.WriteAllText(_configPath, JsonSerializer.Serialize(_config, ObserverConfig.JsonOptions)); } catch { }
+        }
     }
 
     private void TogglePause()
@@ -764,17 +769,35 @@ internal sealed class ObserverContext : ApplicationContext
 
     private void Log(object value)
     {
-        Directory.CreateDirectory(_root);
-        File.AppendAllText(Path.Combine(_root, "observer.jsonl"), JsonSerializer.Serialize(value) + Environment.NewLine);
+        lock (_logGate)
+        {
+            try
+            {
+                Directory.CreateDirectory(_root);
+                File.AppendAllText(Path.Combine(_root, "observer.jsonl"), JsonSerializer.Serialize(value) + Environment.NewLine);
+            }
+            catch
+            {
+                // Logging must never take down observation.
+            }
+        }
     }
 
     private readonly Dictionary<string, DateTime> _lastRateLimitedLog = new();
     private void LogRateLimited(string type, TimeSpan interval)
     {
+        var shouldLog = false;
         var now = DateTime.UtcNow;
-        if (_lastRateLimitedLog.TryGetValue(type, out var last) && now - last < interval) return;
-        _lastRateLimitedLog[type] = now;
-        Log(new { type, at = now });
+        lock (_logGate)
+        {
+            if (!_lastRateLimitedLog.TryGetValue(type, out var last) || now - last >= interval)
+            {
+                _lastRateLimitedLog[type] = now;
+                shouldLog = true;
+            }
+        }
+
+        if (shouldLog) Log(new { type, at = now });
     }
 
     private static IntPtr FindTradingViewWindow()
