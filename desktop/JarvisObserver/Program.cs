@@ -506,7 +506,7 @@ internal sealed class ObserverContext : ApplicationContext
             TopMost = true,
         };
 
-        var label = new Label
+        var label = new System.Windows.Forms.Label
         {
             Left = 18,
             Top = 18,
@@ -514,14 +514,14 @@ internal sealed class ObserverContext : ApplicationContext
             Height = 70,
             Text = prompt,
         };
-        var box = new TextBox
+        var box = new System.Windows.Forms.TextBox
         {
             Left = 18,
             Top = 95,
             Width = 505,
             UseSystemPasswordChar = true,
         };
-        var ok = new Button
+        var ok = new System.Windows.Forms.Button
         {
             Text = "Save",
             Left = 338,
@@ -529,7 +529,7 @@ internal sealed class ObserverContext : ApplicationContext
             Top = 135,
             DialogResult = DialogResult.OK,
         };
-        var cancel = new Button
+        var cancel = new System.Windows.Forms.Button
         {
             Text = "Cancel",
             Left = 435,
