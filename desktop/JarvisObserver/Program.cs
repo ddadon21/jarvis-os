@@ -25,14 +25,16 @@ internal static class Program
 internal sealed class ObserverContext : ApplicationContext
 {
     private readonly NotifyIcon _tray;
-    private readonly System.Threading.Timer _timer;
+    private readonly System.Threading.Timer _captureTimer;
+    private readonly System.Threading.Timer _controlTimer;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private readonly UIA3Automation _automation = new();
     private readonly string _root;
     private readonly string _configPath;
     private ObserverConfig _config;
-    private int _busy;
-    private bool _paused;
+    private int _captureBusy;
+    private int _controlBusy;
+    private bool _paused = true;
     private bool _tradingViewDetected;
     private DateTime _lastSentUtc = DateTime.MinValue;
     private DateTime _lastSavedUtc = DateTime.MinValue;
@@ -86,12 +88,14 @@ internal sealed class ObserverContext : ApplicationContext
 
         EnsureConfigExists();
         Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.7", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
-        _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+        _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+        _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
     protected override void ExitThreadCore()
     {
-        _timer.Dispose();
+        _captureTimer.Dispose();
+        _controlTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
@@ -99,12 +103,28 @@ internal sealed class ObserverContext : ApplicationContext
         base.ExitThreadCore();
     }
 
-    private async Task TickAsync()
+    private async Task ControlTickAsync()
     {
-        if (Interlocked.Exchange(ref _busy, 1) == 1) return;
+        if (Interlocked.Exchange(ref _controlBusy, 1) == 1) return;
         try
         {
             await EnsurePairingAndControlAsync();
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("control.tick.error:" + ex.GetType().Name, TimeSpan.FromSeconds(15));
+        }
+        finally
+        {
+            Volatile.Write(ref _controlBusy, 0);
+        }
+    }
+
+    private async Task TickAsync()
+    {
+        if (Interlocked.Exchange(ref _captureBusy, 1) == 1) return;
+        try
+        {
             if (_paused) return;
 
             var target = FindTradingViewWindow();
@@ -183,7 +203,7 @@ internal sealed class ObserverContext : ApplicationContext
         }
         finally
         {
-            Volatile.Write(ref _busy, 0);
+            Volatile.Write(ref _captureBusy, 0);
         }
     }
 
@@ -369,7 +389,8 @@ internal sealed class ObserverContext : ApplicationContext
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
             req.Headers.Add("x-jarvis-observer-version", "0.4.7");
-            using var res = await _http.SendAsync(req);
+            using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var res = await _http.SendAsync(req, controlCts.Token);
 
             if ((int)res.StatusCode == 401)
             {
