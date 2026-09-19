@@ -119,19 +119,12 @@ export async function POST(request: Request) {
   }
 
   const previous = await getTradingState();
-  const previousPendingAgeMs =
-    previous.observer?.status === "PENDING" && previous.observer.observedAt
-      ? Date.parse(capturedAt) - Date.parse(previous.observer.observedAt)
-      : Number.POSITIVE_INFINITY;
-  const preserveRecentPending =
+  const preserveConfirmedExecution =
     !semanticExecution &&
-    previous.observer?.status === "PENDING" &&
-    Number.isFinite(previousPendingAgeMs) &&
-    previousPendingAgeMs >= 0 &&
-    previousPendingAgeMs < 12_000;
+    (previous.observer?.status === "PENDING" || previous.observer?.status === "OPEN");
 
   if (semanticExecution?.frame.positionStatus === "PENDING") {
-    const frame = semanticExecution.frame;
+    const frame = mergeSemanticWithPrevious(semanticExecution.frame, previous.observer);
     const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
     const state = await ingestTradingObservation(observation);
     console.info("Observer semantic execution accepted", {
@@ -166,9 +159,11 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown observer vision error.";
     console.error("Observer frame parse degraded:", message);
-    frame = semanticExecution?.frame ?? (preserveRecentPending && previous.observer ? {
+    frame = semanticExecution?.frame
+      ? mergeSemanticWithPrevious(semanticExecution.frame, previous.observer)
+      : (preserveConfirmedExecution && previous.observer ? {
       brokerPanelVisible: true,
-      positionStatus: "PENDING",
+      positionStatus: previous.observer.status,
       symbol: previous.observer.symbol,
       orderType: previous.observer.orderType,
       side: previous.observer.side,
@@ -181,13 +176,13 @@ export async function POST(request: Request) {
       tradeRealizedPnl: null,
       balance: null,
       equity: null,
-      confidence: Math.max(0.7, previous.observer.confidence * 0.9),
+      confidence: Math.max(0.62, previous.observer.confidence * 0.98),
       evidence: [
         ...previous.observer.evidence.slice(0, 5),
-        "Holding the recently confirmed working order through a brief inconclusive TradingView frame.",
+        "Jarvis retained the last positively confirmed execution state because the current frame was inconclusive.",
       ].slice(0, 8),
-      note: "Recent working-order confirmation retained briefly while the current frame is inconclusive.",
-      intentState: "ORDER_WORKING",
+      note: "Confirmed execution state retained until contrary evidence is observed.",
+      intentState: previous.observer.status === "OPEN" ? "POSITION_OPEN" : "ORDER_WORKING",
       orderTicketVisible: previous.observer.orderTicketVisible ?? true,
     } : {
       brokerPanelVisible: false,
@@ -225,7 +220,7 @@ export async function POST(request: Request) {
         targetPrice: frame.targetPrice,
         openPnl: frame.openPnl,
         confidence: frame.confidence,
-        observedAt: preserveRecentPending && frame.positionStatus === "PENDING"
+        observedAt: preserveConfirmedExecution && !semanticExecution
           ? previous.observer?.observedAt ?? capturedAt
           : capturedAt,
         evidence: frame.evidence,
@@ -239,9 +234,9 @@ export async function POST(request: Request) {
       ok: true,
       accepted: Boolean(semanticExecution),
       reason: semanticExecution
-        ? "Visual parsing was unavailable; Jarvis preserved high-confidence TradingView semantic execution state."
-        : preserveRecentPending
-          ? "Visual parsing was inconclusive; Jarvis retained the recently confirmed working order briefly."
+        ? "Visual parsing was unavailable; Jarvis preserved TradingView semantic execution state."
+        : preserveConfirmedExecution
+          ? "Visual parsing was inconclusive; Jarvis retained the last positively confirmed execution state."
           : "Frame received, but visual parsing was inconclusive.",
       frame,
       state: {
@@ -310,6 +305,7 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
   const hasQuantityEditor = lines.some((line) => /\bedit\s*\|\s*quantity\b/i.test(line) || /\bchange order quantity\b/i.test(line));
   const hasOrderTypeControl = lines.some((line) => /\bchange order type\b/i.test(line));
   const orderTicketVisible = hasQuantityEditor || hasOrderTypeControl;
+  const details = extractSemanticOrderDetails(lines);
 
   if (hasWorkingOrderCancel) {
     return {
@@ -317,11 +313,11 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
       frame: {
         brokerPanelVisible: true,
         positionStatus: "PENDING",
-        symbol: null,
-        orderType: null,
-        side: null,
-        quantity: null,
-        entryPrice: null,
+        symbol: details.symbol,
+        orderType: details.orderType,
+        side: details.side,
+        quantity: details.quantity,
+        entryPrice: details.entryPrice,
         currentPrice: null,
         stopPrice: null,
         targetPrice: null,
@@ -344,11 +340,11 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
       frame: {
         brokerPanelVisible: true,
         positionStatus: "UNKNOWN",
-        symbol: null,
-        orderType: null,
-        side: null,
-        quantity: null,
-        entryPrice: null,
+        symbol: details.symbol,
+        orderType: details.orderType,
+        side: details.side,
+        quantity: details.quantity,
+        entryPrice: details.entryPrice,
         currentPrice: null,
         stopPrice: null,
         targetPrice: null,
@@ -365,6 +361,74 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
     };
   }
 
+  return null;
+}
+
+function mergeSemanticWithPrevious(
+  frame: FrameRead,
+  previous: Awaited<ReturnType<typeof getTradingState>>["observer"] | undefined,
+): FrameRead {
+  if (!previous || (previous.status !== "PENDING" && previous.status !== "OPEN")) return frame;
+  return {
+    ...frame,
+    symbol: frame.symbol ?? previous.symbol,
+    orderType: frame.orderType ?? previous.orderType,
+    side: frame.side ?? previous.side,
+    quantity: frame.quantity ?? previous.quantity,
+    entryPrice: frame.entryPrice ?? previous.entryPrice,
+    currentPrice: frame.currentPrice ?? previous.currentPrice,
+    stopPrice: frame.stopPrice ?? previous.stopPrice,
+    targetPrice: frame.targetPrice ?? previous.targetPrice,
+    openPnl: frame.openPnl ?? previous.openPnl,
+    evidence: [...frame.evidence, ...previous.evidence].slice(0, 8),
+  };
+}
+
+function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" | "orderType" | "side" | "quantity" | "entryPrice"> {
+  const joined = lines.join("\n");
+  const selectedBuy = lines.some((line) => /\bbuy\b/i.test(line) && /\bselected\b/i.test(line));
+  const selectedSell = lines.some((line) => /\bsell\b/i.test(line) && /\bselected\b/i.test(line));
+  const explicitBuy = /\bbuy\s+(?:limit|stop|market)\b/i.test(joined);
+  const explicitSell = /\bsell\s+(?:limit|stop|market)\b/i.test(joined);
+  const side: "LONG" | "SHORT" | null =
+    selectedBuy || (explicitBuy && !explicitSell) ? "LONG" :
+    selectedSell || (explicitSell && !explicitBuy) ? "SHORT" :
+    null;
+
+  const orderType: "LIMIT" | "STOP" | "MARKET" | null =
+    /\b(?:buy|sell)\s+limit\b|\blimit\s+order\b|\border\s+type[^\n]*limit\b/i.test(joined) ? "LIMIT" :
+    /\b(?:buy|sell)\s+stop\b|\bstop\s+order\b|\border\s+type[^\n]*stop\b/i.test(joined) ? "STOP" :
+    /\b(?:buy|sell)\s+market\b|\bmarket\s+order\b|\border\s+type[^\n]*market\b/i.test(joined) ? "MARKET" :
+    null;
+
+  const quantity = semanticNumberNearLabel(lines, /\b(quantity|qty|order quantity)\b/i, 4);
+  const entryPrice = semanticNumberNearLabel(lines, /\b(limit price|order price|entry price|price)\b/i, 4);
+
+  const symbolMatch = joined.match(/\b(?:symbol|contract)\b[^\n|:=]*[|:=]?\s*([A-Z]{1,5}[A-Z0-9]{0,8})\b/i);
+  const symbol = symbolMatch?.[1]?.toUpperCase() ?? null;
+
+  return { symbol, orderType, side, quantity, entryPrice };
+}
+
+function semanticNumberNearLabel(lines: string[], label: RegExp, radius: number): number | null {
+  for (let i = 0; i < lines.length; i++) {
+    if (!label.test(lines[i])) continue;
+    const candidates = lines.slice(Math.max(0, i - radius), Math.min(lines.length, i + radius + 1));
+    for (const candidate of candidates) {
+      const valueMatch = candidate.match(/\bvalue=\s*(-?\d[\d,]*(?:\.\d+)?)\b/i);
+      if (valueMatch) {
+        const n = Number(valueMatch[1].replace(/,/g, ""));
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    for (const candidate of candidates) {
+      const numericParts = candidate.match(/-?\d[\d,]*(?:\.\d+)?/g) ?? [];
+      for (const raw of numericParts) {
+        const n = Number(raw.replace(/,/g, ""));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+    }
+  }
   return null;
 }
 
