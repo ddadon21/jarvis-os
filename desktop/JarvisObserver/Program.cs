@@ -85,7 +85,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.5", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.6", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -298,7 +298,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.5",
+            observerVersion = "0.4.6",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -309,7 +309,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.5");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.6");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -350,6 +350,19 @@ internal sealed class ObserverContext : ApplicationContext
             return;
         }
 
+        // A device token exists before the human confirms the one-time code.
+        // Do not poll /device/control until that pending code has had time to be confirmed.
+        // Otherwise the expected pre-confirmation 401 looks like invalid credentials and
+        // the Observer clears the very pairing identity the user is trying to confirm.
+        var pairingStillPending =
+            !string.IsNullOrWhiteSpace(_config.PairingCode) &&
+            DateTime.TryParse(_config.PairingExpiresAt, out var pendingExpiry) &&
+            pendingExpiry.ToUniversalTime() > now;
+        if (pairingStillPending)
+        {
+            return;
+        }
+
         if (now - _lastControlPollUtc < TimeSpan.FromSeconds(2)) return;
         _lastControlPollUtc = now;
 
@@ -360,7 +373,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.5");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.6");
             using var res = await _http.SendAsync(req);
 
             if ((int)res.StatusCode == 401)
