@@ -13,17 +13,17 @@ const FIRST_CAPITAL_MILESTONE = 5_000;
 const HUNDRED_MILLION = 100_000_000;
 
 const SEEDED_ACCOUNTS: FinanceAccountState[] = [
-  { key: "chase-checking", institution: "CHASE", name: "CHASE SECURE BANKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "PERSONAL CONTROL", current: 60.27, available: 11.25, limit: null },
-  { key: "bofa-personal", institution: "BANK OF AMERICA", name: "FINANCIAL OPS", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "CONTROLLED BILLS", current: 5.63, available: 5.63, limit: null },
-  { key: "bofa-business", institution: "BANK OF AMERICA", name: "BUSINESS ADV FUNDAMENTALS", type: "depository", subtype: "checking", ownership: "BUSINESS", role: "CAPITAL GENERATION", current: 750.68, available: 686.53, limit: null },
+  { key: "chase-checking", institution: "CHASE", name: "CHASE SECURE BANKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "PERSONAL CONTROL", current: 14.52, available: 6.25, limit: null },
+  { key: "bofa-personal", institution: "BANK OF AMERICA", name: "FINANCIAL OPS", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "CONTROLLED BILLS", current: 1.64, available: 1.64, limit: null },
+  { key: "bofa-business", institution: "BANK OF AMERICA", name: "BUSINESS ADV FUNDAMENTALS", type: "depository", subtype: "checking", ownership: "BUSINESS", role: "CAPITAL GENERATION", current: 661.50, available: 596.54, limit: null },
   { key: "schwab-checking", institution: "CHARLES SCHWAB", name: "INVESTOR CHECKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "INVESTMENT ROUTING", current: 0.93, available: 0.93, limit: null },
   { key: "schwab-brokerage", institution: "CHARLES SCHWAB", name: "INDIVIDUAL", type: "investment", subtype: "brokerage", ownership: "PERSONAL", role: "COMPOUNDING", current: 1.78, available: 1.78, limit: null },
   { key: "amex-hysa", institution: "AMERICAN EXPRESS", name: "HIGH YIELD SAVINGS ACCOUNT", type: "depository", subtype: "savings", ownership: "PERSONAL", role: "LIQUIDITY / RESERVE", current: 0.74, available: 0.74, limit: null },
-  { key: "rbfcu-checking", institution: "RBFCU", name: "CHECKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "CASH", current: 1.0, available: 1.0, limit: null },
-  { key: "rbfcu-savings", institution: "RBFCU", name: "PRIMARY SAVINGS", type: "depository", subtype: "savings", ownership: "PERSONAL", role: "CASH", current: 3.04, available: 2.04, limit: null },
+  { key: "rbfcu-checking", institution: "RBFCU", name: "CHECKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "CASH", current: 0.05, available: 0.05, limit: null },
+  { key: "rbfcu-savings", institution: "RBFCU", name: "PRIMARY SAVINGS", type: "depository", subtype: "savings", ownership: "PERSONAL", role: "CASH", current: 3.99, available: 2.99, limit: null },
   { key: "rbfcu-platinum", institution: "RBFCU", name: "PLATINUM PREMIER", type: "credit", subtype: "credit card", ownership: "AUTHORIZED_USER", role: "CREDIT CONTEXT", current: 8205.97, available: 4294.0, limit: 12500.0 },
   { key: "rbfcu-world", institution: "RBFCU", name: "WORLD CARD", type: "credit", subtype: "credit card", ownership: "PERSONAL", role: "LIABILITY", current: 598.12, available: 1.0, limit: 600.0 },
-  { key: "capitalone-quicksilver", institution: "CAPITAL ONE", name: "QUICKSILVER", type: "credit", subtype: "credit card", ownership: "PERSONAL", role: "LIABILITY", current: 503.05, available: null, limit: null },
+  { key: "capitalone-quicksilver", institution: "CAPITAL ONE", name: "QUICKSILVER", type: "credit", subtype: "credit card", ownership: "PERSONAL", role: "LIABILITY", current: 528.05, available: null, limit: null },
 ];
 
 const SEEDED_LIABILITIES: FinanceLiabilityState[] = [
@@ -106,11 +106,11 @@ export async function getOrSeedFinanceState(): Promise<FinanceRuntimeState> {
     liabilities: SEEDED_LIABILITIES,
     mode: "SYNCED_SNAPSHOT",
     source: "CHATGPT FINANCES",
-    asOf: "2026-09-15T23:05:29.722Z",
+    asOf: "2026-09-19T19:25:00.000Z",
     connectionCount: 7,
     transactionHistory: "FULL HISTORY READY",
     recurringHistory: "FULL HISTORY READY",
-    note: "Real connected-account snapshot. Jarvis is ready for automatic provider refresh, but direct provider credentials are not connected to the website yet.",
+    note: "Connected-account snapshot synchronized from ChatGPT Finances on Sep 19, 2026. Jarvis is still in Phase 1 snapshot mode until direct provider refresh is connected.",
   });
   await setFinanceState(seeded);
   return seeded;
