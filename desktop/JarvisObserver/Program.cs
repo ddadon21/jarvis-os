@@ -27,6 +27,7 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly System.Threading.Timer _captureTimer;
     private readonly System.Threading.Timer _controlTimer;
+    private readonly System.Threading.Timer _semanticTimer;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private readonly UIA3Automation _automation = new();
     private readonly string _root;
@@ -34,6 +35,8 @@ internal sealed class ObserverContext : ApplicationContext
     private ObserverConfig _config;
     private int _captureBusy;
     private int _controlBusy;
+    private int _semanticBusy;
+    private int _semanticChangedPending;
     private volatile bool _paused = true;
     private volatile bool _tradingViewDetected;
     private DateTime _lastSentUtc = DateTime.MinValue;
@@ -46,6 +49,8 @@ internal sealed class ObserverContext : ApplicationContext
     private bool _deploymentAccessPrimed;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
+    private string? _richExecutionSemanticText;
+    private DateTime _richExecutionSemanticAt = DateTime.MinValue;
     private byte[]? _lastSignature;
     private string? _sessionDir;
     private int _frameNumber;
@@ -55,6 +60,7 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly object _cloudQueueGate = new();
     private readonly object _logGate = new();
     private readonly object _configGate = new();
+    private readonly object _semanticGate = new();
     private byte[]? _pendingCloudFrame;
     private DateTime _pendingCloudAt;
     private double _pendingCloudDifference;
@@ -89,15 +95,17 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.9", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.10", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+        _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
     }
 
     protected override void ExitThreadCore()
     {
         _captureTimer.Dispose();
         _controlTimer.Dispose();
+        _semanticTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
@@ -120,6 +128,57 @@ internal sealed class ObserverContext : ApplicationContext
         {
             Volatile.Write(ref _controlBusy, 0);
         }
+    }
+
+    private Task SemanticTickAsync()
+    {
+        if (Interlocked.Exchange(ref _semanticBusy, 1) == 1) return Task.CompletedTask;
+        try
+        {
+            if (_paused) return Task.CompletedTask;
+
+            var target = FindTradingViewWindow();
+            if (target == IntPtr.Zero) return Task.CompletedTask;
+
+            var now = DateTime.UtcNow;
+            var semantic = CaptureAccessibleText(target, _config.MaxSemanticChars);
+            if (string.IsNullOrWhiteSpace(semantic)) return Task.CompletedTask;
+
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(semantic)));
+            var changed = false;
+
+            lock (_semanticGate)
+            {
+                _latestSemanticText = semantic;
+                if (IsRichExecutionSemantic(semantic))
+                {
+                    _richExecutionSemanticText = semantic;
+                    _richExecutionSemanticAt = now;
+                }
+
+                if (!string.Equals(hash, _lastSemanticHash, StringComparison.Ordinal))
+                {
+                    _lastSemanticHash = hash;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                Interlocked.Exchange(ref _semanticChangedPending, 1);
+                SaveSemanticSnapshot(semantic, now, hash);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("semantic.tick.error:" + ex.GetType().Name, TimeSpan.FromSeconds(15));
+        }
+        finally
+        {
+            Volatile.Write(ref _semanticBusy, 0);
+        }
+
+        return Task.CompletedTask;
     }
 
     private async Task TickAsync()
@@ -150,23 +209,6 @@ internal sealed class ObserverContext : ApplicationContext
                 Log(new { type = "tradingview.detected", at = DateTime.UtcNow });
             }
 
-            var semanticNow = DateTime.UtcNow;
-            if (semanticNow - _lastSemanticPollUtc >= TimeSpan.FromMilliseconds(_config.SemanticPollMs))
-            {
-                _lastSemanticPollUtc = semanticNow;
-                var semantic = CaptureAccessibleText(target, _config.MaxSemanticChars);
-                if (!string.IsNullOrWhiteSpace(semantic))
-                {
-                    _latestSemanticText = semantic;
-                    var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(semantic)));
-                    if (!string.Equals(hash, _lastSemanticHash, StringComparison.Ordinal))
-                    {
-                        _lastSemanticHash = hash;
-                        SaveSemanticSnapshot(semantic, semanticNow, hash);
-                    }
-                }
-            }
-
             using var frame = CaptureWindow(target);
             if (frame is null)
             {
@@ -181,7 +223,8 @@ internal sealed class ObserverContext : ApplicationContext
             var now = DateTime.UtcNow;
             var meaningfulVisualChange = difference >= _config.VisualChangeThreshold;
             var heartbeatDue = now - _lastSentUtc >= TimeSpan.FromSeconds(_config.HeartbeatSeconds);
-            if (!meaningfulVisualChange && !heartbeatDue) return;
+            var semanticChangeDue = Volatile.Read(ref _semanticChangedPending) == 1;
+            if (!meaningfulVisualChange && !heartbeatDue && !semanticChangeDue) return;
 
             var jpg = EncodeJpeg(frame, _config.JpegQuality);
             var eventSaveDue = meaningfulVisualChange && now - _lastEventSavedUtc >= TimeSpan.FromMilliseconds(_config.MinimumLocalEventIntervalMs);
@@ -195,8 +238,10 @@ internal sealed class ObserverContext : ApplicationContext
 
             if (_config.CloudEnabled && now - _lastSentUtc >= TimeSpan.FromMilliseconds(_config.MinimumCloudIntervalMs))
             {
-                QueueCloudFrame(jpg, now, difference, _latestSemanticText);
+                var semanticForUpload = GetSemanticForUpload(now);
+                QueueCloudFrame(jpg, now, difference, semanticForUpload);
                 _lastSentUtc = now;
+                Interlocked.Exchange(ref _semanticChangedPending, 0);
             }
         }
         catch (Exception ex)
@@ -220,8 +265,14 @@ internal sealed class ObserverContext : ApplicationContext
         _lastSavedUtc = DateTime.MinValue;
         _lastEventSavedUtc = DateTime.MinValue;
         _lastSemanticPollUtc = DateTime.MinValue;
-        _latestSemanticText = null;
-        _lastSemanticHash = null;
+        lock (_semanticGate)
+        {
+            _latestSemanticText = null;
+            _lastSemanticHash = null;
+            _richExecutionSemanticText = null;
+            _richExecutionSemanticAt = DateTime.MinValue;
+        }
+        Interlocked.Exchange(ref _semanticChangedPending, 0);
     }
 
     private void SaveFrame(byte[] jpg, DateTime at, double difference)
@@ -238,6 +289,34 @@ internal sealed class ObserverContext : ApplicationContext
             file = Path.GetFileName(path),
         }) + Environment.NewLine);
         TrimSessionFrames(_sessionDir, _config.MaxLocalFrames);
+    }
+
+    private string? GetSemanticForUpload(DateTime now)
+    {
+        lock (_semanticGate)
+        {
+            var current = _latestSemanticText;
+            if (!string.IsNullOrWhiteSpace(_richExecutionSemanticText) &&
+                now - _richExecutionSemanticAt <= TimeSpan.FromSeconds(4))
+            {
+                if (string.IsNullOrWhiteSpace(current)) return _richExecutionSemanticText;
+                if (!current.Contains(_richExecutionSemanticText, StringComparison.Ordinal))
+                {
+                    return _richExecutionSemanticText + Environment.NewLine + current;
+                }
+            }
+
+            return current;
+        }
+    }
+
+    private static bool IsRichExecutionSemantic(string semantic)
+    {
+        if (semantic.Contains("Cancel project order", StringComparison.OrdinalIgnoreCase)) return true;
+        return Regex.IsMatch(
+            semantic,
+            @"\b(Buy|Sell)\s+\d+(?:\.\d+)?\s+[A-Z]{1,8}[A-Z0-9!]{0,10}\s+@\s+[\d,]+(?:\.\d+)?\s+(limit|stop|market)\b",
+            RegexOptions.IgnoreCase);
     }
 
     private void SaveSemanticSnapshot(string semantic, DateTime at, string hash)
@@ -320,7 +399,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.9",
+            observerVersion = "0.4.10",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -331,7 +410,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.9");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.10");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -390,7 +469,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.9");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.10");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -751,7 +830,7 @@ internal sealed class ObserverContext : ApplicationContext
         // Upgrade older local configs to the responsive v0.4.5 observation cadence.
         _config.MinimumCloudIntervalMs = Math.Min(_config.MinimumCloudIntervalMs, 700);
         _config.HeartbeatSeconds = Math.Min(_config.HeartbeatSeconds, 3);
-        _config.SemanticPollMs = Math.Min(_config.SemanticPollMs, 500);
+        _config.SemanticPollMs = Math.Min(_config.SemanticPollMs, 250);
     }
 
     private void SaveConfig()
@@ -1155,7 +1234,7 @@ internal sealed class ObserverConfig
     public int MaxLocalFrames { get; set; } = 600;
 
     [JsonPropertyName("semanticPollMs")]
-    public int SemanticPollMs { get; set; } = 500;
+    public int SemanticPollMs { get; set; } = 250;
 
     [JsonPropertyName("maxSemanticChars")]
     public int MaxSemanticChars { get; set; } = 20000;
