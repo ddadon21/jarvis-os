@@ -89,7 +89,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.8", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.9", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
@@ -320,7 +320,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.8",
+            observerVersion = "0.4.9",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -331,7 +331,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.8");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.9");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -390,7 +390,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.8");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.9");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -837,11 +837,11 @@ internal sealed class ObserverContext : ApplicationContext
         try
         {
             AutomationElement root = _automation.FromHandle(hwnd);
-            var priorityLines = new List<string>();
-            var lines = new List<string>();
+            var semanticItems = new List<string>();
+            var priorityIndexes = new HashSet<int>();
             var elements = root.FindAllDescendants();
 
-            foreach (var element in elements.Take(2400))
+            foreach (var element in elements.Take(2600))
             {
                 try
                 {
@@ -909,16 +909,15 @@ internal sealed class ObserverContext : ApplicationContext
 
                     if (string.IsNullOrWhiteSpace(payload)) continue;
 
+                    var index = semanticItems.Count;
+                    semanticItems.Add(payload);
+
                     if (Regex.IsMatch(
                         payload,
                         @"\b(buy|sell|limit|stop|market|order|position|quantity|qty|price|cancel|working|filled|flatten|reverse|bracket|take profit|stop loss|pnl|profit|loss)\b",
                         RegexOptions.IgnoreCase))
                     {
-                        priorityLines.Add(payload);
-                    }
-                    else
-                    {
-                        lines.Add(payload);
+                        priorityIndexes.Add(index);
                     }
                 }
                 catch
@@ -927,11 +926,27 @@ internal sealed class ObserverContext : ApplicationContext
                 }
             }
 
-            // Execution state must never be pushed out of the semantic snapshot by
-            // unrelated chart/watchlist elements. Priority lines go first and are
-            // deduplicated while preserving their first observed order.
+            // Keep the execution label AND its nearby siblings. TradingView often
+            // exposes numeric values (qty/price) as separate neighboring elements
+            // with no useful label of their own.
+            var expandedPriority = new HashSet<int>();
+            foreach (var index in priorityIndexes)
+            {
+                for (var i = Math.Max(0, index - 6); i <= Math.Min(semanticItems.Count - 1, index + 6); i++)
+                {
+                    expandedPriority.Add(i);
+                }
+            }
+
+            var priorityLines = semanticItems
+                .Where((_, index) => expandedPriority.Contains(index))
+                .ToList();
+            var remainingLines = semanticItems
+                .Where((_, index) => !expandedPriority.Contains(index))
+                .ToList();
+
             var ordered = priorityLines
-                .Concat(lines)
+                .Concat(remainingLines)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
 
@@ -1143,7 +1158,7 @@ internal sealed class ObserverConfig
     public int SemanticPollMs { get; set; } = 500;
 
     [JsonPropertyName("maxSemanticChars")]
-    public int MaxSemanticChars { get; set; } = 12000;
+    public int MaxSemanticChars { get; set; } = 20000;
 
     [JsonIgnore]
     public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && (!string.IsNullOrWhiteSpace(DeviceToken) || !string.IsNullOrWhiteSpace(TradingSecret));
