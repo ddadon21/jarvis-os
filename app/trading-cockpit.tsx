@@ -116,6 +116,15 @@ type ObserverLink = {
   online: boolean;
 };
 
+function safeTradingSymbol(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase();
+  if (["CLASS", "BUTTON", "GROUP", "TEXT", "ORDER", "ORDERS", "POSITION", "POSITIONS", "BUY", "SELL"].includes(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
 function money(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -442,7 +451,7 @@ export default function TradingCockpit() {
           <div className="trading-symbol-row">
             <div>
               <small>SYMBOL</small>
-              <strong>{liveStateFresh ? (observer?.symbol ?? current?.symbol ?? "—") : "—"}</strong>
+              <strong>{liveStateFresh ? (safeTradingSymbol(observer?.symbol) ?? safeTradingSymbol(current?.symbol) ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>DIRECTION</small>
