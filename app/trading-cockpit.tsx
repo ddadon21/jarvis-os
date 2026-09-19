@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, Crosshair, Eye, Gauge, Radio, ShieldCheck, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type ObserverState = {
   status: "FLAT" | "PENDING" | "OPEN" | "UNKNOWN";
@@ -112,6 +112,8 @@ export default function TradingCockpit() {
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
+  const [linkAuthFailed, setLinkAuthFailed] = useState(false);
+  const linkAuthFailures = useRef(0);
   const [payoutRange, setPayoutRange] = useState<PayoutRange>("ALL");
   const [payoutSummary, setPayoutSummary] = useState<PayoutSummary | null>(null);
 
@@ -134,14 +136,16 @@ export default function TradingCockpit() {
           headers: { Authorization: `Bearer ${controllerToken}` },
         });
         if (response.status === 401) {
-          window.localStorage.removeItem("jarvis-observer-controller-v1");
-          if (!cancelled) {
-            setControllerToken("");
-            setLink(null);
+          linkAuthFailures.current += 1;
+          if (!cancelled && linkAuthFailures.current >= 3) {
+            setLinkAuthFailed(true);
+            setLink((previous) => previous ? { ...previous, online: false } : previous);
           }
           return;
         }
         if (!response.ok) return;
+        linkAuthFailures.current = 0;
+        if (!cancelled) setLinkAuthFailed(false);
         const payload = await response.json() as { link?: ObserverLink };
         if (!cancelled && payload.link) setLink(payload.link);
       } catch {
@@ -213,7 +217,7 @@ export default function TradingCockpit() {
   const confidence = Math.round((observer?.confidence ?? 0) * 100);
 
   const controlWatching = link?.command === "WATCH";
-  const paired = Boolean(controllerToken && link);
+  const paired = Boolean(controllerToken && link && !linkAuthFailed);
   const frameAgeMs = link?.lastFrameAt ? Date.now() - Date.parse(link.lastFrameAt) : Number.POSITIVE_INFINITY;
   const frameFresh = Number.isFinite(frameAgeMs) && frameAgeMs < 10_000;
   const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing && frameFresh;
@@ -253,6 +257,9 @@ export default function TradingCockpit() {
       const token = payload.pair?.controllerToken;
       if (!response.ok || !token) throw new Error(payload.error || "Pairing failed.");
       window.localStorage.setItem("jarvis-observer-controller-v1", token);
+      linkAuthFailures.current = 0;
+      setLinkAuthFailed(false);
+      setLink(null);
       setControllerToken(token);
       setPairCode("");
     } catch (pairingError) {
@@ -266,6 +273,8 @@ export default function TradingCockpit() {
     window.localStorage.removeItem("jarvis-observer-controller-v1");
     setControllerToken("");
     setLink(null);
+    setLinkAuthFailed(false);
+    linkAuthFailures.current = 0;
     setPairError(null);
     setPairCode("");
   }
