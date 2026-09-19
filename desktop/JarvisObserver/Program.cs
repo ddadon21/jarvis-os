@@ -74,7 +74,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.2", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.3", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _timer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
     }
 
@@ -232,7 +232,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.2",
+            observerVersion = "0.4.3",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -242,7 +242,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.2");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.3");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -292,7 +292,7 @@ internal sealed class ObserverContext : ApplicationContext
             using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.2");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.3");
             using var res = await _http.SendAsync(req);
 
             if ((int)res.StatusCode == 401)
@@ -380,7 +380,22 @@ internal sealed class ObserverContext : ApplicationContext
             using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode)
             {
-                LogRateLimited("pair.start.failed:" + (int)res.StatusCode, TimeSpan.FromSeconds(30));
+                var errorText = await res.Content.ReadAsStringAsync();
+                Log(new
+                {
+                    type = "pair.start.failed",
+                    at = DateTime.UtcNow,
+                    status = (int)res.StatusCode,
+                    response = errorText.Length > 800 ? errorText[..800] : errorText,
+                });
+                if (forceNew)
+                {
+                    MessageBox.Show(
+                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
+                        "Jarvis Observer pairing failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
                 return;
             }
 
@@ -405,7 +420,15 @@ internal sealed class ObserverContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            LogRateLimited("pair.start.error:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+            Log(new { type = "pair.start.error", at = DateTime.UtcNow, error = ex.Message, exception = ex.GetType().Name });
+            if (forceNew)
+            {
+                MessageBox.Show(
+                    $"Jarvis could not create a pairing code.\n\n{ex.GetType().Name}: {ex.Message}\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
+                    "Jarvis Observer pairing failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
         }
     }
 
@@ -423,6 +446,19 @@ internal sealed class ObserverContext : ApplicationContext
         }
 
         ClearPairingState();
+        _deploymentAccessPrimed = false;
+        await EnsureDeploymentAccessAsync();
+        if (!_deploymentAccessPrimed)
+        {
+            Log(new { type = "pair.bootstrap.failed", at = DateTime.UtcNow });
+            MessageBox.Show(
+                "Jarvis Observer could not establish secure access to the Jarvis server.\n\nNo pairing request was sent. Open the Observer folder and check observer.jsonl.",
+                "Jarvis Observer connection failed",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
         _lastPairAttemptUtc = DateTime.UtcNow;
         await RequestPairingAsync(forceNew: true);
     }
@@ -470,7 +506,7 @@ internal sealed class ObserverContext : ApplicationContext
     private void NormalizeServerUrl()
     {
         const string current = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
-        const string access = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/?_vercel_share=1yQkOpuIMcr4tlwrP37nCgJTxmZmXj5A";
+        const string access = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/?_vercel_share=q9WCnf9dLRjQoNMCfucDrXIx4Cab8AdG";
         _config.ServerUrl = current;
         _config.AccessBootstrapUrl = access;
     }
