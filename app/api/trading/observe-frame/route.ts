@@ -119,6 +119,58 @@ export async function POST(request: Request) {
   }
 
   const previous = await getTradingState();
+  const observerVersion = typeof body.observerVersion === "string" ? body.observerVersion : "";
+  const semanticConfirmsNoWorkingOrder =
+    previous.observer?.status === "PENDING" &&
+    isObserverVersionAtLeast(observerVersion, 0, 4, 10) &&
+    Boolean(semanticText) &&
+    semanticShowsTradingSurface(semanticText!) &&
+    !semanticOrderEvidence(semanticText!.split(/\r?\n/).filter(Boolean)).explicitOrder &&
+    !semanticOrderEvidence(semanticText!.split(/\r?\n/).filter(Boolean)).cancelControl;
+
+  if (semanticConfirmsNoWorkingOrder) {
+    const flatFrame: FrameRead = {
+      brokerPanelVisible: true,
+      positionStatus: "FLAT",
+      symbol: null,
+      orderType: null,
+      side: null,
+      quantity: null,
+      entryPrice: null,
+      currentPrice: null,
+      stopPrice: null,
+      targetPrice: null,
+      openPnl: null,
+      tradeRealizedPnl: null,
+      balance: null,
+      equity: null,
+      confidence: 0.9,
+      evidence: ["Observer 4.10 completed its local execution grace window and found the TradingView trading surface with no working order."],
+      note: "Previously confirmed pending order is no longer present.",
+      intentState: "NONE",
+      orderTicketVisible: false,
+    };
+    const state = await ingestTradingObservation(mapFrameToObservation(flatFrame, capturedAt, previous.openTrades));
+    console.info("Observer semantic execution cleared", {
+      status: "FLAT",
+      priorStatus: previous.observer?.status,
+      observerVersion,
+    });
+    return Response.json({
+      ok: true,
+      accepted: true,
+      source: "semantic",
+      frame: flatFrame,
+      state: {
+        connection: state.account.connection,
+        observer: state.observer,
+        guardrails: state.guardrails,
+        openTrades: state.openTrades,
+        today: state.today,
+      },
+    });
+  }
+
   const preserveConfirmedExecution =
     !semanticExecution &&
     (previous.observer?.status === "PENDING" || previous.observer?.status === "OPEN");
@@ -422,11 +474,19 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
     .filter((item, index, all) => all.findIndex((other) => other.raw === item.raw) === index);
 
+  const protectiveStop = parsed.find((item) => item.type === "STOP") ?? null;
+  const inferredEntryAction: "BUY" | "SELL" | null =
+    protectiveStop?.action === "SELL" ? "BUY" :
+    protectiveStop?.action === "BUY" ? "SELL" :
+    null;
+
   const entry =
-    parsed.find((item) => item.type === "LIMIT" && item.action === "BUY") ??
-    parsed.find((item) => item.type === "LIMIT" && item.action === "SELL") ??
-    parsed.find((item) => item.type === "STOP" && item.action === "BUY") ??
-    parsed.find((item) => item.type === "STOP" && item.action === "SELL") ??
+    (inferredEntryAction
+      ? parsed.find((item) => item.action === inferredEntryAction && item.type === "LIMIT")
+        ?? parsed.find((item) => item.action === inferredEntryAction && item.type === "STOP")
+      : null) ??
+    parsed.find((item) => item.type === "LIMIT") ??
+    parsed.find((item) => item.type === "STOP") ??
     parsed.find((item) => item.type === "MARKET");
 
   if (!entry) {
@@ -500,6 +560,23 @@ function semanticOrderEvidence(lines: string[]) {
   );
   const cancelControl = textParts.some((part) => /^Cancel project order$/i.test(part));
   return { explicitOrder, cancelControl };
+}
+
+function semanticShowsTradingSurface(semanticText: string) {
+  return /\bOrders\b/i.test(semanticText) &&
+    (/\bPositions\b/i.test(semanticText) || /\bBUY\b/i.test(semanticText) || /\bSELL\b/i.test(semanticText));
+}
+
+function isObserverVersionAtLeast(version: string, major: number, minor: number, patch: number) {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return false;
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const target = [major, minor, patch];
+  for (let i = 0; i < 3; i++) {
+    if (parts[i] > target[i]) return true;
+    if (parts[i] < target[i]) return false;
+  }
+  return true;
 }
 
 async function inspectFrame(
