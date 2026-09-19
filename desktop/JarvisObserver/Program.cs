@@ -351,7 +351,9 @@ internal sealed class ObserverContext : ApplicationContext
 
         try
         {
-            using var res = await _http.GetAsync(_config.AccessBootstrapUrl);
+            using var req = new HttpRequestMessage(HttpMethod.Get, _config.AccessBootstrapUrl);
+            ApplyVercelBypass(req);
+            using var res = await _http.SendAsync(req);
             _deploymentAccessPrimed = res.IsSuccessStatusCode || (int)res.StatusCode is >= 300 and < 400;
             Log(new { type = "deployment.access", at = DateTime.UtcNow, status = (int)res.StatusCode, primed = _deploymentAccessPrimed });
         }
@@ -395,7 +397,7 @@ internal sealed class ObserverContext : ApplicationContext
                 if (forceNew)
                 {
                     MessageBox.Show(
-                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
+                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nIf this is 401, set the Vercel automation bypass secret from the Observer tray menu, then try again.\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
                         "Jarvis Observer pairing failed",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -849,7 +851,10 @@ internal sealed class ObserverConfig
     public string? ServerUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
 
     [JsonPropertyName("accessBootstrapUrl")]
-    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/?_vercel_share=1yQkOpuIMcr4tlwrP37nCgJTxmZmXj5A";
+    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/";
+
+    [JsonPropertyName("vercelBypassSecretProtected")]
+    public string? VercelBypassSecretProtected { get; set; }
 
     [JsonPropertyName("tradingSecret")]
     public string? TradingSecret { get; set; }
