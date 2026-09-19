@@ -250,6 +250,14 @@ export default function TradingCockpit() {
     }
   }
 
+  function resetPairing() {
+    window.localStorage.removeItem("jarvis-observer-controller-v1");
+    setControllerToken("");
+    setLink(null);
+    setPairError(null);
+    setPairCode("");
+  }
+
   async function setWatching(nextWatching: boolean) {
     if (!controllerToken) return;
     try {
@@ -306,7 +314,7 @@ export default function TradingCockpit() {
             </div>
           </div>
         </div>
-        {!paired && (
+        {!paired ? (
           <div className="observer-pair-row">
             <input
               value={pairCode}
@@ -319,6 +327,11 @@ export default function TradingCockpit() {
               {pairBusy ? "PAIRING..." : "PAIR OBSERVER"}
             </button>
             {pairError && <small>{pairError}</small>}
+          </div>
+        ) : (
+          <div className="observer-repair-row">
+            <small>{link?.deviceName ?? "Windows Observer"} paired</small>
+            <button type="button" onClick={resetPairing}>RE-PAIR DEVICE</button>
           </div>
         )}
       </div>
