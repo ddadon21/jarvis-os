@@ -3,8 +3,39 @@ import { authenticateObserverDevice, markObserverFrame } from "../../../../lib/t
 
 export const runtime = "nodejs";
 
-const CLAUDE_MODEL = "claude-opus-5";
+const GATEWAY_PRIMARY_MODEL = "google/gemini-3.6-flash";
+const GATEWAY_FALLBACK_MODELS = ["openai/gpt-5.6-sol", "anthropic/claude-opus-5"] as const;
+const DIRECT_ANTHROPIC_MODEL = "claude-opus-5";
 const MAX_BASE64_CHARS = 8_000_000;
+
+const FRAME_READ_SCHEMA = {
+  type: "object",
+  properties: {
+    brokerPanelVisible: { type: "boolean" },
+    positionStatus: { type: "string", enum: ["FLAT", "PENDING", "OPEN", "UNKNOWN"] },
+    symbol: { anyOf: [{ type: "string" }, { type: "null" }] },
+    orderType: { anyOf: [{ type: "string", enum: ["LIMIT", "STOP", "MARKET"] }, { type: "null" }] },
+    side: { anyOf: [{ type: "string", enum: ["LONG", "SHORT"] }, { type: "null" }] },
+    quantity: { anyOf: [{ type: "number" }, { type: "null" }] },
+    entryPrice: { anyOf: [{ type: "number" }, { type: "null" }] },
+    currentPrice: { anyOf: [{ type: "number" }, { type: "null" }] },
+    stopPrice: { anyOf: [{ type: "number" }, { type: "null" }] },
+    targetPrice: { anyOf: [{ type: "number" }, { type: "null" }] },
+    openPnl: { anyOf: [{ type: "number" }, { type: "null" }] },
+    tradeRealizedPnl: { anyOf: [{ type: "number" }, { type: "null" }] },
+    balance: { anyOf: [{ type: "number" }, { type: "null" }] },
+    equity: { anyOf: [{ type: "number" }, { type: "null" }] },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    evidence: { type: "array", items: { type: "string" }, maxItems: 8 },
+    note: { anyOf: [{ type: "string" }, { type: "null" }] },
+  },
+  required: [
+    "brokerPanelVisible", "positionStatus", "symbol", "orderType", "side", "quantity",
+    "entryPrice", "currentPrice", "stopPrice", "targetPrice", "openPnl",
+    "tradeRealizedPnl", "balance", "equity", "confidence", "evidence", "note",
+  ],
+  additionalProperties: false,
+} as const;
 
 type FrameRead = {
   brokerPanelVisible: boolean;
@@ -38,9 +69,13 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Observer device is not securely paired." }, { status: 401 });
   }
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) {
-    return Response.json({ ok: false, error: "Claude vision is unavailable because ANTHROPIC_API_KEY is not configured." }, { status: 503 });
+  const gatewayAuth = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN ?? null;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY ?? null;
+  if (!gatewayAuth && !anthropicKey) {
+    return Response.json({
+      ok: false,
+      error: "Observer vision is unavailable because neither Vercel AI Gateway auth nor ANTHROPIC_API_KEY is configured.",
+    }, { status: 503 });
   }
 
   const body = await request.json().catch(() => null) as null | {
@@ -69,6 +104,7 @@ export async function POST(request: Request) {
   try {
     frame = await inspectFrame(
       body.imageBase64,
+      gatewayAuth,
       anthropicKey,
       previous,
       typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null,
@@ -178,7 +214,13 @@ export async function POST(request: Request) {
   });
 }
 
-async function inspectFrame(imageBase64: string, apiKey: string, previous: Awaited<ReturnType<typeof getTradingState>>, semanticText: string | null): Promise<FrameRead> {
+async function inspectFrame(
+  imageBase64: string,
+  gatewayAuth: string | null,
+  anthropicKey: string | null,
+  previous: Awaited<ReturnType<typeof getTradingState>>,
+  semanticText: string | null,
+): Promise<FrameRead> {
   const prompt = `You are the visual parser for Jarvis Trading Observer.
 Inspect ONLY what is visibly shown in this TradingView Desktop screenshot, especially the Tradovate broker/order/position panel.
 
@@ -190,26 +232,7 @@ ${JSON.stringify({ account: previous.account, observer: previous.observer, openT
 Windows accessibility text from the SAME TradingView window may be included below. Treat it as supporting evidence only and prefer exact values when it clearly labels broker/order/position state. Never treat unrelated watchlist quotes as a position.
 ${semanticText ?? "(no accessibility text available)"}
 
-Return ONLY valid JSON with exactly this shape:
-{
-  "brokerPanelVisible": true,
-  "positionStatus": "FLAT|PENDING|OPEN|UNKNOWN",
-  "symbol": "MNQ" | null,
-  "orderType": "LIMIT|STOP|MARKET" | null,
-  "side": "LONG|SHORT" | null,
-  "quantity": 2 | null,
-  "entryPrice": 12345.25 | null,
-  "currentPrice": 12346.00 | null,
-  "stopPrice": 12320.00 | null,
-  "targetPrice": 12400.00 | null,
-  "openPnl": 125.50 | null,
-  "tradeRealizedPnl": 210.00 | null,
-  "balance": 50120.00 | null,
-  "equity": 50245.50 | null,
-  "confidence": 0.0,
-  "evidence": ["short visible facts that support the parse"],
-  "note": "short ambiguity note or null"
-}
+Return the structured frame state requested by the schema.
 
 Rules:
 - confidence is 0 to 1.
@@ -220,15 +243,88 @@ Rules:
 - Stop/target must correspond to the live position or its working exit orders, not random chart labels.
 - Never fabricate strategy reasoning, setup quality, HTF bias, liquidity, confidence level, or rule adherence.`;
 
+  let gatewayFailure: string | null = null;
+
+  if (gatewayAuth) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12_000);
+      try {
+        const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${gatewayAuth}`,
+          },
+          body: JSON.stringify({
+            model: GATEWAY_PRIMARY_MODEL,
+            models: GATEWAY_FALLBACK_MODELS,
+            max_tokens: 1000,
+            stream: false,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:image/jpeg;base64,${imageBase64}`,
+                    detail: "auto",
+                  },
+                },
+              ],
+            }],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "jarvis_trading_frame",
+                schema: FRAME_READ_SCHEMA,
+              },
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`AI Gateway failed (${response.status}): ${errorText.slice(0, 500)}`);
+        }
+
+        const payload = await response.json() as {
+          model?: string;
+          choices?: Array<{ message?: { content?: string | null } }>;
+        };
+        const text = payload.choices?.[0]?.message?.content ?? "";
+        const parsed = normalizeFrameRead(parseJson(text));
+        console.info("Observer vision parsed", {
+          provider: "vercel-ai-gateway",
+          model: payload.model ?? GATEWAY_PRIMARY_MODEL,
+          confidence: parsed.confidence,
+          status: parsed.positionStatus,
+        });
+        return parsed;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      gatewayFailure = error instanceof Error ? error.message : "Unknown AI Gateway error.";
+      console.error("Observer gateway vision degraded:", gatewayFailure);
+    }
+  }
+
+  if (!anthropicKey) {
+    throw new Error(gatewayFailure ?? "AI Gateway vision failed and no direct Anthropic fallback is configured.");
+  }
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": apiKey,
+      "x-api-key": anthropicKey,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: CLAUDE_MODEL,
+      model: DIRECT_ANTHROPIC_MODEL,
       max_tokens: 1000,
       messages: [{
         role: "user",
@@ -237,7 +333,7 @@ Rules:
             type: "image",
             source: { type: "base64", media_type: "image/jpeg", data: imageBase64 },
           },
-          { type: "text", text: prompt },
+          { type: "text", text: prompt + "\nReturn ONLY valid JSON matching the requested frame schema." },
         ],
       }],
     }),
@@ -245,12 +341,20 @@ Rules:
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Claude observer vision failed (${response.status}): ${text.slice(0, 500)}`);
+    const prefix = gatewayFailure ? `Gateway also failed: ${gatewayFailure.slice(0, 240)}. ` : "";
+    throw new Error(`${prefix}Direct Anthropic observer vision failed (${response.status}): ${text.slice(0, 500)}`);
   }
 
   const payload = await response.json() as { content?: Array<{ type?: string; text?: string }> };
   const text = payload.content?.find((item) => item.type === "text")?.text ?? "";
-  return normalizeFrameRead(parseJson(text));
+  const parsed = normalizeFrameRead(parseJson(text));
+  console.info("Observer vision parsed", {
+    provider: "anthropic-direct-fallback",
+    model: DIRECT_ANTHROPIC_MODEL,
+    confidence: parsed.confidence,
+    status: parsed.positionStatus,
+  });
+  return parsed;
 }
 
 function mapFrameToObservation(frame: FrameRead, observedAt: string, previousOpenTrades: JournalTrade[]): TradingObservationInput {
