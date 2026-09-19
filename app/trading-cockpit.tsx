@@ -61,6 +61,19 @@ type TradingState = {
 
 type ApiResponse = { state: TradingState; observing: boolean };
 
+type PayoutRange = "30D" | "6M" | "ALL";
+
+type PayoutSummary = {
+  range: PayoutRange;
+  connected: boolean;
+  source: string;
+  count: number;
+  totalNet: number;
+  totalGross: number;
+  averageNet: number | null;
+  latest: { approvedAt: string; traderNetAmount: number } | null;
+};
+
 type ObserverLink = {
   deviceId: string;
   deviceName: string;
@@ -99,6 +112,8 @@ export default function TradingCockpit() {
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
   const [pairError, setPairError] = useState<string | null>(null);
+  const [payoutRange, setPayoutRange] = useState<PayoutRange>("ALL");
+  const [payoutSummary, setPayoutSummary] = useState<PayoutSummary | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("jarvis-observer-controller-v1") ?? "";
@@ -141,6 +156,28 @@ export default function TradingCockpit() {
       window.clearInterval(timer);
     };
   }, [controllerToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function refreshPayouts() {
+      try {
+        const response = await fetch(`/api/trading/payouts?range=${payoutRange}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { summary?: PayoutSummary };
+        if (!cancelled && payload.summary) setPayoutSummary(payload.summary);
+      } catch {
+        // Payout analytics stay unavailable until the ledger source is connected.
+      }
+    }
+
+    void refreshPayouts();
+    const timer = window.setInterval(refreshPayouts, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [payoutRange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,6 +383,34 @@ export default function TradingCockpit() {
             <Stat label="WINS" value={state?.today.wins ?? 0} />
             <Stat label="LOSSES" value={state?.today.losses ?? 0} />
             <Stat label="REALIZED" value={money(state?.today.realizedPnl)} />
+          </div>
+        </article>
+
+        <article className="trading-card trading-payouts">
+          <div className="trading-card-head">
+            <span>PAYOUTS</span>
+            <div className="payout-range-tabs" aria-label="Payout date range">
+              {(["30D", "6M", "ALL"] as PayoutRange[]).map((range) => (
+                <button
+                  key={range}
+                  type="button"
+                  className={payoutRange === range ? "active" : ""}
+                  onClick={() => setPayoutRange(range)}
+                >
+                  {range}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="payout-total">
+            <span>{payoutRange === "ALL" ? "ALL-TIME NET PAYOUTS" : `${payoutRange} NET PAYOUTS`}</span>
+            <strong>{payoutSummary?.connected ? money(payoutSummary.totalNet) : "—"}</strong>
+            <small>{payoutSummary?.connected ? `${payoutSummary.count} payouts · avg ${money(payoutSummary.averageNet)}` : "Lucid payout history not connected yet"}</small>
+          </div>
+          <div className="trading-lines">
+            <Line label="Source" value={payoutSummary?.source ?? "PENDING"} />
+            <Line label="Latest payout" value={payoutSummary?.latest ? money(payoutSummary.latest.traderNetAmount) : "—"} />
+            <Line label="Latest approved" value={payoutSummary?.latest ? new Date(payoutSummary.latest.approvedAt).toLocaleDateString() : "—"} />
           </div>
         </article>
 
