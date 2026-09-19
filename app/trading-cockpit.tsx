@@ -214,6 +214,16 @@ export default function TradingCockpit() {
 
   const controlWatching = link?.command === "WATCH";
   const paired = Boolean(controllerToken && link);
+  const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing;
+  const displayStatus = !paired
+    ? "UNLINKED"
+    : !link?.online
+      ? "OFFLINE"
+      : !controlWatching
+        ? "PAUSED"
+        : !observing
+          ? "WAITING"
+          : status;
   const liveLabel = useMemo(() => {
     if (error) return "STATE ERROR";
     if (!paired) return "PAIR DESKTOP OBSERVER";
@@ -340,34 +350,34 @@ export default function TradingCockpit() {
         <article className="trading-card trading-primary">
           <div className="trading-card-head">
             <span>CURRENT STATE</span>
-            <b>{status}</b>
+            <b>{displayStatus}</b>
           </div>
           <div className="trading-symbol-row">
             <div>
               <small>SYMBOL</small>
-              <strong>{observer?.symbol ?? current?.symbol ?? "—"}</strong>
+              <strong>{liveStateFresh ? (observer?.symbol ?? current?.symbol ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>DIRECTION</small>
-              <strong>{observer?.side ?? current?.side ?? "—"}</strong>
+              <strong>{liveStateFresh ? (observer?.side ?? current?.side ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>QTY</small>
-              <strong>{observer?.quantity ?? current?.quantity ?? "—"}</strong>
+              <strong>{liveStateFresh ? (observer?.quantity ?? current?.quantity ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>ORDER</small>
-              <strong>{observer?.orderType ?? "—"}</strong>
+              <strong>{liveStateFresh ? (observer?.orderType ?? "—") : "—"}</strong>
             </div>
           </div>
 
           <div className="trading-prices">
-            <Metric label="ENTRY" value={number(observer?.entryPrice ?? current?.entryPrice)} />
-            <Metric label="CURRENT" value={number(observer?.currentPrice)} />
-            <Metric label="STOP" value={number(observer?.stopPrice ?? current?.stopPrice)} />
-            <Metric label="TARGET" value={number(observer?.targetPrice ?? current?.targetPrice)} />
-            <Metric label="OPEN P&L" value={money(observer?.openPnl ?? state?.account.openPnl)} strong />
-            <Metric label="VISION CONF." value={observing ? `${confidence}%` : "—"} />
+            <Metric label="ENTRY" value={liveStateFresh ? number(observer?.entryPrice ?? current?.entryPrice) : "—"} />
+            <Metric label="CURRENT" value={liveStateFresh ? number(observer?.currentPrice) : "—"} />
+            <Metric label="STOP" value={liveStateFresh ? number(observer?.stopPrice ?? current?.stopPrice) : "—"} />
+            <Metric label="TARGET" value={liveStateFresh ? number(observer?.targetPrice ?? current?.targetPrice) : "—"} />
+            <Metric label="OPEN P&L" value={liveStateFresh ? money(observer?.openPnl ?? state?.account.openPnl) : "—"} strong />
+            <Metric label="VISION CONF." value={liveStateFresh ? `${confidence}%` : "—"} />
           </div>
         </article>
 
