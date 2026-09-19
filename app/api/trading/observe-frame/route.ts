@@ -63,6 +63,12 @@ type FrameRead = {
   orderTicketVisible: boolean;
 };
 
+type SemanticExecutionRead = {
+  frame: FrameRead;
+  source: "semantic";
+};
+
+
 export async function POST(request: Request) {
   const auth = request.headers.get("authorization");
   const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
@@ -104,6 +110,8 @@ export async function POST(request: Request) {
     }
   }
 
+  const semanticExecution = semanticText ? inspectSemanticExecution(semanticText) : null;
+
   // A valid, authenticated screenshot reached Jarvis. Record that transport-level
   // success independently from whether the vision model can interpret the frame.
   if (deviceId && bearer && deviceAuthorized) {
@@ -111,6 +119,32 @@ export async function POST(request: Request) {
   }
 
   const previous = await getTradingState();
+
+  if (semanticExecution?.frame.positionStatus === "PENDING") {
+    const frame = semanticExecution.frame;
+    const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
+    const state = await ingestTradingObservation(observation);
+    console.info("Observer semantic execution accepted", {
+      status: frame.positionStatus,
+      intentState: frame.intentState,
+      evidence: frame.evidence,
+    });
+    return Response.json({
+      ok: true,
+      accepted: true,
+      source: "semantic",
+      frame,
+      state: {
+        connection: state.account.connection,
+        activeGoal: state.activeGoal,
+        observer: state.observer,
+        guardrails: state.guardrails,
+        openTrades: state.openTrades,
+        today: state.today,
+      },
+    });
+  }
+
   let frame: FrameRead;
   try {
     frame = await inspectFrame(
@@ -122,7 +156,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown observer vision error.";
     console.error("Observer frame parse degraded:", message);
-    frame = {
+    frame = semanticExecution?.frame ?? {
       brokerPanelVisible: false,
       positionStatus: "UNKNOWN",
       symbol: null,
@@ -147,17 +181,17 @@ export async function POST(request: Request) {
     const state = await ingestTradingObservation({
       connection: "OBSERVING",
       observer: {
-        status: "UNKNOWN",
-        symbol: null,
-        side: null,
-        quantity: null,
-        orderType: null,
-        entryPrice: null,
-        currentPrice: null,
-        stopPrice: null,
-        targetPrice: null,
-        openPnl: null,
-        confidence: 0,
+        status: frame.positionStatus,
+        symbol: frame.symbol,
+        side: frame.side,
+        quantity: frame.quantity,
+        orderType: frame.orderType,
+        entryPrice: frame.entryPrice,
+        currentPrice: frame.currentPrice,
+        stopPrice: frame.stopPrice,
+        targetPrice: frame.targetPrice,
+        openPnl: frame.openPnl,
+        confidence: frame.confidence,
         observedAt: capturedAt,
         evidence: frame.evidence,
         intentState: frame.intentState,
@@ -168,8 +202,10 @@ export async function POST(request: Request) {
 
     return Response.json({
       ok: true,
-      accepted: false,
-      reason: "Frame received, but visual parsing was inconclusive.",
+      accepted: Boolean(semanticExecution),
+      reason: semanticExecution
+        ? "Visual parsing was unavailable; Jarvis preserved high-confidence TradingView semantic execution state."
+        : "Frame received, but visual parsing was inconclusive.",
       frame,
       state: {
         connection: state.account.connection,
@@ -228,6 +264,71 @@ export async function POST(request: Request) {
       today: state.today,
     },
   });
+}
+
+function inspectSemanticExecution(semanticText: string): SemanticExecutionRead | null {
+  const text = semanticText.replace(/\r/g, "");
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const hasWorkingOrderCancel = lines.some((line) => /\bcancel project order\b/i.test(line));
+  const hasQuantityEditor = lines.some((line) => /\bedit\s*\|\s*quantity\b/i.test(line) || /\bchange order quantity\b/i.test(line));
+  const hasOrderTypeControl = lines.some((line) => /\bchange order type\b/i.test(line));
+  const orderTicketVisible = hasQuantityEditor || hasOrderTypeControl;
+
+  if (hasWorkingOrderCancel) {
+    return {
+      source: "semantic",
+      frame: {
+        brokerPanelVisible: true,
+        positionStatus: "PENDING",
+        symbol: null,
+        orderType: null,
+        side: null,
+        quantity: null,
+        entryPrice: null,
+        currentPrice: null,
+        stopPrice: null,
+        targetPrice: null,
+        openPnl: null,
+        tradeRealizedPnl: null,
+        balance: null,
+        equity: null,
+        confidence: 0.92,
+        evidence: ["TradingView accessibility exposes an active 'Cancel project order' control, indicating a working entry order."],
+        note: "Working order detected from TradingView accessibility state.",
+        intentState: "ORDER_WORKING",
+        orderTicketVisible: true,
+      },
+    };
+  }
+
+  if (orderTicketVisible) {
+    return {
+      source: "semantic",
+      frame: {
+        brokerPanelVisible: true,
+        positionStatus: "UNKNOWN",
+        symbol: null,
+        orderType: null,
+        side: null,
+        quantity: null,
+        entryPrice: null,
+        currentPrice: null,
+        stopPrice: null,
+        targetPrice: null,
+        openPnl: null,
+        tradeRealizedPnl: null,
+        balance: null,
+        equity: null,
+        confidence: 0.78,
+        evidence: ["TradingView accessibility shows active order-entry controls; Jarvis classifies this as order preparation, not a submitted order."],
+        note: "Order preparation detected from TradingView accessibility state.",
+        intentState: "PREPARING",
+        orderTicketVisible: true,
+      },
+    };
+  }
+
+  return null;
 }
 
 async function inspectFrame(
