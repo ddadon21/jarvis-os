@@ -28,6 +28,8 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly System.Threading.Timer _captureTimer;
     private readonly System.Threading.Timer _controlTimer;
     private readonly System.Threading.Timer _semanticTimer;
+    private readonly System.Threading.Timer _ocrTimer;
+    private readonly LocalExecutionOcr _executionOcr = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private readonly UIA3Automation _automation = new();
     private readonly string _root;
@@ -36,6 +38,7 @@ internal sealed class ObserverContext : ApplicationContext
     private int _captureBusy;
     private int _controlBusy;
     private int _semanticBusy;
+    private int _ocrBusy;
     private int _semanticChangedPending;
     private volatile bool _paused = true;
     private volatile bool _tradingViewDetected;
@@ -49,6 +52,8 @@ internal sealed class ObserverContext : ApplicationContext
     private bool _deploymentAccessPrimed;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
+    private string? _latestOcrText;
+    private string? _lastOcrHash;
     private string? _richExecutionSemanticText;
     private DateTime _richExecutionSemanticAt = DateTime.MinValue;
     private byte[]? _lastSignature;
@@ -95,10 +100,12 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.10", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.11", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
+        _ocrTimer = new System.Threading.Timer(async _ => await OcrTickAsync(), null, TimeSpan.FromMilliseconds(350), TimeSpan.FromMilliseconds(650));
+        Log(new { type = "observer.local_ocr", at = DateTime.UtcNow, available = _executionOcr.Available });
     }
 
     protected override void ExitThreadCore()
@@ -106,6 +113,7 @@ internal sealed class ObserverContext : ApplicationContext
         _captureTimer.Dispose();
         _controlTimer.Dispose();
         _semanticTimer.Dispose();
+        _ocrTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
@@ -179,6 +187,56 @@ internal sealed class ObserverContext : ApplicationContext
         }
 
         return Task.CompletedTask;
+    }
+
+    private async Task OcrTickAsync()
+    {
+        if (Interlocked.Exchange(ref _ocrBusy, 1) == 1) return;
+        try
+        {
+            if (_paused || !_executionOcr.Available) return;
+
+            var target = FindTradingViewWindow();
+            if (target == IntPtr.Zero) return;
+
+            using var frame = CaptureWindow(target);
+            if (frame is null) return;
+
+            var ocr = await _executionOcr.ReadAsync(frame);
+            if (string.IsNullOrWhiteSpace(ocr)) return;
+
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ocr)));
+            var changed = false;
+            lock (_semanticGate)
+            {
+                _latestOcrText = ocr;
+                if (!string.Equals(hash, _lastOcrHash, StringComparison.Ordinal))
+                {
+                    _lastOcrHash = hash;
+                    changed = true;
+                }
+
+                if (ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=PENDING", StringComparison.OrdinalIgnoreCase))
+                {
+                    _richExecutionSemanticText = ocr;
+                    _richExecutionSemanticAt = DateTime.UtcNow;
+                }
+            }
+
+            if (changed)
+            {
+                Interlocked.Exchange(ref _semanticChangedPending, 1);
+                LogRateLimited("observer.ocr.changed", TimeSpan.FromSeconds(1));
+            }
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("ocr.tick.error:" + ex.GetType().Name, TimeSpan.FromSeconds(15));
+        }
+        finally
+        {
+            Volatile.Write(ref _ocrBusy, 0);
+        }
     }
 
     private async Task TickAsync()
@@ -269,6 +327,8 @@ internal sealed class ObserverContext : ApplicationContext
         {
             _latestSemanticText = null;
             _lastSemanticHash = null;
+            _latestOcrText = null;
+            _lastOcrHash = null;
             _richExecutionSemanticText = null;
             _richExecutionSemanticAt = DateTime.MinValue;
         }
@@ -295,23 +355,32 @@ internal sealed class ObserverContext : ApplicationContext
     {
         lock (_semanticGate)
         {
-            var current = _latestSemanticText;
-            if (!string.IsNullOrWhiteSpace(_richExecutionSemanticText) &&
-                now - _richExecutionSemanticAt <= TimeSpan.FromSeconds(4))
+            var parts = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(_latestOcrText))
             {
-                if (string.IsNullOrWhiteSpace(current)) return _richExecutionSemanticText;
-                if (!current.Contains(_richExecutionSemanticText, StringComparison.Ordinal))
-                {
-                    return _richExecutionSemanticText + Environment.NewLine + current;
-                }
+                parts.Add(_latestOcrText);
             }
 
-            return current;
+            if (!string.IsNullOrWhiteSpace(_richExecutionSemanticText) &&
+                now - _richExecutionSemanticAt <= TimeSpan.FromSeconds(8) &&
+                !parts.Any(x => x.Contains(_richExecutionSemanticText, StringComparison.Ordinal)))
+            {
+                parts.Add(_richExecutionSemanticText);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_latestSemanticText))
+            {
+                parts.Add(_latestSemanticText);
+            }
+
+            return parts.Count == 0 ? null : string.Join(Environment.NewLine, parts);
         }
     }
 
     private static bool IsRichExecutionSemantic(string semantic)
     {
+        if (semantic.Contains("JARVIS_OCR_EXECUTION|STATUS=PENDING", StringComparison.OrdinalIgnoreCase)) return true;
         if (semantic.Contains("Cancel project order", StringComparison.OrdinalIgnoreCase)) return true;
         return Regex.IsMatch(
             semantic,
@@ -399,7 +468,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.10",
+            observerVersion = "0.4.11",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -410,7 +479,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.10");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.11");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -469,7 +538,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.10");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.11");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
