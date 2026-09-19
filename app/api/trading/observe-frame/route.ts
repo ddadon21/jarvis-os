@@ -110,7 +110,12 @@ export async function POST(request: Request) {
     }
   }
 
-  const semanticExecution = semanticText ? inspectSemanticExecution(semanticText) : null;
+  const ocrExecution = semanticText ? inspectLocalOcrExecution(semanticText) : null;
+  const semanticExecution = ocrExecution?.frame.positionStatus === "PENDING"
+    ? ocrExecution
+    : semanticText
+      ? inspectSemanticExecution(semanticText)
+      : null;
 
   // A valid, authenticated screenshot reached Jarvis. Record that transport-level
   // success independently from whether the vision model can interpret the frame.
@@ -120,38 +125,11 @@ export async function POST(request: Request) {
 
   const previous = await getTradingState();
   const observerVersion = typeof body.observerVersion === "string" ? body.observerVersion : "";
-  const semanticConfirmsNoWorkingOrder =
-    previous.observer?.status === "PENDING" &&
-    isObserverVersionAtLeast(observerVersion, 0, 4, 10) &&
-    Boolean(semanticText) &&
-    semanticShowsTradingSurface(semanticText!) &&
-    !semanticOrderEvidence(semanticText!.split(/\r?\n/).filter(Boolean)).explicitOrder &&
-    !semanticOrderEvidence(semanticText!.split(/\r?\n/).filter(Boolean)).cancelControl;
 
-  if (semanticConfirmsNoWorkingOrder) {
-    const flatFrame: FrameRead = {
-      brokerPanelVisible: true,
-      positionStatus: "FLAT",
-      symbol: null,
-      orderType: null,
-      side: null,
-      quantity: null,
-      entryPrice: null,
-      currentPrice: null,
-      stopPrice: null,
-      targetPrice: null,
-      openPnl: null,
-      tradeRealizedPnl: null,
-      balance: null,
-      equity: null,
-      confidence: 0.9,
-      evidence: ["Observer 4.10 completed its local execution grace window and found the TradingView trading surface with no working order."],
-      note: "Previously confirmed pending order is no longer present.",
-      intentState: "NONE",
-      orderTicketVisible: false,
-    };
+  if (ocrExecution?.frame.positionStatus === "FLAT" && previous.observer?.status === "PENDING") {
+    const flatFrame = ocrExecution.frame;
     const state = await ingestTradingObservation(mapFrameToObservation(flatFrame, capturedAt, previous.openTrades));
-    console.info("Observer semantic execution cleared", {
+    console.info("Observer local OCR execution cleared", {
       status: "FLAT",
       priorStatus: previous.observer?.status,
       observerVersion,
@@ -159,7 +137,7 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       accepted: true,
-      source: "semantic",
+      source: "local-ocr",
       frame: flatFrame,
       state: {
         connection: state.account.connection,
@@ -179,7 +157,7 @@ export async function POST(request: Request) {
     const frame = mergeSemanticWithPrevious(semanticExecution.frame, previous.observer);
     const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
     const state = await ingestTradingObservation(observation);
-    console.info("Observer semantic execution accepted", {
+    console.info(ocrExecution?.frame.positionStatus === "PENDING" ? "Observer local OCR execution accepted" : "Observer semantic execution accepted", {
       status: frame.positionStatus,
       intentState: frame.intentState,
       symbol: frame.symbol,
@@ -194,7 +172,7 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       accepted: true,
-      source: "semantic",
+      source: ocrExecution?.frame.positionStatus === "PENDING" ? "local-ocr" : "semantic",
       frame,
       state: {
         connection: state.account.connection,
@@ -355,6 +333,93 @@ export async function POST(request: Request) {
       today: state.today,
     },
   });
+}
+
+function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead | null {
+  const line = semanticText
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("JARVIS_OCR_EXECUTION|"));
+
+  if (!line) return null;
+
+  const fields = Object.fromEntries(
+    line
+      .split("|")
+      .slice(1)
+      .map((part) => {
+        const index = part.indexOf("=");
+        return index > 0 ? [part.slice(0, index), part.slice(index + 1)] : [part, ""];
+      }),
+  );
+
+  if (fields.STATUS === "FLAT") {
+    return {
+      source: "semantic",
+      frame: {
+        brokerPanelVisible: true,
+        positionStatus: "FLAT",
+        symbol: null,
+        orderType: null,
+        side: null,
+        quantity: null,
+        entryPrice: null,
+        currentPrice: null,
+        stopPrice: null,
+        targetPrice: null,
+        openPnl: null,
+        tradeRealizedPnl: null,
+        balance: null,
+        equity: null,
+        confidence: 0.96,
+        evidence: ["Local TradingView OCR confirmed the previously visible working order disappeared across consecutive scans."],
+        note: "Local execution reader confirmed no working order remains.",
+        intentState: "NONE",
+        orderTicketVisible: false,
+      },
+    };
+  }
+
+  if (fields.STATUS !== "PENDING") return null;
+
+  const side = fields.SIDE === "LONG" || fields.SIDE === "SHORT" ? fields.SIDE : null;
+  const orderType = fields.TYPE === "LIMIT" || fields.TYPE === "STOP" || fields.TYPE === "MARKET" ? fields.TYPE : null;
+  const quantity = parseSemanticNumber(fields.QTY);
+  const entryPrice = parseSemanticNumber(fields.ENTRY);
+  const stopPrice = parseSemanticNumber(fields.STOP);
+  const targetPrice = parseSemanticNumber(fields.TARGET);
+  const symbol = normalizeTradingSymbol(fields.SYMBOL || null);
+
+  return {
+    source: "semantic",
+    frame: {
+      brokerPanelVisible: true,
+      positionStatus: "PENDING",
+      symbol,
+      orderType,
+      side,
+      quantity,
+      entryPrice,
+      currentPrice: null,
+      stopPrice,
+      targetPrice,
+      openPnl: null,
+      tradeRealizedPnl: null,
+      balance: null,
+      equity: null,
+      confidence: entryPrice != null && quantity != null && symbol && side && orderType ? 0.995 : 0.94,
+      evidence: ["Local Windows OCR read the visible TradingView working-order label and nearby chart prices."],
+      note: "Pending order detected locally from the TradingView chart; cloud vision was not required.",
+      intentState: "ORDER_WORKING",
+      orderTicketVisible: true,
+    },
+  };
+}
+
+function parseSemanticNumber(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const value = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
 }
 
 function inspectSemanticExecution(semanticText: string): SemanticExecutionRead | null {
@@ -784,7 +849,7 @@ function normalizeFrameRead(value: unknown): FrameRead {
   return {
     brokerPanelVisible: v.brokerPanelVisible === true,
     positionStatus: v.positionStatus === "OPEN" || v.positionStatus === "PENDING" || v.positionStatus === "FLAT" ? v.positionStatus : "UNKNOWN",
-    symbol: cleanString(v.symbol, 24),
+    symbol: normalizeTradingSymbol(cleanString(v.symbol, 24)),
     orderType: v.orderType === "LIMIT" || v.orderType === "STOP" || v.orderType === "MARKET" ? v.orderType : null,
     side: v.side === "LONG" || v.side === "SHORT" ? v.side : null,
     quantity: numberOrNull(v.quantity),
