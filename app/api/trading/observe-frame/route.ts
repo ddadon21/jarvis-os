@@ -130,6 +130,13 @@ export async function POST(request: Request) {
     console.info("Observer semantic execution accepted", {
       status: frame.positionStatus,
       intentState: frame.intentState,
+      symbol: frame.symbol,
+      side: frame.side,
+      quantity: frame.quantity,
+      orderType: frame.orderType,
+      entryPrice: frame.entryPrice,
+      stopPrice: frame.stopPrice,
+      targetPrice: frame.targetPrice,
       evidence: frame.evidence,
     });
     return Response.json({
@@ -301,13 +308,20 @@ export async function POST(request: Request) {
 function inspectSemanticExecution(semanticText: string): SemanticExecutionRead | null {
   const text = semanticText.replace(/\r/g, "");
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
-  const hasWorkingOrderCancel = lines.some((line) => /\bcancel project order\b/i.test(line));
+  const evidence = semanticOrderEvidence(lines);
   const hasQuantityEditor = lines.some((line) => /\bedit\s*\|\s*quantity\b/i.test(line) || /\bchange order quantity\b/i.test(line));
   const hasOrderTypeControl = lines.some((line) => /\bchange order type\b/i.test(line));
   const orderTicketVisible = hasQuantityEditor || hasOrderTypeControl;
   const details = extractSemanticOrderDetails(lines);
 
-  if (hasWorkingOrderCancel) {
+  if (evidence.explicitOrder || evidence.cancelControl) {
+    const facts: string[] = ["TradingView accessibility confirms a working order."];
+    if (details.side && details.quantity && details.symbol && details.orderType && details.entryPrice != null) {
+      facts.unshift(
+        `TradingView reports ${details.side === "LONG" ? "Buy" : "Sell"} ${details.quantity} ${details.symbol} @ ${details.entryPrice} ${details.orderType.toLowerCase()}.`
+      );
+    }
+
     return {
       source: "semantic",
       frame: {
@@ -319,15 +333,15 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
         quantity: details.quantity,
         entryPrice: details.entryPrice,
         currentPrice: null,
-        stopPrice: null,
-        targetPrice: null,
+        stopPrice: details.stopPrice,
+        targetPrice: details.targetPrice,
         openPnl: null,
         tradeRealizedPnl: null,
         balance: null,
         equity: null,
-        confidence: 0.92,
-        evidence: ["TradingView accessibility exposes an active 'Cancel project order' control, indicating a working entry order."],
-        note: "Working order detected from TradingView accessibility state.",
+        confidence: details.entryPrice != null && details.quantity != null && details.symbol ? 0.98 : 0.92,
+        evidence: facts,
+        note: "Working order detected directly from TradingView accessibility order text.",
         intentState: "ORDER_WORKING",
         orderTicketVisible: true,
       },
@@ -346,8 +360,8 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
         quantity: details.quantity,
         entryPrice: details.entryPrice,
         currentPrice: null,
-        stopPrice: null,
-        targetPrice: null,
+        stopPrice: details.stopPrice,
+        targetPrice: details.targetPrice,
         openPnl: null,
         tradeRealizedPnl: null,
         balance: null,
@@ -384,58 +398,108 @@ function mergeSemanticWithPrevious(
   };
 }
 
-function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" | "orderType" | "side" | "quantity" | "entryPrice"> {
-  const joined = lines.join("\n");
-  const selectedBuy = lines.some((line) => /\bbuy\b/i.test(line) && /\bselected\b/i.test(line));
-  const selectedSell = lines.some((line) => /\bsell\b/i.test(line) && /\bselected\b/i.test(line));
-  const explicitBuy = /\bbuy\s+(?:limit|stop|market)\b/i.test(joined);
-  const explicitSell = /\bsell\s+(?:limit|stop|market)\b/i.test(joined);
-  const side: "LONG" | "SHORT" | null =
-    selectedBuy || (explicitBuy && !explicitSell) ? "LONG" :
-    selectedSell || (explicitSell && !explicitBuy) ? "SHORT" :
-    null;
+function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" | "orderType" | "side" | "quantity" | "entryPrice" | "stopPrice" | "targetPrice"> {
+  const normalizedLines = lines
+    .map((line) => line.split("|").map((part) => part.trim()))
+    .flat()
+    .filter(Boolean);
 
-  const orderType: "LIMIT" | "STOP" | "MARKET" | null =
-    /\b(?:buy|sell)\s+limit\b|\blimit\s+order\b|\border\s+type[^\n]*limit\b/i.test(joined) ? "LIMIT" :
-    /\b(?:buy|sell)\s+stop\b|\bstop\s+order\b|\border\s+type[^\n]*stop\b/i.test(joined) ? "STOP" :
-    /\b(?:buy|sell)\s+market\b|\bmarket\s+order\b|\border\s+type[^\n]*market\b/i.test(joined) ? "MARKET" :
-    null;
+  const orderPattern = /^(Buy|Sell)\s+(\d+(?:\.\d+)?)\s+([A-Z]{1,8}[A-Z0-9!]{0,10})\s+@\s+([\d,]+(?:\.\d+)?)\s+(limit|stop|market)\b(?:\s+([\d,]+(?:\.\d+)?)\s+limit\b)?/i;
+  const parsed = normalizedLines
+    .map((text) => {
+      const match = text.match(orderPattern);
+      if (!match) return null;
+      return {
+        action: match[1].toUpperCase() as "BUY" | "SELL",
+        quantity: Number(match[2]),
+        contract: match[3].toUpperCase(),
+        price: Number(match[4].replace(/,/g, "")),
+        type: match[5].toUpperCase() as "LIMIT" | "STOP" | "MARKET",
+        secondaryLimitPrice: match[6] ? Number(match[6].replace(/,/g, "")) : null,
+        raw: text,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .filter((item, index, all) => all.findIndex((other) => other.raw === item.raw) === index);
 
-  const quantity = semanticNumberNearLabel(lines, /\b(quantity|qty|order quantity)\b/i, 4);
-  const entryPrice = semanticNumberNearLabel(lines, /\b(limit price|order price|entry price|price)\b/i, 4);
+  const entry =
+    parsed.find((item) => item.type === "LIMIT" && item.action === "BUY") ??
+    parsed.find((item) => item.type === "LIMIT" && item.action === "SELL") ??
+    parsed.find((item) => item.type === "STOP" && item.action === "BUY") ??
+    parsed.find((item) => item.type === "STOP" && item.action === "SELL") ??
+    parsed.find((item) => item.type === "MARKET");
 
-  const symbolMatch = joined.match(/\b(?:symbol|contract)\b[^\n|:=]*[|:=]?\s*([A-Z]{1,5}[A-Z0-9]{0,8})\b/i);
-  const symbol = symbolMatch?.[1]?.toUpperCase() ?? null;
+  if (!entry) {
+    const addOrder = normalizedLines
+      .map((text) => text.match(/^Add order on\s+([A-Z]{1,8}[A-Z0-9!]*)\s+at\s+([\d,]+(?:\.\d+)?)/i))
+      .find(Boolean);
+    return {
+      symbol: normalizeTradingSymbol(addOrder?.[1] ?? null),
+      orderType: null,
+      side: null,
+      quantity: null,
+      entryPrice: addOrder ? Number(addOrder[2].replace(/,/g, "")) : null,
+      stopPrice: null,
+      targetPrice: null,
+    };
+  }
 
-  return { symbol, orderType, side, quantity, entryPrice };
+  const side: "LONG" | "SHORT" = entry.action === "BUY" ? "LONG" : "SHORT";
+  const exitAction = side === "LONG" ? "SELL" : "BUY";
+
+  const stopOrder = parsed.find((item) =>
+    item.action === exitAction &&
+    item.type === "STOP" &&
+    item.contract === entry.contract &&
+    item.quantity === entry.quantity
+  ) ?? null;
+
+  const targetOrder = parsed.find((item) =>
+    item.action === exitAction &&
+    item.type === "LIMIT" &&
+    item.contract === entry.contract &&
+    item.quantity === entry.quantity &&
+    Math.abs(item.price - entry.price) > 0.000001
+  ) ?? null;
+
+  return {
+    symbol: normalizeTradingSymbol(entry.contract),
+    orderType: entry.type,
+    side,
+    quantity: Number.isFinite(entry.quantity) ? entry.quantity : null,
+    entryPrice: Number.isFinite(entry.price) ? entry.price : null,
+    stopPrice: stopOrder && Number.isFinite(stopOrder.price) ? stopOrder.price : null,
+    targetPrice: targetOrder && Number.isFinite(targetOrder.price) ? targetOrder.price : null,
+  };
 }
 
-function semanticNumberNearLabel(lines: string[], label: RegExp, radius: number): number | null {
-  for (let i = 0; i < lines.length; i++) {
-    if (!label.test(lines[i])) continue;
-    const candidates = lines.slice(Math.max(0, i - radius), Math.min(lines.length, i + radius + 1));
+function normalizeTradingSymbol(raw: string | null): string | null {
+  if (!raw) return null;
+  const symbol = raw.toUpperCase().replace(/[^A-Z0-9!]/g, "");
+  const reserved = new Set(["CLASS", "BUTTON", "GROUP", "TEXT", "ORDER", "ORDERS", "POSITION", "POSITIONS", "BUY", "SELL"]);
+  if (!symbol || reserved.has(symbol)) return null;
 
-    for (const candidate of candidates) {
-      const valueMatch = candidate.match(/(?:^|\|\s*)value=\s*(-?\d[\d,]*(?:\.\d+)?)\s*(?:\||$)/i);
-      if (valueMatch) {
-        const n = Number(valueMatch[1].replace(/,/g, ""));
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-    }
+  const futuresContract = symbol.match(/^([A-Z]{1,5})[FGHJKMNQUVXZ]\d{2,4}$/);
+  if (futuresContract) return futuresContract[1];
 
-    for (const candidate of candidates) {
-      const segments = candidate
-        .split("|")
-        .map((part) => part.trim())
-        .filter((part) => part && !/^class=/i.test(part));
-      for (const part of segments) {
-        if (!/^-?\d[\d,]*(?:\.\d+)?$/.test(part)) continue;
-        const n = Number(part.replace(/,/g, ""));
-        if (Number.isFinite(n) && n > 0) return n;
-      }
-    }
-  }
+  const continuous = symbol.match(/^([A-Z]{1,5})\d?!$/);
+  if (continuous) return continuous[1];
+
+  if (/^[A-Z]{1,6}$/.test(symbol)) return symbol;
   return null;
+}
+
+function semanticOrderEvidence(lines: string[]) {
+  const textParts = lines
+    .map((line) => line.split("|").map((part) => part.trim()))
+    .flat()
+    .filter(Boolean);
+
+  const explicitOrder = textParts.some((part) =>
+    /^(Buy|Sell)\s+\d+(?:\.\d+)?\s+[A-Z]{1,8}[A-Z0-9!]{0,10}\s+@\s+[\d,]+(?:\.\d+)?\s+(limit|stop|market)\b/i.test(part)
+  );
+  const cancelControl = textParts.some((part) => /^Cancel project order$/i.test(part));
+  return { explicitOrder, cancelControl };
 }
 
 async function inspectFrame(
