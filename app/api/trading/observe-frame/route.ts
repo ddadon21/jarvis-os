@@ -29,11 +29,14 @@ const FRAME_READ_SCHEMA = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
     evidence: { type: "array", items: { type: "string" }, maxItems: 8 },
     note: { anyOf: [{ type: "string" }, { type: "null" }] },
+    intentState: { type: "string", enum: ["NONE", "PREPARING", "ORDER_WORKING", "POSITION_OPEN", "UNKNOWN"] },
+    orderTicketVisible: { type: "boolean" },
   },
   required: [
     "brokerPanelVisible", "positionStatus", "symbol", "orderType", "side", "quantity",
     "entryPrice", "currentPrice", "stopPrice", "targetPrice", "openPnl",
     "tradeRealizedPnl", "balance", "equity", "confidence", "evidence", "note",
+    "intentState", "orderTicketVisible",
   ],
   additionalProperties: false,
 } as const;
@@ -56,6 +59,8 @@ type FrameRead = {
   confidence: number;
   evidence: string[];
   note: string | null;
+  intentState: "NONE" | "PREPARING" | "ORDER_WORKING" | "POSITION_OPEN" | "UNKNOWN";
+  orderTicketVisible: boolean;
 };
 
 export async function POST(request: Request) {
@@ -135,6 +140,8 @@ export async function POST(request: Request) {
       confidence: 0,
       evidence: ["Frame reached Jarvis but visual parsing did not produce a reliable structured result."],
       note: message.slice(0, 300),
+      intentState: "UNKNOWN",
+      orderTicketVisible: false,
     };
 
     const state = await ingestTradingObservation({
@@ -153,6 +160,8 @@ export async function POST(request: Request) {
         confidence: 0,
         observedAt: capturedAt,
         evidence: frame.evidence,
+        intentState: frame.intentState,
+        orderTicketVisible: frame.orderTicketVisible,
       },
       observedAt: capturedAt,
     });
@@ -186,6 +195,8 @@ export async function POST(request: Request) {
         confidence: frame.confidence,
         observedAt: capturedAt,
         evidence: frame.evidence,
+        intentState: frame.intentState,
+        orderTicketVisible: frame.orderTicketVisible,
       },
       observedAt: capturedAt,
     });
@@ -243,6 +254,11 @@ Rules:
 - Set positionStatus OPEN only when the broker UI visibly shows a non-zero live position.
 - Set PENDING when a working entry order is visibly resting but no live position is shown. A visible label such as Buy/Sell + quantity + Limit/Stop is strong pending-order evidence.
 - Set FLAT only when the broker UI visibly indicates no position and no working entry order.
+- intentState PREPARING means an order ticket is visibly configured or being edited, but no working order is confirmed yet.
+- intentState ORDER_WORKING means a pending entry order is visibly working.
+- intentState POSITION_OPEN means a live position is visibly open.
+- intentState NONE means no order preparation, pending order, or live position is visible.
+- orderTicketVisible is true only when the ticket/order-entry controls are visibly open.
 - tradeRealizedPnl must be the result of the just-closed trade only if the UI makes that explicit; otherwise null.
 - Stop/target must correspond to the live position or its working exit orders, not random chart labels.
 - Never fabricate strategy reasoning, setup quality, HTF bias, liquidity, confidence level, or rule adherence.`;
@@ -391,6 +407,8 @@ function mapFrameToObservation(frame: FrameRead, observedAt: string, previousOpe
       confidence: frame.confidence,
       observedAt,
       evidence: frame.evidence,
+      intentState: frame.intentState,
+      orderTicketVisible: frame.orderTicketVisible,
     },
     provider: "Tradovate via TradingView Desktop",
     propFirm: "Lucid Trading",
@@ -432,6 +450,11 @@ function normalizeFrameRead(value: unknown): FrameRead {
     confidence: Math.max(0, Math.min(1, typeof v.confidence === "number" && Number.isFinite(v.confidence) ? v.confidence : 0)),
     evidence: Array.isArray(v.evidence) ? v.evidence.filter((x): x is string => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 160)) : [],
     note: cleanString(v.note, 300),
+    intentState:
+      v.intentState === "NONE" || v.intentState === "PREPARING" || v.intentState === "ORDER_WORKING" || v.intentState === "POSITION_OPEN"
+        ? v.intentState
+        : "UNKNOWN",
+    orderTicketVisible: v.orderTicketVisible === true,
   };
 }
 
