@@ -1,3 +1,4 @@
+import { generateText } from "ai";
 import { getTradingState, ingestTradingObservation, type JournalTrade, type TradingObservationInput } from "../../../../lib/trading-runtime";
 import { authenticateObserverDevice, markObserverFrame } from "../../../../lib/trading-device-link";
 
@@ -69,14 +70,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Observer device is not securely paired." }, { status: 401 });
   }
 
-  const gatewayAuth = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN ?? null;
   const anthropicKey = process.env.ANTHROPIC_API_KEY ?? null;
-  if (!gatewayAuth && !anthropicKey) {
-    return Response.json({
-      ok: false,
-      error: "Observer vision is unavailable because neither Vercel AI Gateway auth nor ANTHROPIC_API_KEY is configured.",
-    }, { status: 503 });
-  }
 
   const body = await request.json().catch(() => null) as null | {
     capturedAt?: string;
@@ -104,7 +98,6 @@ export async function POST(request: Request) {
   try {
     frame = await inspectFrame(
       body.imageBase64,
-      gatewayAuth,
       anthropicKey,
       previous,
       typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null,
@@ -216,7 +209,6 @@ export async function POST(request: Request) {
 
 async function inspectFrame(
   imageBase64: string,
-  gatewayAuth: string | null,
   anthropicKey: string | null,
   previous: Awaited<ReturnType<typeof getTradingState>>,
   semanticText: string | null,
@@ -245,71 +237,50 @@ Rules:
 
   let gatewayFailure: string | null = null;
 
-  if (gatewayAuth) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12_000);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12_000);
-      try {
-        const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${gatewayAuth}`,
+      const result = await generateText({
+        model: GATEWAY_PRIMARY_MODEL,
+        abortSignal: controller.signal,
+        maxOutputTokens: 1000,
+        maxRetries: 0,
+        providerOptions: {
+          gateway: {
+            models: [...GATEWAY_FALLBACK_MODELS],
           },
-          body: JSON.stringify({
-            model: GATEWAY_PRIMARY_MODEL,
-            models: GATEWAY_FALLBACK_MODELS,
-            max_tokens: 1000,
-            stream: false,
-            messages: [{
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:image/jpeg;base64,${imageBase64}`,
-                    detail: "auto",
-                  },
-                },
-              ],
-            }],
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "jarvis_trading_frame",
-                schema: FRAME_READ_SCHEMA,
-              },
+        },
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: prompt + "\nReturn ONLY valid JSON matching the requested frame schema. No markdown fences or commentary.",
             },
-          }),
-        });
+            {
+              type: "image",
+              image: `data:image/jpeg;base64,${imageBase64}`,
+              mediaType: "image/jpeg",
+            },
+          ],
+        }],
+      });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`AI Gateway failed (${response.status}): ${errorText.slice(0, 500)}`);
-        }
-
-        const payload = await response.json() as {
-          model?: string;
-          choices?: Array<{ message?: { content?: string | null } }>;
-        };
-        const text = payload.choices?.[0]?.message?.content ?? "";
-        const parsed = normalizeFrameRead(parseJson(text));
-        console.info("Observer vision parsed", {
-          provider: "vercel-ai-gateway",
-          model: payload.model ?? GATEWAY_PRIMARY_MODEL,
-          confidence: parsed.confidence,
-          status: parsed.positionStatus,
-        });
-        return parsed;
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (error) {
-      gatewayFailure = error instanceof Error ? error.message : "Unknown AI Gateway error.";
-      console.error("Observer gateway vision degraded:", gatewayFailure);
+      const parsed = normalizeFrameRead(parseJson(result.text));
+      console.info("Observer vision parsed", {
+        provider: "vercel-ai-gateway",
+        requestedModel: GATEWAY_PRIMARY_MODEL,
+        confidence: parsed.confidence,
+        status: parsed.positionStatus,
+      });
+      return parsed;
+    } finally {
+      clearTimeout(timeout);
     }
+  } catch (error) {
+    gatewayFailure = error instanceof Error ? error.message : "Unknown AI Gateway error.";
+    console.error("Observer gateway vision degraded:", gatewayFailure);
   }
 
   if (!anthropicKey) {
