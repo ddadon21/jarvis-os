@@ -87,6 +87,18 @@ export async function POST(request: Request) {
 
   const capturedAt = normalizeDate(body.capturedAt) ?? new Date().toISOString();
 
+  const semanticText = typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null;
+  if (semanticText) {
+    const executionLines = semanticText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /\b(buy|sell|limit|stop|market|working|order|orders|position|positions|filled|cancel|qty|quantity)\b/i.test(line))
+      .slice(0, 24);
+    if (executionLines.length > 0) {
+      console.info("Observer semantic execution sample", { lines: executionLines });
+    }
+  }
+
   // A valid, authenticated screenshot reached Jarvis. Record that transport-level
   // success independently from whether the vision model can interpret the frame.
   if (deviceId && bearer && deviceAuthorized) {
@@ -100,7 +112,7 @@ export async function POST(request: Request) {
       body.imageBase64,
       anthropicKey,
       previous,
-      typeof body.semanticText === "string" ? body.semanticText.slice(0, 12000) : null,
+      semanticText,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown observer vision error.";
