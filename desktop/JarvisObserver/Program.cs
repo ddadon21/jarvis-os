@@ -272,7 +272,7 @@ internal sealed class ObserverContext : ApplicationContext
     private async Task EnsurePairingAndControlAsync()
     {
         if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out _)) return;
-        if (string.IsNullOrWhiteSpace(_config.VercelBypassSecret)) return;
+        if (string.IsNullOrWhiteSpace(GetVercelBypassSecret())) return;
 
         var now = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken))
@@ -352,7 +352,7 @@ internal sealed class ObserverContext : ApplicationContext
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, _config.AccessBootstrapUrl);
-            ApplyVercelBypass(req);
+            ApplyVercelBypassHeaders(req);
             using var res = await _http.SendAsync(req);
             _deploymentAccessPrimed = res.IsSuccessStatusCode || (int)res.StatusCode is >= 300 and < 400;
             Log(new { type = "deployment.access", at = DateTime.UtcNow, status = (int)res.StatusCode, primed = _deploymentAccessPrimed });
@@ -440,7 +440,7 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task ShowOrCreatePairingCodeAsync()
     {
-        if (string.IsNullOrWhiteSpace(_config.VercelBypassSecret) && !PromptAndStoreVercelBypassSecret(showSuccess: false))
+        if (string.IsNullOrWhiteSpace(GetVercelBypassSecret()) && !PromptAndStoreVercelBypassSecret(showSuccess: false))
         {
             return;
         }
@@ -463,11 +463,33 @@ internal sealed class ObserverContext : ApplicationContext
 
     private void ApplyVercelBypassHeaders(HttpRequestMessage req)
     {
-        if (string.IsNullOrWhiteSpace(_config.VercelBypassSecret)) return;
+        var secret = GetVercelBypassSecret();
+        if (string.IsNullOrWhiteSpace(secret)) return;
         req.Headers.Remove("x-vercel-protection-bypass");
-        req.Headers.TryAddWithoutValidation("x-vercel-protection-bypass", _config.VercelBypassSecret.Trim());
+        req.Headers.TryAddWithoutValidation("x-vercel-protection-bypass", secret.Trim());
         req.Headers.Remove("x-vercel-set-bypass-cookie");
         req.Headers.TryAddWithoutValidation("x-vercel-set-bypass-cookie", "true");
+    }
+
+    private string? GetVercelBypassSecret()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_config.VercelBypassSecretProtected))
+            {
+                var protectedBytes = Convert.FromBase64String(_config.VercelBypassSecretProtected);
+                var clearBytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(clearBytes);
+            }
+
+            // One-time compatibility path for an older local config. It is migrated
+            // to Windows-protected storage the next time the user saves the key.
+            return string.IsNullOrWhiteSpace(_config.VercelBypassSecret) ? null : _config.VercelBypassSecret;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private bool PromptAndStoreVercelBypassSecret(bool showSuccess)
@@ -477,11 +499,27 @@ internal sealed class ObserverContext : ApplicationContext
             "Jarvis Observer — Vercel access key");
 
         if (string.IsNullOrWhiteSpace(value)) return false;
-        _config.VercelBypassSecret = value.Trim();
-        _config.AccessBootstrapUrl = null;
-        _deploymentAccessPrimed = true;
-        SaveConfig();
-        Log(new { type = "vercel.bypass.saved", at = DateTime.UtcNow });
+        try
+        {
+            var clearBytes = Encoding.UTF8.GetBytes(value.Trim());
+            var protectedBytes = ProtectedData.Protect(clearBytes, null, DataProtectionScope.CurrentUser);
+            _config.VercelBypassSecretProtected = Convert.ToBase64String(protectedBytes);
+            _config.VercelBypassSecret = null;
+            _config.AccessBootstrapUrl = null;
+            _deploymentAccessPrimed = true;
+            SaveConfig();
+            Log(new { type = "vercel.bypass.saved", at = DateTime.UtcNow, storage = "windows-dpapi" });
+        }
+        catch (Exception ex)
+        {
+            Log(new { type = "vercel.bypass.save_failed", at = DateTime.UtcNow, error = ex.Message });
+            MessageBox.Show(
+                "Could not securely save the Vercel access key.\n\n" + ex.Message,
+                "Jarvis Observer",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
 
         if (showSuccess)
         {
