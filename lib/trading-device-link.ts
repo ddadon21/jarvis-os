@@ -93,6 +93,9 @@ export async function confirmObserverPairing(code: string) {
   await Promise.all([
     getCache().set(deviceKey(link.deviceId), link, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
     getCache().set(controllerKey(controllerTokenHash), { deviceId: link.deviceId }, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
+    // Consume the one-time code so a duplicate confirm cannot mint another
+    // controller token and silently invalidate the browser that already paired.
+    getCache().set(pairKey(normalized), { ...pending, expiresAt: new Date(0).toISOString() }, { ttl: 1, tags: ["jarvis-trading-pairing"] }),
   ]);
 
   return {
