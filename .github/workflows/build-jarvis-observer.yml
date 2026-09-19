@@ -39,16 +39,7 @@ jobs:
         run: |
           $publishRoot = '.\desktop\JarvisObserver\bin\Release'
           $exe = Get-ChildItem -Path $publishRoot -Filter 'JarvisObserver.exe' -Recurse |
-            Where-Object { $_.FullName -match '\\win-x64\\publish\\JarvisObserver\.exe
-
-      - name: Upload observer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: JarvisObserver-win-x64
-          path: observer-release
-          if-no-files-found: error
-          retention-days: 30
- } |
+            Where-Object { $_.FullName -like '*\win-x64\publish\JarvisObserver.exe' } |
             Select-Object -First 1
           if (-not $exe) { throw 'JarvisObserver.exe was not found in the publish output.' }
           New-Item -ItemType Directory -Force -Path '.\observer-release' | Out-Null
