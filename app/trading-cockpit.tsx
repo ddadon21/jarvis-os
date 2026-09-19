@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Crosshair, Eye, Gauge, Radio, ShieldCheck, TrendingUp } from "lucide-react";
+import { Activity, Crosshair, Eye, Gauge, Radio, ShieldCheck, TriangleAlert, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ObserverState = {
@@ -17,6 +17,8 @@ type ObserverState = {
   confidence: number;
   observedAt: string | null;
   evidence: string[];
+  intentState?: "NONE" | "PREPARING" | "ORDER_WORKING" | "POSITION_OPEN" | "UNKNOWN";
+  orderTicketVisible?: boolean;
 };
 
 type Trade = {
@@ -48,6 +50,35 @@ type TradingState = {
     lastObservedAt: string | null;
   };
   observer?: ObserverState;
+  guardrails?: {
+    rules: {
+      maxTradesPerDay: number;
+      riskTargetDollars: number;
+    };
+    todayTradeCount: number;
+    remainingTrades: number;
+    plannedRisk: number | null;
+    activeAlert: {
+      id: string;
+      rule: "TRADE_COUNT" | "RISK_LIMIT";
+      severity: "WARNING" | "VIOLATION";
+      title: string;
+      message: string;
+      observedAt: string;
+      symbol: string | null;
+      side: "LONG" | "SHORT" | null;
+      tradeNumber: number | null;
+      plannedRisk: number | null;
+    } | null;
+    eventsToday: Array<{
+      id: string;
+      rule: "TRADE_COUNT" | "RISK_LIMIT";
+      severity: "WARNING" | "VIOLATION";
+      title: string;
+      message: string;
+      observedAt: string;
+    }>;
+  };
   openTrades: Trade[];
   recentTrades: Trade[];
   today: {
@@ -116,6 +147,7 @@ export default function TradingCockpit() {
   const linkAuthFailures = useRef(0);
   const [payoutRange, setPayoutRange] = useState<PayoutRange>("ALL");
   const [payoutSummary, setPayoutSummary] = useState<PayoutSummary | null>(null);
+  const lastAlertSoundId = useRef<string | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("jarvis-observer-controller-v1") ?? "";
@@ -230,6 +262,34 @@ export default function TradingCockpit() {
         : !observing || !frameFresh
           ? "WAITING"
           : status;
+  const guardrails = state?.guardrails;
+  const activeAlert = liveStateFresh ? guardrails?.activeAlert ?? null : null;
+
+  useEffect(() => {
+    if (!activeAlert || activeAlert.id === lastAlertSoundId.current) return;
+    lastAlertSoundId.current = activeAlert.id;
+    try {
+      const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const context = new AudioContextClass();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(activeAlert.severity === "VIOLATION" ? 620 : 520, context.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(activeAlert.severity === "VIOLATION" ? 880 : 700, context.currentTime + 0.22);
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.34);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.36);
+      window.setTimeout(() => void context.close(), 500);
+    } catch {
+      // Browser audio policy can block alerts until the page has received a user gesture.
+    }
+  }, [activeAlert]);
+
   const liveLabel = useMemo(() => {
     if (error) return "STATE ERROR";
     if (!paired) return "PAIR DESKTOP OBSERVER";
@@ -357,6 +417,22 @@ export default function TradingCockpit() {
         )}
       </div>
 
+      {activeAlert ? (
+        <div className={`jarvis-rule-alert ${activeAlert.severity === "VIOLATION" ? "is-violation" : "is-warning"}`} role="alert" aria-live="assertive">
+          <div className="jarvis-rule-alert-orb" aria-hidden="true">
+            <span className="jarvis-rule-alert-ring outer" />
+            <span className="jarvis-rule-alert-ring inner" />
+            <span className="jarvis-rule-alert-core"><TriangleAlert size={34} strokeWidth={1.8} /></span>
+          </div>
+          <div className="jarvis-rule-alert-copy">
+            <small>JARVIS TRADING GUARDRAIL</small>
+            <strong>{activeAlert.title}</strong>
+            <p>{activeAlert.message}</p>
+            <span>{activeAlert.rule === "TRADE_COUNT" ? "DAILY TRADE RULE" : "PLANNED RISK RULE"} · {activeAlert.severity}</span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="trading-grid">
         <article className="trading-card trading-primary">
           <div className="trading-card-head">
@@ -417,6 +493,28 @@ export default function TradingCockpit() {
             <Stat label="WINS" value={state?.today.wins ?? 0} />
             <Stat label="LOSSES" value={state?.today.losses ?? 0} />
             <Stat label="REALIZED" value={money(state?.today.realizedPnl)} />
+          </div>
+          <div className="trading-rule-strip">
+            <div>
+              <span>DAILY LIMIT</span>
+              <b>{guardrails ? `${guardrails.todayTradeCount}/${guardrails.rules.maxTradesPerDay}` : "—"}</b>
+            </div>
+            <div>
+              <span>TRADES LEFT</span>
+              <b>{guardrails?.remainingTrades ?? "—"}</b>
+            </div>
+            <div>
+              <span>PLANNED RISK</span>
+              <b>{guardrails?.plannedRisk == null ? "—" : money(guardrails.plannedRisk)}</b>
+            </div>
+            <div>
+              <span>RISK TARGET</span>
+              <b>{guardrails ? money(guardrails.rules.riskTargetDollars) : "—"}</b>
+            </div>
+            <div>
+              <span>RULE EVENTS</span>
+              <b>{guardrails?.eventsToday.length ?? 0}</b>
+            </div>
           </div>
         </article>
 
