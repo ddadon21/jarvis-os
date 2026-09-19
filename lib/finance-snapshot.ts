@@ -29,21 +29,21 @@ export function getNextNetWorthMilestone(netWorth: number) {
   return { floor, target, step, progress };
 }
 
-const CURRENT_PERSONAL_NET_WORTH = -277.10;
+const CURRENT_PERSONAL_NET_WORTH = -441.02;
 export const NET_WORTH_MILESTONE = getNextNetWorthMilestone(CURRENT_PERSONAL_NET_WORTH);
 
 export const FINANCE_SNAPSHOT = {
-  importedAt: "2026-09-15",
+  importedAt: "2026-09-19",
   source: "CHATGPT FINANCES",
   connectionCount: 7,
   accountCount: 11,
   transactionHistory: "FULL HISTORY READY",
   recurringHistory: "FULL HISTORY READY",
   personalNetWorth: CURRENT_PERSONAL_NET_WORTH,
-  providerNetWorth: -8483.07,
-  liquidity: 822.29,
+  providerNetWorth: -8646.99,
+  liquidity: 683.37,
   investmentValue: 1.78,
-  personalDebt: 1101.17,
+  personalDebt: 1126.17,
   authorizedUserBalance: 8205.97,
   septemberSpend: 798.46,
   septemberCreditsDetected: 1747.05,
@@ -67,7 +67,7 @@ export const FINANCE_DEBTS: FinanceDebt[] = [
   },
   {
     name: "CAPITAL ONE QUICKSILVER",
-    balance: 503.05,
+    balance: 528.05,
     apr: null,
     minimum: 25,
     due: "SEP 14",
@@ -86,12 +86,12 @@ export const FINANCE_DEBTS: FinanceDebt[] = [
 ];
 
 export const FINANCE_ACCOUNT_PURPOSES = [
-  { institution: "BOFA BUSINESS", role: "CAPITAL GENERATION", detail: "$750.68 · business income, payouts and operating cash" },
-  { institution: "CHASE", role: "PERSONAL CONTROL", detail: "$60.27 · personal routing and debt-elimination cash" },
+  { institution: "BOFA BUSINESS", role: "CAPITAL GENERATION", detail: "$661.50 · business income, payouts and operating cash" },
+  { institution: "CHASE", role: "PERSONAL CONTROL", detail: "$14.52 · personal routing and debt-elimination cash" },
   { institution: "AMEX HYSA", role: "LIQUIDITY / RESERVE", detail: "$0.74 · emergency reserves and near-term runway" },
   { institution: "SCHWAB", role: "COMPOUNDING", detail: "$2.71 combined · checking + brokerage · long-term wealth" },
   { institution: "RBFCU", role: "CASH + CREDIT", detail: "$4.04 cash · World Card personal · Platinum tracked as authorized-user" },
-  { institution: "BOFA PERSONAL", role: "CONTROLLED BILLS", detail: "$5.63 · temporary subscriptions and recurring personal bills" },
+  { institution: "BOFA PERSONAL", role: "CONTROLLED BILLS", detail: "$1.64 · temporary subscriptions and recurring personal bills" },
 ] as const;
 
 export const FINANCE_GOALS: FinanceGoalReadiness[] = [
@@ -99,23 +99,23 @@ export const FINANCE_GOALS: FinanceGoalReadiness[] = [
     name: "DEBT FREEDOM",
     state: "RED",
     progress: null,
-    current: "$1,101.17 personal debt",
+    current: "$1,126.17 personal debt",
     target: "$0",
     blocker: "Clear personal revolving balances while keeping enough operating cash to avoid recreating debt.",
   },
   {
     name: "$10K LIQUID",
     state: "RED",
-    progress: 8.2229,
-    current: "$822.29",
+    progress: 6.8337,
+    current: "$683.37",
     target: "$10,000",
-    blocker: "$9,177.71 remaining.",
+    blocker: "$9,316.63 remaining.",
   },
   {
     name: "NET WORTH MILESTONE",
     state: "RED",
     progress: NET_WORTH_MILESTONE.progress,
-    current: "-$277.10",
+    current: "-$441.02",
     target: formatWholeMoney(NET_WORTH_MILESTONE.target),
     blocker: `Milestone rolls forward by ${formatWholeMoney(NET_WORTH_MILESTONE.step)} when reached; after $100,000 the step becomes $10,000.`,
   },
@@ -139,7 +139,7 @@ export const FINANCE_GOALS: FinanceGoalReadiness[] = [
     name: "$1M NET WORTH",
     state: "RED",
     progress: 0,
-    current: "-$277.10",
+    current: "-$441.02",
     target: "$1,000,000",
     blocker: "Long-horizon destination; Jarvis tracks the smaller rolling milestones on the way there.",
   },
