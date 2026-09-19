@@ -382,6 +382,14 @@ function normalizeObserver(
     evidence: Array.isArray(input?.evidence)
       ? input.evidence.filter((x): x is string => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 160))
       : previous?.evidence ?? [],
+    intentState:
+      input?.intentState === "NONE" || input?.intentState === "PREPARING" || input?.intentState === "ORDER_WORKING" || input?.intentState === "POSITION_OPEN" || input?.intentState === "UNKNOWN"
+        ? input.intentState
+        : previous?.intentState ?? "UNKNOWN",
+    orderTicketVisible:
+      typeof input?.orderTicketVisible === "boolean"
+        ? input.orderTicketVisible
+        : previous?.orderTicketVisible ?? false,
   };
 }
 
