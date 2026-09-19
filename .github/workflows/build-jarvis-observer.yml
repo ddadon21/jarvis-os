@@ -37,9 +37,22 @@ jobs:
       - name: Create release bundle
         shell: pwsh
         run: |
-          $publish = '.\desktop\JarvisObserver\bin\Release\net8.0-windows\win-x64\publish'
+          $publishRoot = '.\desktop\JarvisObserver\bin\Release'
+          $exe = Get-ChildItem -Path $publishRoot -Filter 'JarvisObserver.exe' -Recurse |
+            Where-Object { $_.FullName -match '\\win-x64\\publish\\JarvisObserver\.exe
+
+      - name: Upload observer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JarvisObserver-win-x64
+          path: observer-release
+          if-no-files-found: error
+          retention-days: 30
+ } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'JarvisObserver.exe was not found in the publish output.' }
           New-Item -ItemType Directory -Force -Path '.\observer-release' | Out-Null
-          Copy-Item "$publish\JarvisObserver.exe" '.\observer-release\JarvisObserver.exe'
+          Copy-Item $exe.FullName '.\observer-release\JarvisObserver.exe'
           Copy-Item '.\desktop\JarvisObserver\README.md' '.\observer-release\README.md'
 
       - name: Upload observer artifact
