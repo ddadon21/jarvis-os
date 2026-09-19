@@ -96,20 +96,68 @@ export async function POST(request: Request) {
       note: message.slice(0, 300),
     };
 
+    const state = await ingestTradingObservation({
+      connection: "OBSERVING",
+      observer: {
+        status: "UNKNOWN",
+        symbol: null,
+        side: null,
+        quantity: null,
+        orderType: null,
+        entryPrice: null,
+        currentPrice: null,
+        stopPrice: null,
+        targetPrice: null,
+        openPnl: null,
+        confidence: 0,
+        observedAt: capturedAt,
+        evidence: frame.evidence,
+      },
+      observedAt: capturedAt,
+    });
+
     return Response.json({
       ok: true,
       accepted: false,
       reason: "Frame received, but visual parsing was inconclusive.",
       frame,
+      state: {
+        connection: state.account.connection,
+        observer: state.observer,
+      },
     });
   }
 
   if (!frame.brokerPanelVisible || frame.confidence < 0.55) {
+    const state = await ingestTradingObservation({
+      connection: "OBSERVING",
+      observer: {
+        status: "UNKNOWN",
+        symbol: null,
+        side: null,
+        quantity: null,
+        orderType: null,
+        entryPrice: null,
+        currentPrice: null,
+        stopPrice: null,
+        targetPrice: null,
+        openPnl: null,
+        confidence: frame.confidence,
+        observedAt: capturedAt,
+        evidence: frame.evidence,
+      },
+      observedAt: capturedAt,
+    });
+
     return Response.json({
       ok: true,
       accepted: false,
       reason: !frame.brokerPanelVisible ? "Tradovate/broker state was not clearly visible." : "Frame confidence was too low to update trading state.",
       frame,
+      state: {
+        connection: state.account.connection,
+        observer: state.observer,
+      },
     });
   }
 
