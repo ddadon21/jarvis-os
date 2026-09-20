@@ -242,7 +242,7 @@ export default function TradingCockpit() {
     }
 
     void refresh();
-    const timer = window.setInterval(refresh, 2_000);
+    const timer = window.setInterval(refresh, 750);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -262,6 +262,8 @@ export default function TradingCockpit() {
   const frameAgeMs = link?.lastFrameAt ? Date.now() - Date.parse(link.lastFrameAt) : Number.POSITIVE_INFINITY;
   const frameFresh = Number.isFinite(frameAgeMs) && frameAgeMs < 10_000;
   const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing && frameFresh;
+  const intentState = observer?.intentState ?? "UNKNOWN";
+  const executionActive = status === "PENDING" || status === "OPEN" || intentState === "PREPARING";
   const displayStatus = !paired
     ? "UNLINKED"
     : !link?.online
@@ -270,7 +272,14 @@ export default function TradingCockpit() {
         ? "PAUSED"
         : !observing || !frameFresh
           ? "WAITING"
-          : status;
+          : status === "OPEN"
+            ? "OPEN"
+            : status === "PENDING"
+              ? "PENDING"
+              : intentState === "PREPARING"
+                ? "PREPARING"
+                : "WAITING";
+  const showExecutionDetails = liveStateFresh && executionActive;
   const guardrails = state?.guardrails;
   const activeAlert = liveStateFresh ? guardrails?.activeAlert ?? null : null;
 
@@ -304,12 +313,12 @@ export default function TradingCockpit() {
     if (!paired) return "PAIR DESKTOP OBSERVER";
     if (!link?.online) return "DESKTOP OFFLINE";
     if (!controlWatching) return "OBSERVER PAUSED";
-    if (controlWatching && (!observing || !frameFresh)) return "WATCHING · WAITING FOR FRESH FRAME";
+    if (controlWatching && (!observing || !frameFresh)) return "WAITING";
     if (status === "PENDING") return "WATCHING PENDING ORDER";
-    if (status === "OPEN") return "WATCHING LIVE POSITION";
-    if (status === "FLAT") return "WATCHING · FLAT";
-    return "WATCHING";
-  }, [controlWatching, error, frameFresh, link?.online, observing, paired, status]);
+    if (status === "OPEN") return "TRADE IN PROGRESS";
+    if (intentState === "PREPARING") return "PREPARING ORDER";
+    return "WAITING";
+  }, [controlWatching, error, frameFresh, intentState, link?.online, observing, paired, status]);
 
   async function confirmPairing() {
     const code = pairCode.trim().toUpperCase();
@@ -451,33 +460,33 @@ export default function TradingCockpit() {
           <div className="trading-symbol-row">
             <div>
               <small>SYMBOL</small>
-              <strong>{liveStateFresh ? (safeTradingSymbol(observer?.symbol) ?? safeTradingSymbol(current?.symbol) ?? "—") : "—"}</strong>
+              <strong>{showExecutionDetails ? (safeTradingSymbol(observer?.symbol) ?? safeTradingSymbol(current?.symbol) ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>DIRECTION</small>
-              <strong>{liveStateFresh ? (observer?.side ?? current?.side ?? "—") : "—"}</strong>
+              <strong>{showExecutionDetails ? (observer?.side ?? current?.side ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>QTY</small>
-              <strong>{liveStateFresh ? (observer?.quantity ?? current?.quantity ?? "—") : "—"}</strong>
+              <strong>{showExecutionDetails ? (observer?.quantity ?? current?.quantity ?? "—") : "—"}</strong>
             </div>
             <div>
               <small>ORDER</small>
-              <strong>{liveStateFresh ? (observer?.orderType ?? "—") : "—"}</strong>
+              <strong>{showExecutionDetails ? (observer?.orderType ?? "—") : "—"}</strong>
             </div>
           </div>
 
           <div className="trading-prices">
-            <Metric label="ENTRY" value={liveStateFresh ? number(observer?.entryPrice ?? current?.entryPrice) : "—"} />
-            <Metric label="CURRENT" value={liveStateFresh ? number(observer?.currentPrice) : "—"} />
-            <Metric label="STOP" value={liveStateFresh ? number(observer?.stopPrice ?? current?.stopPrice) : "—"} />
-            <Metric label="TARGET" value={liveStateFresh ? number(observer?.targetPrice ?? current?.targetPrice) : "—"} />
+            <Metric label="ENTRY" value={showExecutionDetails ? number(observer?.entryPrice ?? current?.entryPrice) : "—"} />
+            <Metric label="CURRENT" value={showExecutionDetails ? number(observer?.currentPrice) : "—"} />
+            <Metric label="STOP" value={showExecutionDetails ? number(observer?.stopPrice ?? current?.stopPrice) : "—"} />
+            <Metric label="TARGET" value={showExecutionDetails ? number(observer?.targetPrice ?? current?.targetPrice) : "—"} />
             <Metric
               label="OPEN P&L"
-              value={liveStateFresh && status === "OPEN" ? money(observer?.openPnl ?? state?.account.openPnl) : "—"}
+              value={showExecutionDetails && status === "OPEN" ? money(observer?.openPnl ?? state?.account.openPnl) : "—"}
               strong
             />
-            <Metric label="VISION CONF." value={liveStateFresh ? `${confidence}%` : "—"} />
+            <Metric label="VISION CONF." value={showExecutionDetails ? `${confidence}%` : "—"} />
           </div>
         </article>
 
