@@ -198,45 +198,6 @@ export async function POST(request: Request) {
     });
   }
 
-  if (semanticExecution?.frame.intentState === "PREPARING") {
-    const frame = semanticExecution.frame;
-    const state = await ingestTradingObservation({
-      connection: "OBSERVING",
-      observer: {
-        status: "UNKNOWN",
-        symbol: frame.symbol,
-        side: frame.side,
-        quantity: frame.quantity,
-        orderType: frame.orderType,
-        entryPrice: frame.entryPrice,
-        currentPrice: null,
-        stopPrice: frame.stopPrice,
-        targetPrice: frame.targetPrice,
-        openPnl: null,
-        confidence: frame.confidence,
-        observedAt: capturedAt,
-        evidence: frame.evidence,
-        intentState: "PREPARING",
-        orderTicketVisible: true,
-      },
-      observedAt: capturedAt,
-    });
-
-    return Response.json({
-      ok: true,
-      accepted: true,
-      source: "semantic-preparing",
-      frame,
-      state: {
-        connection: state.account.connection,
-        observer: state.observer,
-        guardrails: state.guardrails,
-        openTrades: state.openTrades,
-        today: state.today,
-      },
-    });
-  }
-
   let frame: FrameRead;
   try {
     frame = await inspectFrame(
