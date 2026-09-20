@@ -615,17 +615,57 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
     parsed.find((item) => item.type === "MARKET");
 
   if (!entry) {
+    const ocrRows = parseLocalOcrRows(lines);
     const addOrder = normalizedLines
-      .map((text) => text.match(/^Add order on\s+([A-Z]{1,8}[A-Z0-9!]*)\s+at\s+([\d,]+(?:\.\d+)?)/i))
+      .map((text) => text.match(/^Add order on\s+([A-Z0-9!\s]{1,20}?)\s+at\s+([\d,]+(?:\.\d+)?)/i))
       .find(Boolean);
+
+    const orderTypeAnchor = ocrRows.find((row) => /\bchange order type\b/i.test(row.text)) ?? null;
+    const quantityAnchor =
+      ocrRows.find((row) => /\bchange order quantity\b/i.test(row.text))
+      ?? ocrRows.find((row) => /^quantity$/i.test(row.text))
+      ?? null;
+
+    const lowerAction = ocrRows
+      .filter((row) => row.y >= 450 && /^(buy|sell)$/i.test(row.text))
+      .sort((a, b) => b.y - a.y)[0] ?? null;
+
+    const side: "LONG" | "SHORT" | null =
+      lowerAction?.text.toUpperCase() === "BUY" ? "LONG" :
+      lowerAction?.text.toUpperCase() === "SELL" ? "SHORT" :
+      null;
+
+    const typeCandidates = orderTypeAnchor
+      ? ocrRows
+          .filter((row) => row.y >= orderTypeAnchor.y - 8 && row.y <= orderTypeAnchor.y + 130)
+          .filter((row) => /^(limit|stop|market)$/i.test(row.text))
+          .sort((a, b) => Math.abs(a.y - orderTypeAnchor.y) - Math.abs(b.y - orderTypeAnchor.y))
+      : [];
+    const orderType =
+      typeCandidates.length === 1 || (typeCandidates.length > 1 && typeCandidates[0].y < typeCandidates[1].y - 12)
+        ? typeCandidates[0].text.toUpperCase() as "LIMIT" | "STOP" | "MARKET"
+        : null;
+
+    const quantity = quantityAnchor ? nearestPlainNumber(ocrRows, quantityAnchor, 120, 70, 1, 1000) : null;
+    const entryPrice = addOrder ? Number(addOrder[2].replace(/,/g, "")) : null;
+
+    const stopAnchor = ocrRows.find((row) => /\bstop loss\b/i.test(row.text)) ?? null;
+    const targetAnchor = ocrRows.find((row) => /\b(take profit|target)\b/i.test(row.text)) ?? null;
+    const stopPrice = stopAnchor ? nearestPriceRow(ocrRows, stopAnchor, 180, 50) : null;
+    const targetPrice = targetAnchor ? nearestPriceRow(ocrRows, targetAnchor, 180, 50) : null;
+
+    const symbol =
+      normalizeTradingSymbol(addOrder?.[1]?.replace(/\s+/g, "") ?? null)
+      ?? inferSymbolFromOcrRows(ocrRows);
+
     return {
-      symbol: normalizeTradingSymbol(addOrder?.[1] ?? null),
-      orderType: null,
-      side: null,
-      quantity: null,
-      entryPrice: addOrder ? Number(addOrder[2].replace(/,/g, "")) : null,
-      stopPrice: null,
-      targetPrice: null,
+      symbol,
+      orderType,
+      side,
+      quantity,
+      entryPrice: Number.isFinite(entryPrice) ? entryPrice : null,
+      stopPrice,
+      targetPrice,
     };
   }
 
@@ -656,6 +696,85 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
     stopPrice: stopOrder && Number.isFinite(stopOrder.price) ? stopOrder.price : null,
     targetPrice: targetOrder && Number.isFinite(targetOrder.price) ? targetOrder.price : null,
   };
+}
+
+type LocalOcrRow = { x: number; y: number; w: number; h: number; text: string };
+
+function parseLocalOcrRows(lines: string[]): LocalOcrRow[] {
+  return lines
+    .map((line) => {
+      const match = line.match(/^JARVIS_OCR\|X=(-?\d+(?:\.\d+)?)\|Y=(-?\d+(?:\.\d+)?)\|W=(-?\d+(?:\.\d+)?)\|H=(-?\d+(?:\.\d+)?)\|TEXT=(.*)$/i);
+      if (!match) return null;
+      return {
+        x: Number(match[1]),
+        y: Number(match[2]),
+        w: Number(match[3]),
+        h: Number(match[4]),
+        text: match[5].trim(),
+      };
+    })
+    .filter((row): row is LocalOcrRow => Boolean(row));
+}
+
+function nearestPlainNumber(
+  rows: LocalOcrRow[],
+  anchor: LocalOcrRow,
+  maxDx: number,
+  maxDy: number,
+  min: number,
+  max: number,
+): number | null {
+  const candidate = rows
+    .map((row) => ({
+      row,
+      value: /^\d+(?:\.\d+)?$/.test(row.text) ? Number(row.text) : null,
+      dx: Math.abs((row.x + row.w / 2) - (anchor.x + anchor.w / 2)),
+      dy: Math.abs((row.y + row.h / 2) - (anchor.y + anchor.h / 2)),
+    }))
+    .filter((item) => item.value != null && item.value >= min && item.value <= max)
+    .filter((item) => item.dx <= maxDx && item.dy <= maxDy)
+    .sort((a, b) => (a.dy * 4 + a.dx) - (b.dy * 4 + b.dx))[0];
+  return candidate?.value ?? null;
+}
+
+function nearestPriceRow(
+  rows: LocalOcrRow[],
+  anchor: LocalOcrRow,
+  maxDx: number,
+  maxDy: number,
+): number | null {
+  const candidate = rows
+    .map((row) => {
+      const matches = row.text.match(/\b\d{1,3}(?:,\d{3})+(?:\.\d{1,4})?\b|\b\d{4,6}(?:\.\d{1,4})?\b/g) ?? [];
+      const values = matches
+        .map((raw) => Number(raw.replace(/,/g, "")))
+        .filter((value) => Number.isFinite(value) && value >= 100 && value <= 1_000_000);
+      return {
+        row,
+        value: values[0] ?? null,
+        dx: Math.abs((row.x + row.w / 2) - (anchor.x + anchor.w / 2)),
+        dy: Math.abs((row.y + row.h / 2) - (anchor.y + anchor.h / 2)),
+      };
+    })
+    .filter((item) => item.value != null)
+    .filter((item) => item.dx <= maxDx && item.dy <= maxDy)
+    .sort((a, b) => (a.dy * 4 + a.dx) - (b.dy * 4 + b.dx))[0];
+  return candidate?.value ?? null;
+}
+
+function inferSymbolFromOcrRows(rows: LocalOcrRow[]): string | null {
+  const text = rows.slice(0, 100).map((row) => row.text).join(" ");
+  if (/Micro\s+E-?mini\s+Nasdaq-?100/i.test(text)) return "MNQ";
+  if (/E-?mini\s+Nasdaq-?100/i.test(text)) return "NQ";
+  if (/Micro\s+E-?mini\s+S&P/i.test(text)) return "MES";
+  if (/E-?mini\s+S&P/i.test(text)) return "ES";
+  if (/Micro\s+E-?mini\s+Dow/i.test(text)) return "MYM";
+  if (/E-?mini\s+Dow/i.test(text)) return "YM";
+
+  const ticker = rows
+    .map((row) => row.text.match(/\b([A-Z]{1,5})(?:[FGHJKMNQUVXZ]\d{2,4}|\d?!)/)?.[1] ?? null)
+    .find(Boolean);
+  return ticker ? normalizeTradingSymbol(ticker) : null;
 }
 
 function normalizeTradingSymbol(raw: string | null): string | null {
