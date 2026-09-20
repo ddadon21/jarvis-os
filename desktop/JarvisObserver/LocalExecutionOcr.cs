@@ -122,10 +122,7 @@ internal sealed class LocalExecutionOcr
 
     private static string? TryBuildExecution(List<OcrRow> rows)
     {
-        // TradingView often OCRs the visible chart order as separate fragments:
-        // "Buy" | "8" | "Limit" | "29,733.75". Reconstruct the horizontal row
-        // instead of requiring one combined OCR sentence.
-        var candidates = rows
+        var reconstructed = rows
             .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Buy|Sell)$", RegexOptions.IgnoreCase))
             .Select(actionRow =>
             {
@@ -145,53 +142,130 @@ internal sealed class LocalExecutionOcr
                     .Where(row => row.X >= actionRow.X + actionRow.Width - 4)
                     .FirstOrDefault(row => Regex.IsMatch(row.Text.Trim(), @"^(Limit|Stop|Market)$", RegexOptions.IgnoreCase));
 
-                return new { actionRow, quantityRow, typeRow, peers };
+                if (quantityRow is null || typeRow is null) return null;
+
+                var quantity = ParseNumber(quantityRow.Text.Trim());
+                var type = typeRow.Text.Trim().ToUpperInvariant();
+                var price = FindNearestPrice(rows, typeRow, preferRight: true)
+                    ?? FindNearestPrice(rows, actionRow, preferRight: true);
+
+                return new ReconstructedOrder(
+                    actionRow.Text.Trim().Equals("Buy", StringComparison.OrdinalIgnoreCase) ? "BUY" : "SELL",
+                    quantity,
+                    type,
+                    price,
+                    actionRow);
             })
-            .Where(x => x.quantityRow is not null && x.typeRow is not null)
-            .OrderByDescending(x => x.actionRow.Y)
+            .Where(order => order is not null)
+            .Cast<ReconstructedOrder>()
             .ToList();
 
-        var order = candidates.FirstOrDefault();
-        if (order is null) return null;
+        if (reconstructed.Count == 0) return null;
 
-        var action = order.actionRow.Text.Trim().Equals("Buy", StringComparison.OrdinalIgnoreCase) ? "LONG" : "SHORT";
-        var quantity = ParseNumber(order.quantityRow!.Text.Trim());
-        var type = order.typeRow!.Text.Trim().ToUpperInvariant();
         var symbol = InferSymbol(rows);
 
-        var entry = FindNearestPrice(rows, order.typeRow!, preferRight: true)
-            ?? FindNearestPrice(rows, order.actionRow, preferRight: true);
+        // A live bracketed position presents as two same-side exit orders: one STOP
+        // and one LIMIT, with the original opposite-side entry order gone.
+        var bracket = reconstructed
+            .Where(order => order.Quantity is not null)
+            .GroupBy(order => new { order.Action, Quantity = order.Quantity!.Value })
+            .Select(group => new
+            {
+                group.Key.Action,
+                group.Key.Quantity,
+                Stop = group.FirstOrDefault(order => order.Type == "STOP"),
+                Limit = group.FirstOrDefault(order => order.Type == "LIMIT"),
+                HasOpposite = reconstructed.Any(order => order.Action != group.Key.Action),
+            })
+            .FirstOrDefault(group => group.Stop is not null && group.Limit is not null && !group.HasOpposite);
 
-        var stopAnchor = rows
-            .Where(row => Regex.IsMatch(row.Text, @"(^|\s)-\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
-                       || Regex.IsMatch(row.Text, @"\b(stop loss|stop)\b", RegexOptions.IgnoreCase))
-            .OrderBy(row => VerticalDistance(row, order.actionRow))
-            .FirstOrDefault();
+        if (bracket is not null)
+        {
+            var side = bracket.Action == "SELL" ? "LONG" : "SHORT";
+            return string.Join("|", new[]
+            {
+                "JARVIS_OCR_EXECUTION",
+                "STATUS=OPEN",
+                $"SIDE={side}",
+                $"QTY={bracket.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                "TYPE=",
+                $"SYMBOL={symbol ?? ""}",
+                "ENTRY=",
+                $"STOP={Format(bracket.Stop!.Price)}",
+                $"TARGET={Format(bracket.Limit!.Price)}"
+            });
+        }
 
-        var targetAnchor = rows
-            .Where(row => Regex.IsMatch(row.Text, @"(^|\s)\+\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
-                       || Regex.IsMatch(row.Text, @"\b(take profit|target)\b", RegexOptions.IgnoreCase))
-            .OrderBy(row => VerticalDistance(row, order.actionRow))
-            .FirstOrDefault();
+        // If an opposite-side entry is still present alongside its protective exits,
+        // the position has not filled yet. Prefer that entry as the pending order.
+        var bracketWithEntry = reconstructed
+            .Where(order => order.Quantity is not null)
+            .GroupBy(order => new { order.Action, Quantity = order.Quantity!.Value })
+            .Select(group => new
+            {
+                group.Key.Action,
+                group.Key.Quantity,
+                Stop = group.FirstOrDefault(order => order.Type == "STOP"),
+                Limit = group.FirstOrDefault(order => order.Type == "LIMIT"),
+                Entry = reconstructed.FirstOrDefault(order => order.Action != group.Key.Action && order.Quantity == group.Key.Quantity),
+            })
+            .FirstOrDefault(group => group.Stop is not null && group.Limit is not null && group.Entry is not null);
 
-        var stop = stopAnchor is null ? null : FindNearestPrice(rows, stopAnchor, preferRight: true);
-        var target = targetAnchor is null ? null : FindNearestPrice(rows, targetAnchor, preferRight: true);
+        ReconstructedOrder entry;
+        double? stop;
+        double? target;
 
-        var parts = new List<string>
+        if (bracketWithEntry is not null)
+        {
+            entry = bracketWithEntry.Entry!;
+            stop = bracketWithEntry.Stop!.Price;
+            target = bracketWithEntry.Limit!.Price;
+        }
+        else
+        {
+            entry = reconstructed
+                .OrderByDescending(order => order.Anchor.Y)
+                .First();
+            stop = null;
+            target = null;
+
+            var stopAnchor = rows
+                .Where(row => Regex.IsMatch(row.Text, @"(^|\s)-\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
+                           || Regex.IsMatch(row.Text, @"\b(stop loss|stop)\b", RegexOptions.IgnoreCase))
+                .OrderBy(row => VerticalDistance(row, entry.Anchor))
+                .FirstOrDefault();
+
+            var targetAnchor = rows
+                .Where(row => Regex.IsMatch(row.Text, @"(^|\s)\+\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
+                           || Regex.IsMatch(row.Text, @"\b(take profit|target)\b", RegexOptions.IgnoreCase))
+                .OrderBy(row => VerticalDistance(row, entry.Anchor))
+                .FirstOrDefault();
+
+            stop = stopAnchor is null ? null : FindNearestPrice(rows, stopAnchor, preferRight: true);
+            target = targetAnchor is null ? null : FindNearestPrice(rows, targetAnchor, preferRight: true);
+        }
+
+        var side = entry.Action == "BUY" ? "LONG" : "SHORT";
+        return string.Join("|", new[]
         {
             "JARVIS_OCR_EXECUTION",
             "STATUS=PENDING",
-            $"SIDE={action}",
-            $"QTY={quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""}",
-            $"TYPE={type}",
+            $"SIDE={side}",
+            $"QTY={entry.Quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""}",
+            $"TYPE={entry.Type}",
             $"SYMBOL={symbol ?? ""}",
-            $"ENTRY={Format(entry)}",
+            $"ENTRY={Format(entry.Price)}",
             $"STOP={Format(stop)}",
             $"TARGET={Format(target)}"
-        };
-
-        return string.Join("|", parts);
+        });
     }
+
+    private sealed record ReconstructedOrder(
+        string Action,
+        double? Quantity,
+        string Type,
+        double? Price,
+        OcrRow Anchor);
 
     private static string? InferSymbol(List<OcrRow> rows)
     {
