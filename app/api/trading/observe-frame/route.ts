@@ -113,7 +113,7 @@ export async function POST(request: Request) {
   const ocrExecution = semanticText ? inspectLocalOcrExecution(semanticText) : null;
   const accessibilityExecution = semanticText ? inspectSemanticExecution(semanticText) : null;
   const semanticExecution =
-    ocrExecution?.frame.positionStatus === "PENDING"
+    ocrExecution?.frame.positionStatus === "PENDING" || ocrExecution?.frame.positionStatus === "OPEN"
       ? ocrExecution
       : accessibilityExecution;
 
@@ -126,9 +126,13 @@ export async function POST(request: Request) {
   const previous = await getTradingState();
   const observerVersion = typeof body.observerVersion === "string" ? body.observerVersion : "";
 
+  const previousWasLocallyConfirmedOpen =
+    previous.observer?.status === "OPEN" &&
+    previous.observer.evidence.some((item) => item.includes("Local Windows OCR confirmed a live TradingView position"));
+
   if (
     ocrExecution?.frame.positionStatus === "FLAT" &&
-    previous.observer?.status === "PENDING" &&
+    (previous.observer?.status === "PENDING" || previousWasLocallyConfirmedOpen) &&
     accessibilityExecution?.frame.positionStatus !== "PENDING"
   ) {
     const flatFrame = ocrExecution.frame;
@@ -157,11 +161,15 @@ export async function POST(request: Request) {
     !semanticExecution &&
     (previous.observer?.status === "PENDING" || previous.observer?.status === "OPEN");
 
-  if (semanticExecution?.frame.positionStatus === "PENDING") {
+  if (semanticExecution?.frame.positionStatus === "PENDING" || semanticExecution?.frame.positionStatus === "OPEN") {
     const frame = mergeSemanticWithPrevious(semanticExecution.frame, previous.observer);
     const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
     const state = await ingestTradingObservation(observation);
-    console.info(ocrExecution?.frame.positionStatus === "PENDING" ? "Observer local OCR execution accepted" : "Observer semantic execution accepted", {
+    console.info(
+      ocrExecution?.frame.positionStatus === "PENDING" || ocrExecution?.frame.positionStatus === "OPEN"
+        ? "Observer local OCR execution accepted"
+        : "Observer semantic execution accepted",
+      {
       status: frame.positionStatus,
       intentState: frame.intentState,
       symbol: frame.symbol,
@@ -176,7 +184,7 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       accepted: true,
-      source: ocrExecution?.frame.positionStatus === "PENDING" ? "local-ocr" : "semantic",
+      source: ocrExecution?.frame.positionStatus === "PENDING" || ocrExecution?.frame.positionStatus === "OPEN" ? "local-ocr" : "semantic",
       frame,
       state: {
         connection: state.account.connection,
@@ -423,7 +431,7 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
     };
   }
 
-  if (fields.STATUS !== "PENDING") return null;
+  if (fields.STATUS !== "PENDING" && fields.STATUS !== "OPEN") return null;
 
   const side = fields.SIDE === "LONG" || fields.SIDE === "SHORT" ? fields.SIDE : null;
   const orderType = fields.TYPE === "LIMIT" || fields.TYPE === "STOP" || fields.TYPE === "MARKET" ? fields.TYPE : null;
@@ -433,11 +441,12 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
   const targetPrice = parseSemanticNumber(fields.TARGET);
   const symbol = normalizeTradingSymbol(fields.SYMBOL || null);
 
+  const isOpen = fields.STATUS === "OPEN";
   return {
     source: "semantic",
     frame: {
       brokerPanelVisible: true,
-      positionStatus: "PENDING",
+      positionStatus: isOpen ? "OPEN" : "PENDING",
       symbol,
       orderType,
       side,
@@ -450,11 +459,19 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
       tradeRealizedPnl: null,
       balance: null,
       equity: null,
-      confidence: entryPrice != null && quantity != null && symbol && side && orderType ? 0.995 : 0.94,
-      evidence: ["Local Windows OCR read the visible TradingView working-order label and nearby chart prices."],
-      note: "Pending order detected locally from the TradingView chart; cloud vision was not required.",
-      intentState: "ORDER_WORKING",
-      orderTicketVisible: true,
+      confidence: isOpen
+        ? (quantity != null && symbol && side && stopPrice != null && targetPrice != null ? 0.995 : 0.94)
+        : (entryPrice != null && quantity != null && symbol && side && orderType ? 0.995 : 0.94),
+      evidence: [
+        isOpen
+          ? "Local Windows OCR confirmed a live TradingView position from matching protective stop and target orders after the entry order disappeared."
+          : "Local Windows OCR read the visible TradingView working-order label and nearby chart prices."
+      ],
+      note: isOpen
+        ? "Live position detected locally from the TradingView chart; cloud vision was not required."
+        : "Pending order detected locally from the TradingView chart; cloud vision was not required.",
+      intentState: isOpen ? "POSITION_OPEN" : "ORDER_WORKING",
+      orderTicketVisible: !isOpen,
     },
   };
 }
