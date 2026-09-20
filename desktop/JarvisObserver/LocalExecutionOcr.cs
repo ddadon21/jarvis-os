@@ -33,27 +33,45 @@ internal sealed class LocalExecutionOcr
 
         try
         {
-            using var png = new MemoryStream();
-            bitmap.Save(png, ImageFormat.Png);
-            var bytes = png.ToArray();
+            var rows = await RecognizeRowsAsync(bitmap, 0, 0, 1.0);
 
-            using var randomAccess = new InMemoryRandomAccessStream();
-            using (var output = randomAccess.GetOutputStreamAt(0))
-            using (var writer = new DataWriter(output))
+            // TradingView execution labels are small. If the first pass does not
+            // already produce a rich execution read, run one enlarged pass over
+            // the chart/order region instead of repeatedly depending on tiny text.
+            var firstCanonical = TryBuildExecution(rows) ?? TryBuildPreparation(rows);
+            if (!IsRichCanonical(firstCanonical))
             {
-                writer.WriteBytes(bytes);
-                await writer.StoreAsync();
-                await writer.FlushAsync();
+                var cropY = Math.Max(0, (int)Math.Round(bitmap.Height * 0.34));
+                var cropHeight = Math.Max(1, bitmap.Height - cropY);
+                using var crop = new Bitmap(bitmap.Width, cropHeight, PixelFormat.Format32bppArgb);
+                using (var graphics = Graphics.FromImage(crop))
+                {
+                    graphics.DrawImage(
+                        bitmap,
+                        new Rectangle(0, 0, crop.Width, crop.Height),
+                        new Rectangle(0, cropY, bitmap.Width, cropHeight),
+                        GraphicsUnit.Pixel);
+                }
+
+                var scale = Math.Min(1.85, 2450d / Math.Max(crop.Width, crop.Height));
+                if (scale > 1.05)
+                {
+                    var scaledWidth = Math.Max(1, (int)Math.Round(crop.Width * scale));
+                    var scaledHeight = Math.Max(1, (int)Math.Round(crop.Height * scale));
+                    using var enlarged = new Bitmap(scaledWidth, scaledHeight, PixelFormat.Format32bppArgb);
+                    using (var graphics = Graphics.FromImage(enlarged))
+                    {
+                        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                        graphics.DrawImage(crop, new Rectangle(0, 0, scaledWidth, scaledHeight));
+                    }
+
+                    var detailRows = await RecognizeRowsAsync(enlarged, 0, cropY, 1d / scale);
+                    rows = MergeRows(rows, detailRows);
+                }
             }
 
-            randomAccess.Seek(0);
-            var decoder = await BitmapDecoder.CreateAsync(randomAccess);
-            using var softwareBitmap = await decoder.GetSoftwareBitmapAsync(
-                BitmapPixelFormat.Bgra8,
-                BitmapAlphaMode.Premultiplied);
-
-            var result = await _engine.RecognizeAsync(softwareBitmap);
-            return BuildSemantic(result);
+            return BuildSemantic(rows);
         }
         catch
         {
@@ -61,19 +79,43 @@ internal sealed class LocalExecutionOcr
         }
     }
 
-    private string BuildSemantic(OcrResult result)
+    private async Task<List<OcrRow>> RecognizeRowsAsync(
+        Bitmap bitmap,
+        double originX,
+        double originY,
+        double coordinateScale)
     {
-        var rows = result.Lines
+        using var png = new MemoryStream();
+        bitmap.Save(png, ImageFormat.Png);
+        var bytes = png.ToArray();
+
+        using var randomAccess = new InMemoryRandomAccessStream();
+        using (var output = randomAccess.GetOutputStreamAt(0))
+        using (var writer = new DataWriter(output))
+        {
+            writer.WriteBytes(bytes);
+            await writer.StoreAsync();
+            await writer.FlushAsync();
+        }
+
+        randomAccess.Seek(0);
+        var decoder = await BitmapDecoder.CreateAsync(randomAccess);
+        using var softwareBitmap = await decoder.GetSoftwareBitmapAsync(
+            BitmapPixelFormat.Bgra8,
+            BitmapAlphaMode.Premultiplied);
+
+        var result = await _engine!.RecognizeAsync(softwareBitmap);
+        return result.Lines
             .Select(line =>
             {
                 var words = line.Words.ToList();
                 var text = string.Join(" ", words.Select(w => w.Text)).Trim();
                 if (string.IsNullOrWhiteSpace(text)) return null;
 
-                var left = words.Min(w => w.BoundingRect.X);
-                var top = words.Min(w => w.BoundingRect.Y);
-                var right = words.Max(w => w.BoundingRect.X + w.BoundingRect.Width);
-                var bottom = words.Max(w => w.BoundingRect.Y + w.BoundingRect.Height);
+                var left = words.Min(w => w.BoundingRect.X) * coordinateScale + originX;
+                var top = words.Min(w => w.BoundingRect.Y) * coordinateScale + originY;
+                var right = words.Max(w => w.BoundingRect.X + w.BoundingRect.Width) * coordinateScale + originX;
+                var bottom = words.Max(w => w.BoundingRect.Y + w.BoundingRect.Height) * coordinateScale + originY;
 
                 return new OcrRow(
                     text,
@@ -85,7 +127,40 @@ internal sealed class LocalExecutionOcr
             .Where(x => x is not null)
             .Cast<OcrRow>()
             .ToList();
+    }
 
+    private static List<OcrRow> MergeRows(List<OcrRow> primary, List<OcrRow> extra)
+    {
+        var merged = new List<OcrRow>(primary);
+        foreach (var row in extra)
+        {
+            var duplicate = merged.Any(existing =>
+                string.Equals(NormalizeText(existing.Text), NormalizeText(row.Text), StringComparison.OrdinalIgnoreCase) &&
+                Math.Abs(existing.X - row.X) <= 16 &&
+                Math.Abs(existing.Y - row.Y) <= 16);
+            if (!duplicate) merged.Add(row);
+        }
+        return merged.OrderBy(row => row.Y).ThenBy(row => row.X).ToList();
+    }
+
+    private static bool IsRichCanonical(string? canonical)
+    {
+        if (string.IsNullOrWhiteSpace(canonical)) return false;
+        if (!canonical.StartsWith("JARVIS_OCR_EXECUTION|", StringComparison.Ordinal)) return false;
+
+        var required = new[] { "SYMBOL=", "SIDE=", "QTY=", "ENTRY=" };
+        return required.All(key =>
+        {
+            var match = Regex.Match(canonical, $@"(?:^|\|){Regex.Escape(key)}([^|]*)");
+            return match.Success && !string.IsNullOrWhiteSpace(match.Groups[1].Value);
+        });
+    }
+
+    private static string NormalizeText(string value) =>
+        Regex.Replace(value.Trim(), @"\s+", " ");
+
+    private string BuildSemantic(List<OcrRow> rows)
+    {
         var output = new List<string>
         {
             "JARVIS_OCR_SURFACE|OK=1"
@@ -97,11 +172,17 @@ internal sealed class LocalExecutionOcr
         }
 
         var canonical = TryBuildExecution(rows);
+        var preparing = canonical is null ? TryBuildPreparation(rows) : null;
         if (canonical is not null)
         {
             _hadWorkingOrder = true;
             _missingWorkingOrderScans = 0;
             output.Insert(0, canonical);
+        }
+        else if (preparing is not null)
+        {
+            _missingWorkingOrderScans = 0;
+            output.Insert(0, preparing);
         }
         else
         {
@@ -122,6 +203,12 @@ internal sealed class LocalExecutionOcr
 
     private static string? TryBuildExecution(List<OcrRow> rows)
     {
+        var combinedOrders = rows
+            .Select(row => ParseCombinedOrder(row))
+            .Where(order => order is not null)
+            .Cast<ReconstructedOrder>()
+            .ToList();
+
         var reconstructed = rows
             .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Buy|Sell)$", RegexOptions.IgnoreCase))
             .Select(actionRow =>
@@ -154,15 +241,30 @@ internal sealed class LocalExecutionOcr
                     quantity,
                     type,
                     price,
+                    null,
+                    null,
                     actionRow);
             })
             .Where(order => order is not null)
             .Cast<ReconstructedOrder>()
             .ToList();
 
+        reconstructed = combinedOrders
+            .Concat(reconstructed)
+            .GroupBy(order => new
+            {
+                order.Action,
+                order.Quantity,
+                order.Type,
+                Price = order.Price is null ? null : Math.Round(order.Price.Value, 4),
+                order.Contract,
+            })
+            .Select(group => group.First())
+            .ToList();
+
         if (reconstructed.Count == 0) return null;
 
-        var symbol = InferSymbol(rows);
+        var symbol = NormalizeContractRoot(reconstructed.Select(order => order.Contract).FirstOrDefault(contract => !string.IsNullOrWhiteSpace(contract))) ?? InferSymbol(rows);
 
         // A live bracketed position presents as two same-side exit orders: one STOP
         // and one LIMIT, with the original opposite-side entry order gone.
@@ -218,8 +320,8 @@ internal sealed class LocalExecutionOcr
         if (bracketWithEntry is not null)
         {
             entry = bracketWithEntry.Entry!;
-            stop = bracketWithEntry.Stop!.Price;
-            target = bracketWithEntry.Limit!.Price;
+            stop = FindRiskRewardPrice(rows, entry.Anchor, negative: true) ?? bracketWithEntry.Stop!.Price;
+            target = FindRiskRewardPrice(rows, entry.Anchor, negative: false) ?? bracketWithEntry.Limit!.Price;
         }
         else
         {
@@ -229,20 +331,8 @@ internal sealed class LocalExecutionOcr
             stop = null;
             target = null;
 
-            var stopAnchor = rows
-                .Where(row => Regex.IsMatch(row.Text, @"(^|\s)-\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
-                           || Regex.IsMatch(row.Text, @"\b(stop loss|stop)\b", RegexOptions.IgnoreCase))
-                .OrderBy(row => VerticalDistance(row, entry.Anchor))
-                .FirstOrDefault();
-
-            var targetAnchor = rows
-                .Where(row => Regex.IsMatch(row.Text, @"(^|\s)\+\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
-                           || Regex.IsMatch(row.Text, @"\b(take profit|target)\b", RegexOptions.IgnoreCase))
-                .OrderBy(row => VerticalDistance(row, entry.Anchor))
-                .FirstOrDefault();
-
-            stop = stopAnchor is null ? null : FindNearestPrice(rows, stopAnchor, preferRight: true);
-            target = targetAnchor is null ? null : FindNearestPrice(rows, targetAnchor, preferRight: true);
+            stop = FindRiskRewardPrice(rows, entry.Anchor, negative: true);
+            target = FindRiskRewardPrice(rows, entry.Anchor, negative: false);
         }
 
         var pendingSide = entry.Action == "BUY" ? "LONG" : "SHORT";
@@ -265,18 +355,243 @@ internal sealed class LocalExecutionOcr
         double? Quantity,
         string Type,
         double? Price,
+        string? Contract,
+        double? SecondaryLimitPrice,
         OcrRow Anchor);
+
+    private static ReconstructedOrder? ParseCombinedOrder(OcrRow row)
+    {
+        var match = Regex.Match(
+            row.Text.Trim(),
+            @"^(Buy|Sell)\s+(\d+(?:\.\d+)?)\s+([A-Z]{1,8}[A-Z0-9!]{0,10})\s+@\s+([\d,]+(?:\.\d+)?)\s+(limit|stop|market)\b(?:\s+([\d,]+(?:\.\d+)?)\s+limit\b)?",
+            RegexOptions.IgnoreCase);
+        if (!match.Success) return null;
+
+        return new ReconstructedOrder(
+            match.Groups[1].Value.Equals("Buy", StringComparison.OrdinalIgnoreCase) ? "BUY" : "SELL",
+            ParseNumber(match.Groups[2].Value),
+            match.Groups[5].Value.ToUpperInvariant(),
+            ParseNumber(match.Groups[4].Value.Replace(",", "")),
+            match.Groups[3].Value.ToUpperInvariant(),
+            match.Groups[6].Success ? ParseNumber(match.Groups[6].Value.Replace(",", "")) : null,
+            row);
+    }
+
+    private static string? TryBuildPreparation(List<OcrRow> rows)
+    {
+        var ticketAnchor = rows
+            .Where(row => Regex.IsMatch(row.Text, @"\b(change order type|change order quantity|^quantity$|stop loss|take profit)\b", RegexOptions.IgnoreCase))
+            .OrderByDescending(row => row.Y)
+            .FirstOrDefault();
+        if (ticketAnchor is null) return null;
+
+        var symbol = InferSymbol(rows);
+        var addOrder = rows
+            .Select(row => Regex.Match(row.Text, @"Add order on\s+([A-Z0-9! ]{2,20}?)\s+at\s+([\d,]+(?:\.\d+)?)", RegexOptions.IgnoreCase))
+            .FirstOrDefault(match => match.Success);
+
+        if (symbol is null && addOrder is not null && addOrder.Success)
+        {
+            symbol = NormalizeOcrTicker(addOrder.Groups[1].Value);
+        }
+
+        var entryPrice = addOrder is not null && addOrder.Success
+            ? ParseNumber(addOrder.Groups[2].Value.Replace(",", ""))
+            : (double?)null;
+
+        var quantityAnchor = rows
+            .Where(row => Regex.IsMatch(row.Text, @"\b(change order quantity|^quantity$)\b", RegexOptions.IgnoreCase))
+            .OrderByDescending(row => row.Y)
+            .FirstOrDefault();
+        var quantity = quantityAnchor is null ? null : FindNearestPlainNumber(rows, quantityAnchor, 140, 75, 1, 1000);
+
+        var orderTypeAnchor = rows
+            .Where(row => Regex.IsMatch(row.Text, @"\bchange order type\b", RegexOptions.IgnoreCase))
+            .OrderByDescending(row => row.Y)
+            .FirstOrDefault();
+        var orderType = orderTypeAnchor is null ? null : FindNearestOrderType(rows, orderTypeAnchor);
+
+        var stopPrice = FindRiskRewardPrice(rows, ticketAnchor, negative: true);
+        var targetPrice = FindRiskRewardPrice(rows, ticketAnchor, negative: false);
+
+        string? side = null;
+        var action = rows
+            .Where(row => row.Y >= ticketAnchor.Y - 180 && row.Y <= ticketAnchor.Y + 180)
+            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Buy|Sell)$", RegexOptions.IgnoreCase))
+            .OrderBy(row => VerticalDistance(row, ticketAnchor))
+            .FirstOrDefault();
+
+        if (action is not null)
+        {
+            side = action.Text.Equals("Buy", StringComparison.OrdinalIgnoreCase) ? "LONG" : "SHORT";
+        }
+        else if (entryPrice is not null && stopPrice is not null && Math.Abs(entryPrice.Value - stopPrice.Value) > 0.000001)
+        {
+            side = stopPrice < entryPrice ? "LONG" : "SHORT";
+        }
+
+        var hasDetails =
+            symbol is not null ||
+            quantity is not null ||
+            orderType is not null ||
+            entryPrice is not null ||
+            stopPrice is not null ||
+            targetPrice is not null;
+        if (!hasDetails) return null;
+
+        return string.Join("|", new[]
+        {
+            "JARVIS_OCR_EXECUTION",
+            "STATUS=PREPARING",
+            $"SIDE={side ?? ""}",
+            $"QTY={quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""}",
+            $"TYPE={orderType ?? ""}",
+            $"SYMBOL={symbol ?? ""}",
+            $"ENTRY={Format(entryPrice)}",
+            $"STOP={Format(stopPrice)}",
+            $"TARGET={Format(targetPrice)}"
+        });
+    }
+
+    private static double? FindNearestPlainNumber(
+        List<OcrRow> rows,
+        OcrRow anchor,
+        double maxDx,
+        double maxDy,
+        double min,
+        double max)
+    {
+        return rows
+            .Where(row => !ReferenceEquals(row, anchor))
+            .Select(row => new
+            {
+                row,
+                value = Regex.IsMatch(row.Text.Trim(), @"^\d+(?:\.\d+)?$")
+                    ? ParseNumber(row.Text.Trim())
+                    : null,
+                dx = Math.Abs((row.X + row.Width / 2) - (anchor.X + anchor.Width / 2)),
+                dy = Math.Abs((row.Y + row.Height / 2) - (anchor.Y + anchor.Height / 2)),
+            })
+            .Where(item => item.value is not null && item.value >= min && item.value <= max)
+            .Where(item => item.dx <= maxDx && item.dy <= maxDy)
+            .OrderBy(item => item.dy * 4 + item.dx)
+            .Select(item => item.value)
+            .FirstOrDefault();
+    }
+
+    private static string? FindNearestOrderType(List<OcrRow> rows, OcrRow anchor)
+    {
+        var candidates = rows
+            .Where(row => !ReferenceEquals(row, anchor))
+            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Limit|Stop|Market)$", RegexOptions.IgnoreCase))
+            .Select(row => new
+            {
+                row,
+                dx = Math.Abs((row.X + row.Width / 2) - (anchor.X + anchor.Width / 2)),
+                dy = Math.Abs((row.Y + row.Height / 2) - (anchor.Y + anchor.Height / 2)),
+            })
+            .Where(item => item.dx <= 180 && item.dy <= 95)
+            .OrderBy(item => item.dy * 4 + item.dx)
+            .ToList();
+
+        if (candidates.Count == 0) return null;
+        if (candidates.Count > 1 && Math.Abs(candidates[0].dy - candidates[1].dy) < 8) return null;
+        return candidates[0].row.Text.Trim().ToUpperInvariant();
+    }
+
+    private static double? FindRiskRewardPrice(List<OcrRow> rows, OcrRow anchor, bool negative)
+    {
+        var signPattern = negative
+            ? @"(^|\s)-\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b|\bstop loss\b"
+            : @"(^|\s)\+\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b|\b(take profit|target)\b";
+
+        var riskAnchor = rows
+            .Where(row => Regex.IsMatch(row.Text, signPattern, RegexOptions.IgnoreCase))
+            .OrderBy(row => VerticalDistance(row, anchor))
+            .FirstOrDefault();
+
+        return riskAnchor is null ? null : FindNearestPriceWide(rows, riskAnchor);
+    }
+
+    private static double? FindNearestPriceWide(List<OcrRow> rows, OcrRow anchor)
+    {
+        return rows
+            .Where(row => !ReferenceEquals(row, anchor))
+            .Select(row => new
+            {
+                price = ExtractPrice(row.Text),
+                dy = Math.Abs((row.Y + row.Height / 2) - (anchor.Y + anchor.Height / 2)),
+                dx = row.X - (anchor.X + anchor.Width),
+            })
+            .Where(item => item.price is not null && item.dy <= 48 && item.dx >= -35 && item.dx <= 520)
+            .OrderBy(item => item.dy * 5 + Math.Abs(item.dx))
+            .Select(item => item.price)
+            .FirstOrDefault();
+    }
+
+    private static string? NormalizeContractRoot(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var symbol = Regex.Replace(raw.ToUpperInvariant(), @"[^A-Z0-9!]", "");
+        var contract = Regex.Match(symbol, @"^([A-Z]{1,5})[FGHJKMNQUVXZ]\d{2,4}$");
+        if (contract.Success) return contract.Groups[1].Value;
+        return NormalizeOcrTicker(symbol);
+    }
+
+    private static string? NormalizeOcrTicker(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var symbol = Regex.Replace(raw.ToUpperInvariant(), @"[^A-Z0-9!]", "");
+
+        var known = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["MNQ"] = "MNQ", ["MNQ1"] = "MNQ", ["MNQI"] = "MNQ", ["MNQ1!"] = "MNQ", ["MNQI!"] = "MNQ",
+            ["NQ"] = "NQ", ["NQ1"] = "NQ", ["NQI"] = "NQ", ["NQ1!"] = "NQ", ["NQI!"] = "NQ",
+            ["MES"] = "MES", ["MES1"] = "MES", ["MESI"] = "MES", ["MES1!"] = "MES",
+            ["ES"] = "ES", ["ES1"] = "ES", ["ESI"] = "ES", ["ES1!"] = "ES",
+            ["MYM"] = "MYM", ["MYM1"] = "MYM", ["MYMI"] = "MYM", ["MYM1!"] = "MYM",
+            ["YM"] = "YM", ["YM1"] = "YM", ["YMI"] = "YM", ["YM1!"] = "YM",
+            ["M2K"] = "M2K", ["RTY"] = "RTY", ["MGC"] = "MGC", ["GC"] = "GC",
+            ["MCL"] = "MCL", ["CL"] = "CL", ["SIL"] = "SIL", ["SI"] = "SI",
+            ["HG"] = "HG", ["ZB"] = "ZB", ["ZN"] = "ZN", ["ZF"] = "ZF", ["ZT"] = "ZT"
+        };
+
+        return known.TryGetValue(symbol, out var normalized) ? normalized : null;
+    }
 
     private static string? InferSymbol(List<OcrRow> rows)
     {
-        var text = string.Join(" ", rows.Take(80).Select(r => r.Text));
+        var text = string.Join(" ", rows.Take(140).Select(r => r.Text));
 
-        if (Regex.IsMatch(text, @"Micro\s+E-?mini\s+Nasdaq-?100", RegexOptions.IgnoreCase)) return "MNQ";
-        if (Regex.IsMatch(text, @"E-?mini\s+Nasdaq-?100", RegexOptions.IgnoreCase)) return "NQ";
-        if (Regex.IsMatch(text, @"Micro\s+E-?mini\s+S&P", RegexOptions.IgnoreCase)) return "MES";
-        if (Regex.IsMatch(text, @"E-?mini\s+S&P", RegexOptions.IgnoreCase)) return "ES";
-        if (Regex.IsMatch(text, @"Micro\s+E-?mini\s+Dow", RegexOptions.IgnoreCase)) return "MYM";
-        if (Regex.IsMatch(text, @"E-?mini\s+Dow", RegexOptions.IgnoreCase)) return "YM";
+        if (Regex.IsMatch(text, @"Micro.*Nasdaq.*100", RegexOptions.IgnoreCase)) return "MNQ";
+        if (Regex.IsMatch(text, @"Nasdaq.*100", RegexOptions.IgnoreCase)) return "NQ";
+        if (Regex.IsMatch(text, @"Micro.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "MES";
+        if (Regex.IsMatch(text, @"E-?mini.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "ES";
+        if (Regex.IsMatch(text, @"Micro.*Dow", RegexOptions.IgnoreCase)) return "MYM";
+        if (Regex.IsMatch(text, @"E-?mini.*Dow", RegexOptions.IgnoreCase)) return "YM";
+        if (Regex.IsMatch(text, @"Micro.*Russell", RegexOptions.IgnoreCase)) return "M2K";
+        if (Regex.IsMatch(text, @"Russell.*2000", RegexOptions.IgnoreCase)) return "RTY";
+        if (Regex.IsMatch(text, @"Micro.*Gold", RegexOptions.IgnoreCase)) return "MGC";
+        if (Regex.IsMatch(text, @"Gold.*Futures", RegexOptions.IgnoreCase)) return "GC";
+        if (Regex.IsMatch(text, @"Micro.*Crude", RegexOptions.IgnoreCase)) return "MCL";
+        if (Regex.IsMatch(text, @"Crude.*Oil", RegexOptions.IgnoreCase)) return "CL";
+
+        foreach (var row in rows.Take(140))
+        {
+            var contract = Regex.Match(row.Text.ToUpperInvariant(), @"\b([A-Z]{1,5}[FGHJKMNQUVXZ]\d{2,4})\b");
+            if (contract.Success)
+            {
+                var normalized = NormalizeContractRoot(contract.Groups[1].Value);
+                if (normalized is not null) return normalized;
+            }
+
+            var continuous = Regex.Match(row.Text.ToUpperInvariant(), @"\b([A-Z0-9]{2,6}[1I]?!?)\b");
+            if (continuous.Success)
+            {
+                var normalized = NormalizeOcrTicker(continuous.Groups[1].Value);
+                if (normalized is not null) return normalized;
+            }
+        }
 
         return null;
     }
