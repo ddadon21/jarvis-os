@@ -112,14 +112,7 @@ export async function POST(request: Request) {
 
   const ocrExecution = semanticText ? inspectLocalOcrExecution(semanticText) : null;
   const accessibilityExecution = semanticText ? inspectSemanticExecution(semanticText) : null;
-  const semanticExecution =
-    ocrExecution && (
-      ocrExecution.frame.positionStatus === "PENDING" ||
-      ocrExecution.frame.positionStatus === "OPEN" ||
-      ocrExecution.frame.intentState === "PREPARING"
-    )
-      ? ocrExecution
-      : accessibilityExecution;
+  const semanticExecution = fuseExecutionReads(ocrExecution, accessibilityExecution);
 
   // A valid, authenticated screenshot reached Jarvis. Record that transport-level
   // success independently from whether the vision model can interpret the frame.
@@ -165,7 +158,11 @@ export async function POST(request: Request) {
     !semanticExecution &&
     (previous.observer?.status === "PENDING" || previous.observer?.status === "OPEN");
 
-  if (semanticExecution?.frame.positionStatus === "PENDING" || semanticExecution?.frame.positionStatus === "OPEN") {
+  if (
+    semanticExecution?.frame.positionStatus === "PENDING" ||
+    semanticExecution?.frame.positionStatus === "OPEN" ||
+    semanticExecution?.frame.intentState === "PREPARING"
+  ) {
     const frame = mergeSemanticWithPrevious(semanticExecution.frame, previous.observer);
     const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
     const state = await ingestTradingObservation(observation);
@@ -188,7 +185,7 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       accepted: true,
-      source: ocrExecution?.frame.positionStatus === "PENDING" || ocrExecution?.frame.positionStatus === "OPEN" ? "local-ocr" : "semantic",
+      source: "screen-fused",
       frame,
       state: {
         connection: state.account.connection,
@@ -563,6 +560,91 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
   return null;
 }
 
+function fuseExecutionReads(
+  ocr: SemanticExecutionRead | null,
+  accessibility: SemanticExecutionRead | null,
+): SemanticExecutionRead | null {
+  if (!ocr) return accessibility;
+  if (!accessibility) return ocr;
+
+  const a = accessibility.frame;
+  const o = ocr.frame;
+
+  const aScore = executionDetailScore(a);
+  const oScore = executionDetailScore(o);
+
+  // Exact TradingView/accessibility order text is semantically cleaner for
+  // side, contract quantity, order type and entry. Local OCR is best used to
+  // supplement chart-only prices such as stop/target/current.
+  const identityPrimary = aScore >= 3 ? a : (oScore > aScore ? o : a);
+  const identitySecondary = identityPrimary === a ? o : a;
+
+  const symbol = identityPrimary.symbol ?? identitySecondary.symbol;
+  const side = identityPrimary.side ?? identitySecondary.side;
+  const quantity = identityPrimary.quantity ?? identitySecondary.quantity;
+  const orderType = identityPrimary.orderType ?? identitySecondary.orderType;
+  const entryPrice = identityPrimary.entryPrice ?? identitySecondary.entryPrice;
+  const currentPrice = a.currentPrice ?? o.currentPrice;
+
+  const validStop = (value: number | null) => {
+    if (value == null) return false;
+    if (entryPrice == null || side == null) return true;
+    return side === "LONG" ? value < entryPrice : value > entryPrice;
+  };
+  const validTarget = (value: number | null) => {
+    if (value == null) return false;
+    if (entryPrice == null || side == null) return true;
+    return side === "LONG" ? value > entryPrice : value < entryPrice;
+  };
+
+  const stopPrice =
+    [a.stopPrice, o.stopPrice].find((value): value is number => validStop(value)) ?? null;
+  const targetPrice =
+    [a.targetPrice, o.targetPrice].find((value): value is number => validTarget(value)) ?? null;
+
+  const positionStatus: FrameRead["positionStatus"] =
+    a.positionStatus === "OPEN" || o.positionStatus === "OPEN" ? "OPEN" :
+    a.positionStatus === "PENDING" ? "PENDING" :
+    a.intentState === "PREPARING" ? "UNKNOWN" :
+    o.positionStatus === "PENDING" ? "PENDING" :
+    o.positionStatus;
+
+  const intentState: FrameRead["intentState"] =
+    positionStatus === "OPEN" ? "POSITION_OPEN" :
+    positionStatus === "PENDING" ? "ORDER_WORKING" :
+    a.intentState === "PREPARING" || o.intentState === "PREPARING" ? "PREPARING" :
+    a.intentState !== "UNKNOWN" ? a.intentState : o.intentState;
+
+  return {
+    source: "semantic",
+    frame: {
+      ...o,
+      ...a,
+      brokerPanelVisible: a.brokerPanelVisible || o.brokerPanelVisible,
+      positionStatus,
+      symbol,
+      side,
+      quantity,
+      orderType,
+      entryPrice,
+      currentPrice,
+      stopPrice,
+      targetPrice,
+      openPnl: a.openPnl ?? o.openPnl,
+      tradeRealizedPnl: a.tradeRealizedPnl ?? o.tradeRealizedPnl,
+      balance: a.balance ?? o.balance,
+      equity: a.equity ?? o.equity,
+      confidence: Math.max(a.confidence, o.confidence),
+      evidence: [...a.evidence, ...o.evidence]
+        .filter((item, index, all) => all.indexOf(item) === index)
+        .slice(0, 8),
+      note: a.note ?? o.note,
+      intentState,
+      orderTicketVisible: a.orderTicketVisible || o.orderTicketVisible,
+    },
+  };
+}
+
 function executionDetailScore(frame: Pick<FrameRead, "symbol" | "orderType" | "side" | "quantity" | "entryPrice" | "stopPrice" | "targetPrice">) {
   return [
     frame.symbol,
@@ -672,7 +754,13 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
         ? typeCandidates[0].text.toUpperCase() as "LIMIT" | "STOP" | "MARKET"
         : null;
 
-    const quantity = quantityAnchor ? nearestPlainNumber(ocrRows, quantityAnchor, 120, 70, 1, 1000) : null;
+    const accessibilityQuantity = lines
+      .map((line) => line.match(/\bQuantity\b[^\n]*\bvalue=\s*(\d+(?:\.\d+)?)/i))
+      .find(Boolean);
+    const quantity =
+      accessibilityQuantity ? Number(accessibilityQuantity[1]) :
+      quantityAnchor ? nearestPlainNumber(ocrRows, quantityAnchor, 160, 90, 1, 1000) :
+      null;
     const entryPrice = addOrder ? Number(addOrder[2].replace(/,/g, "")) : null;
 
     const stopAnchor = ocrRows.find((row) => /\bstop loss\b/i.test(row.text)) ?? null;
@@ -681,7 +769,7 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
     const targetPrice = targetAnchor ? nearestPriceRow(ocrRows, targetAnchor, 180, 50) : null;
 
     const symbol =
-      normalizeTradingSymbol(addOrder?.[1]?.replace(/\s+/g, "") ?? null)
+      normalizeOcrTicker(addOrder?.[1]?.replace(/\s+/g, "") ?? null)
       ?? inferSymbolFromOcrRows(ocrRows);
 
     return {
@@ -801,21 +889,7 @@ function nearestPriceRow(
 }
 
 function inferSymbolFromOcrRows(rows: LocalOcrRow[]): string | null {
-  const text = rows.slice(0, 160).map((row) => row.text).join(" ");
-  if (/Micro.*Nasdaq.*100/i.test(text)) return "MNQ";
-  if (/Nasdaq.*100/i.test(text)) return "NQ";
-  if (/Micro.*S\s*&?\s*P/i.test(text)) return "MES";
-  if (/E-?mini.*S\s*&?\s*P/i.test(text)) return "ES";
-  if (/Micro.*Dow/i.test(text)) return "MYM";
-  if (/E-?mini.*Dow/i.test(text)) return "YM";
-  if (/Micro.*Russell/i.test(text)) return "M2K";
-  if (/Russell.*2000/i.test(text)) return "RTY";
-  if (/Micro.*Gold/i.test(text)) return "MGC";
-  if (/Gold.*Futures/i.test(text)) return "GC";
-  if (/Micro.*Crude/i.test(text)) return "MCL";
-  if (/Crude.*Oil/i.test(text)) return "CL";
-
-  for (const row of rows.slice(0, 160)) {
+  for (const row of rows.slice(0, 180)) {
     const contract = row.text.toUpperCase().match(/\b([A-Z]{1,5}[FGHJKMNQUVXZ]\d{2,4})\b/);
     if (contract) {
       const normalized = normalizeTradingSymbol(contract[1]);
@@ -828,6 +902,14 @@ function inferSymbolFromOcrRows(rows: LocalOcrRow[]): string | null {
       if (normalized) return normalized;
     }
   }
+
+  const text = rows.slice(0, 180).map((row) => row.text).join(" ");
+  if (/Micro.*Nasdaq.*100/i.test(text)) return "MNQ";
+  if (/Micro.*S\s*&?\s*P/i.test(text)) return "MES";
+  if (/Micro.*Dow/i.test(text)) return "MYM";
+  if (/Micro.*Russell/i.test(text)) return "M2K";
+  if (/Micro.*Gold/i.test(text)) return "MGC";
+  if (/Micro.*Crude/i.test(text)) return "MCL";
 
   return null;
 }
