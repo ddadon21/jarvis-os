@@ -53,7 +53,7 @@ internal sealed class LocalExecutionOcr
                         GraphicsUnit.Pixel);
                 }
 
-                var scale = Math.Min(1.85, 2450d / Math.Max(crop.Width, crop.Height));
+                var scale = Math.Min(3.0, 4090d / Math.Max(crop.Width, crop.Height));
                 if (scale > 1.05)
                 {
                     var scaledWidth = Math.Max(1, (int)Math.Round(crop.Width * scale));
@@ -325,21 +325,40 @@ internal sealed class LocalExecutionOcr
         }
         else
         {
-            entry = reconstructed
-                .OrderByDescending(order => order.Anchor.Y)
-                .First();
-            stop = null;
-            target = null;
+            var protectiveAction = combinedOrders
+                .Where(order => order.Type == "STOP")
+                .GroupBy(order => order.Action)
+                .OrderByDescending(group => group.Count())
+                .Select(group => group.Key)
+                .FirstOrDefault();
+
+            var inferredEntryAction =
+                protectiveAction == "SELL" ? "BUY" :
+                protectiveAction == "BUY" ? "SELL" :
+                null;
+
+            entry =
+                (inferredEntryAction is not null
+                    ? combinedOrders.FirstOrDefault(order =>
+                        order.Action == inferredEntryAction &&
+                        (order.Type == "LIMIT" || order.Type == "STOP" || order.Type == "MARKET"))
+                    : null)
+                ?? combinedOrders.OrderBy(order => order.Anchor.Y).FirstOrDefault()
+                ?? reconstructed.OrderBy(order => order.Anchor.Y).First();
 
             stop = FindRiskRewardPrice(rows, entry.Anchor, negative: true);
             target = FindRiskRewardPrice(rows, entry.Anchor, negative: false);
         }
 
         var pendingSide = entry.Action == "BUY" ? "LONG" : "SHORT";
+        var hasFullOrderLine = combinedOrders.Count > 0;
+        var hasDraftControls = rows.Any(row =>
+            Regex.IsMatch(row.Text, @"\b(change order type|change order quantity|^quantity$)\b", RegexOptions.IgnoreCase));
+
         return string.Join("|", new[]
         {
             "JARVIS_OCR_EXECUTION",
-            "STATUS=PENDING",
+            $"STATUS={(hasFullOrderLine || !hasDraftControls ? "PENDING" : "PREPARING")}",
             $"SIDE={pendingSide}",
             $"QTY={entry.Quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""}",
             $"TYPE={entry.Type}",
@@ -561,22 +580,7 @@ internal sealed class LocalExecutionOcr
 
     private static string? InferSymbol(List<OcrRow> rows)
     {
-        var text = string.Join(" ", rows.Take(140).Select(r => r.Text));
-
-        if (Regex.IsMatch(text, @"Micro.*Nasdaq.*100", RegexOptions.IgnoreCase)) return "MNQ";
-        if (Regex.IsMatch(text, @"Nasdaq.*100", RegexOptions.IgnoreCase)) return "NQ";
-        if (Regex.IsMatch(text, @"Micro.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "MES";
-        if (Regex.IsMatch(text, @"E-?mini.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "ES";
-        if (Regex.IsMatch(text, @"Micro.*Dow", RegexOptions.IgnoreCase)) return "MYM";
-        if (Regex.IsMatch(text, @"E-?mini.*Dow", RegexOptions.IgnoreCase)) return "YM";
-        if (Regex.IsMatch(text, @"Micro.*Russell", RegexOptions.IgnoreCase)) return "M2K";
-        if (Regex.IsMatch(text, @"Russell.*2000", RegexOptions.IgnoreCase)) return "RTY";
-        if (Regex.IsMatch(text, @"Micro.*Gold", RegexOptions.IgnoreCase)) return "MGC";
-        if (Regex.IsMatch(text, @"Gold.*Futures", RegexOptions.IgnoreCase)) return "GC";
-        if (Regex.IsMatch(text, @"Micro.*Crude", RegexOptions.IgnoreCase)) return "MCL";
-        if (Regex.IsMatch(text, @"Crude.*Oil", RegexOptions.IgnoreCase)) return "CL";
-
-        foreach (var row in rows.Take(140))
+        foreach (var row in rows.Take(180))
         {
             var contract = Regex.Match(row.Text.ToUpperInvariant(), @"\b([A-Z]{1,5}[FGHJKMNQUVXZ]\d{2,4})\b");
             if (contract.Success)
@@ -592,6 +596,14 @@ internal sealed class LocalExecutionOcr
                 if (normalized is not null) return normalized;
             }
         }
+
+        var text = string.Join(" ", rows.Take(180).Select(r => r.Text));
+        if (Regex.IsMatch(text, @"Micro.*Nasdaq.*100", RegexOptions.IgnoreCase)) return "MNQ";
+        if (Regex.IsMatch(text, @"Micro.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "MES";
+        if (Regex.IsMatch(text, @"Micro.*Dow", RegexOptions.IgnoreCase)) return "MYM";
+        if (Regex.IsMatch(text, @"Micro.*Russell", RegexOptions.IgnoreCase)) return "M2K";
+        if (Regex.IsMatch(text, @"Micro.*Gold", RegexOptions.IgnoreCase)) return "MGC";
+        if (Regex.IsMatch(text, @"Micro.*Crude", RegexOptions.IgnoreCase)) return "MCL";
 
         return null;
     }
