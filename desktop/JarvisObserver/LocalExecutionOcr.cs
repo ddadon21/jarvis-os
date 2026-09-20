@@ -449,6 +449,7 @@ internal sealed class LocalExecutionOcr
             $"TYPE={entry.Type}",
             $"SYMBOL={symbol ?? ""}",
             $"ENTRY={Format(entry.Price)}",
+            $"CURRENT={Format(FindCurrentQuoteMid(rows, entry.Anchor))}",
             $"STOP={Format(stop)}",
             $"TARGET={Format(target)}"
         });
@@ -552,6 +553,7 @@ internal sealed class LocalExecutionOcr
             $"TYPE={orderType ?? ""}",
             $"SYMBOL={symbol ?? ""}",
             $"ENTRY={Format(entryPrice)}",
+            $"CURRENT={Format(FindCurrentQuoteMid(rows, ticketAnchor))}",
             $"STOP={Format(stopPrice)}",
             $"TARGET={Format(targetPrice)}"
         });
@@ -710,6 +712,46 @@ internal sealed class LocalExecutionOcr
         if (Regex.IsMatch(text, @"Crude.*Oil", RegexOptions.IgnoreCase)) return "CL";
 
         return null;
+    }
+
+    private static double? FindCurrentQuoteMid(List<OcrRow> rows, OcrRow activeAnchor)
+    {
+        var paneCenterX = activeAnchor.X + activeAnchor.Width / 2;
+        var topActions = rows
+            .Where(row => row.Y < 340)
+            .Where(row => Math.Abs((row.X + row.Width / 2) - paneCenterX) <= 620)
+            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(BUY|SELL)$", RegexOptions.IgnoreCase))
+            .ToList();
+
+        double? buy = null;
+        double? sell = null;
+
+        foreach (var action in topActions)
+        {
+            var price = rows
+                .Where(row => !ReferenceEquals(row, action))
+                .Select(row => new
+                {
+                    value = ExtractPrice(row.Text),
+                    dx = Math.Abs((row.X + row.Width / 2) - (action.X + action.Width / 2)),
+                    dy = Math.Abs((row.Y + row.Height / 2) - (action.Y + action.Height / 2)),
+                })
+                .Where(item => item.value is not null && item.dx <= 180 && item.dy <= 85)
+                .OrderBy(item => item.dy * 4 + item.dx)
+                .Select(item => item.value)
+                .FirstOrDefault();
+
+            if (price is null) continue;
+            if (action.Text.Equals("BUY", StringComparison.OrdinalIgnoreCase)) buy = price;
+            if (action.Text.Equals("SELL", StringComparison.OrdinalIgnoreCase)) sell = price;
+        }
+
+        if (buy is not null && sell is not null)
+        {
+            return Math.Round((buy.Value + sell.Value) / 2d, 4);
+        }
+
+        return buy ?? sell;
     }
 
     private static double? FindNearestPrice(List<OcrRow> rows, OcrRow anchor, bool preferRight)
