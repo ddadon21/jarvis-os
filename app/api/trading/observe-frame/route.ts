@@ -113,7 +113,11 @@ export async function POST(request: Request) {
   const ocrExecution = semanticText ? inspectLocalOcrExecution(semanticText) : null;
   const accessibilityExecution = semanticText ? inspectSemanticExecution(semanticText) : null;
   const semanticExecution =
-    ocrExecution?.frame.positionStatus === "PENDING" || ocrExecution?.frame.positionStatus === "OPEN"
+    ocrExecution && (
+      ocrExecution.frame.positionStatus === "PENDING" ||
+      ocrExecution.frame.positionStatus === "OPEN" ||
+      ocrExecution.frame.intentState === "PREPARING"
+    )
       ? ocrExecution
       : accessibilityExecution;
 
@@ -431,7 +435,7 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
     };
   }
 
-  if (fields.STATUS !== "PENDING" && fields.STATUS !== "OPEN") return null;
+  if (fields.STATUS !== "PENDING" && fields.STATUS !== "OPEN" && fields.STATUS !== "PREPARING") return null;
 
   const side = fields.SIDE === "LONG" || fields.SIDE === "SHORT" ? fields.SIDE : null;
   const orderType = fields.TYPE === "LIMIT" || fields.TYPE === "STOP" || fields.TYPE === "MARKET" ? fields.TYPE : null;
@@ -442,11 +446,13 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
   const symbol = normalizeTradingSymbol(fields.SYMBOL || null);
 
   const isOpen = fields.STATUS === "OPEN";
+  const isPreparing = fields.STATUS === "PREPARING";
+  const detailCount = [symbol, side, quantity, orderType, entryPrice, stopPrice, targetPrice].filter((value) => value != null).length;
   return {
     source: "semantic",
     frame: {
       brokerPanelVisible: true,
-      positionStatus: isOpen ? "OPEN" : "PENDING",
+      positionStatus: isOpen ? "OPEN" : isPreparing ? "UNKNOWN" : "PENDING",
       symbol,
       orderType,
       side,
@@ -459,18 +465,20 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
       tradeRealizedPnl: null,
       balance: null,
       equity: null,
-      confidence: isOpen
-        ? (quantity != null && symbol && side && stopPrice != null && targetPrice != null ? 0.995 : 0.94)
-        : (entryPrice != null && quantity != null && symbol && side && orderType ? 0.995 : 0.94),
+      confidence: detailCount >= 6 ? 0.995 : detailCount >= 4 ? 0.97 : 0.86,
       evidence: [
         isOpen
-          ? "Local Windows OCR confirmed a live TradingView position from matching protective stop and target orders after the entry order disappeared."
-          : "Local Windows OCR read the visible TradingView working-order label and nearby chart prices."
+          ? "Local Windows OCR confirmed a live TradingView position."
+          : isPreparing
+            ? "Local Windows OCR read the draft TradingView order before submission."
+            : "Local Windows OCR read the visible TradingView working order."
       ],
       note: isOpen
-        ? "Live position detected locally from the TradingView chart; cloud vision was not required."
-        : "Pending order detected locally from the TradingView chart; cloud vision was not required.",
-      intentState: isOpen ? "POSITION_OPEN" : "ORDER_WORKING",
+        ? "Live position detected locally from TradingView."
+        : isPreparing
+          ? "Preparing order details detected locally from TradingView."
+          : "Pending order detected locally from TradingView.",
+      intentState: isOpen ? "POSITION_OPEN" : isPreparing ? "PREPARING" : "ORDER_WORKING",
       orderTicketVisible: !isOpen,
     },
   };
@@ -491,7 +499,7 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
   const orderTicketVisible = hasQuantityEditor || hasOrderTypeControl;
   const details = extractSemanticOrderDetails(lines);
 
-  if (evidence.explicitOrder || evidence.cancelControl) {
+  if (evidence.cancelControl) {
     const facts: string[] = ["TradingView accessibility confirms a working order."];
     if (details.side && details.quantity && details.symbol && details.orderType && details.entryPrice != null) {
       facts.unshift(
@@ -525,7 +533,7 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
     };
   }
 
-  if (orderTicketVisible) {
+  if (orderTicketVisible || evidence.explicitOrder) {
     return {
       source: "semantic",
       frame: {
@@ -555,23 +563,41 @@ function inspectSemanticExecution(semanticText: string): SemanticExecutionRead |
   return null;
 }
 
+function executionDetailScore(frame: Pick<FrameRead, "symbol" | "orderType" | "side" | "quantity" | "entryPrice" | "stopPrice" | "targetPrice">) {
+  return [
+    frame.symbol,
+    frame.orderType,
+    frame.side,
+    frame.quantity,
+    frame.entryPrice,
+    frame.stopPrice,
+    frame.targetPrice,
+  ].filter((value) => value != null).length;
+}
+
 function mergeSemanticWithPrevious(
   frame: FrameRead,
   previous: Awaited<ReturnType<typeof getTradingState>>["observer"] | undefined,
 ): FrameRead {
   if (!previous || (previous.status !== "PENDING" && previous.status !== "OPEN")) return frame;
+
+  const currentScore = executionDetailScore(frame);
+  const previousScore = executionDetailScore(previous);
+  const preferPrevious = previousScore > currentScore;
+
   return {
     ...frame,
-    symbol: frame.symbol ?? previous.symbol,
-    orderType: frame.orderType ?? previous.orderType,
-    side: frame.side ?? previous.side,
-    quantity: frame.quantity ?? previous.quantity,
-    entryPrice: frame.entryPrice ?? previous.entryPrice,
+    symbol: preferPrevious ? previous.symbol ?? frame.symbol : frame.symbol ?? previous.symbol,
+    orderType: preferPrevious ? previous.orderType ?? frame.orderType : frame.orderType ?? previous.orderType,
+    side: preferPrevious ? previous.side ?? frame.side : frame.side ?? previous.side,
+    quantity: preferPrevious ? previous.quantity ?? frame.quantity : frame.quantity ?? previous.quantity,
+    entryPrice: preferPrevious ? previous.entryPrice ?? frame.entryPrice : frame.entryPrice ?? previous.entryPrice,
     currentPrice: frame.currentPrice ?? previous.currentPrice,
-    stopPrice: frame.stopPrice ?? previous.stopPrice,
-    targetPrice: frame.targetPrice ?? previous.targetPrice,
+    stopPrice: preferPrevious ? previous.stopPrice ?? frame.stopPrice : frame.stopPrice ?? previous.stopPrice,
+    targetPrice: preferPrevious ? previous.targetPrice ?? frame.targetPrice : frame.targetPrice ?? previous.targetPrice,
     openPnl: frame.openPnl ?? previous.openPnl,
-    evidence: [...frame.evidence, ...previous.evidence].slice(0, 8),
+    confidence: preferPrevious ? Math.max(frame.confidence, previous.confidence) : frame.confidence,
+    evidence: [...frame.evidence, ...previous.evidence].filter((item, index, all) => all.indexOf(item) === index).slice(0, 8),
   };
 }
 
@@ -687,14 +713,26 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
     Math.abs(item.price - entry.price) > 0.000001
   ) ?? null;
 
+  const ocrRows = parseLocalOcrRows(lines);
+  const overlayStop = findRiskRewardPriceFromRows(ocrRows, true, entry.price);
+  const overlayTarget = findRiskRewardPriceFromRows(ocrRows, false, entry.price);
+  const fallbackStop =
+    stopOrder && Number.isFinite(stopOrder.price) && Math.abs(stopOrder.price - entry.price) > 0.000001
+      ? stopOrder.price
+      : null;
+  const fallbackTarget =
+    targetOrder && Number.isFinite(targetOrder.price) && Math.abs(targetOrder.price - entry.price) > 0.000001
+      ? targetOrder.price
+      : null;
+
   return {
     symbol: normalizeTradingSymbol(entry.contract),
     orderType: entry.type,
     side,
     quantity: Number.isFinite(entry.quantity) ? entry.quantity : null,
     entryPrice: Number.isFinite(entry.price) ? entry.price : null,
-    stopPrice: stopOrder && Number.isFinite(stopOrder.price) ? stopOrder.price : null,
-    targetPrice: targetOrder && Number.isFinite(targetOrder.price) ? targetOrder.price : null,
+    stopPrice: overlayStop ?? fallbackStop,
+    targetPrice: overlayTarget ?? fallbackTarget,
   };
 }
 
@@ -763,18 +801,72 @@ function nearestPriceRow(
 }
 
 function inferSymbolFromOcrRows(rows: LocalOcrRow[]): string | null {
-  const text = rows.slice(0, 100).map((row) => row.text).join(" ");
-  if (/Micro\s+E-?mini\s+Nasdaq-?100/i.test(text)) return "MNQ";
-  if (/E-?mini\s+Nasdaq-?100/i.test(text)) return "NQ";
-  if (/Micro\s+E-?mini\s+S&P/i.test(text)) return "MES";
-  if (/E-?mini\s+S&P/i.test(text)) return "ES";
-  if (/Micro\s+E-?mini\s+Dow/i.test(text)) return "MYM";
-  if (/E-?mini\s+Dow/i.test(text)) return "YM";
+  const text = rows.slice(0, 160).map((row) => row.text).join(" ");
+  if (/Micro.*Nasdaq.*100/i.test(text)) return "MNQ";
+  if (/Nasdaq.*100/i.test(text)) return "NQ";
+  if (/Micro.*S\s*&?\s*P/i.test(text)) return "MES";
+  if (/E-?mini.*S\s*&?\s*P/i.test(text)) return "ES";
+  if (/Micro.*Dow/i.test(text)) return "MYM";
+  if (/E-?mini.*Dow/i.test(text)) return "YM";
+  if (/Micro.*Russell/i.test(text)) return "M2K";
+  if (/Russell.*2000/i.test(text)) return "RTY";
+  if (/Micro.*Gold/i.test(text)) return "MGC";
+  if (/Gold.*Futures/i.test(text)) return "GC";
+  if (/Micro.*Crude/i.test(text)) return "MCL";
+  if (/Crude.*Oil/i.test(text)) return "CL";
 
-  const ticker = rows
-    .map((row) => row.text.match(/\b([A-Z]{1,5})(?:[FGHJKMNQUVXZ]\d{2,4}|\d?!)/)?.[1] ?? null)
-    .find(Boolean);
-  return ticker ? normalizeTradingSymbol(ticker) : null;
+  for (const row of rows.slice(0, 160)) {
+    const contract = row.text.toUpperCase().match(/\b([A-Z]{1,5}[FGHJKMNQUVXZ]\d{2,4})\b/);
+    if (contract) {
+      const normalized = normalizeTradingSymbol(contract[1]);
+      if (normalized) return normalized;
+    }
+
+    const ticker = row.text.toUpperCase().match(/\b([A-Z0-9]{2,6}[1I]?!?)\b/);
+    if (ticker) {
+      const normalized = normalizeOcrTicker(ticker[1]);
+      if (normalized) return normalized;
+    }
+  }
+
+  return null;
+}
+
+function normalizeOcrTicker(raw: string | null): string | null {
+  if (!raw) return null;
+  const symbol = raw.toUpperCase().replace(/[^A-Z0-9!]/g, "");
+  const known: Record<string, string> = {
+    MNQ: "MNQ", MNQ1: "MNQ", MNQI: "MNQ", "MNQ1!": "MNQ", "MNQI!": "MNQ",
+    NQ: "NQ", NQ1: "NQ", NQI: "NQ", "NQ1!": "NQ", "NQI!": "NQ",
+    MES: "MES", MES1: "MES", MESI: "MES", "MES1!": "MES",
+    ES: "ES", ES1: "ES", ESI: "ES", "ES1!": "ES",
+    MYM: "MYM", MYM1: "MYM", MYMI: "MYM", "MYM1!": "MYM",
+    YM: "YM", YM1: "YM", YMI: "YM", "YM1!": "YM",
+    M2K: "M2K", RTY: "RTY", MGC: "MGC", GC: "GC",
+    MCL: "MCL", CL: "CL", SIL: "SIL", SI: "SI",
+    HG: "HG", ZB: "ZB", ZN: "ZN", ZF: "ZF", ZT: "ZT",
+  };
+  return known[symbol] ?? null;
+}
+
+function findRiskRewardPriceFromRows(
+  rows: LocalOcrRow[],
+  negative: boolean,
+  entryPrice: number | null,
+): number | null {
+  const riskPattern = negative
+    ? /(^|\s)-\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b|\bstop loss\b/i
+    : /(^|\s)\+\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b|\b(take profit|target)\b/i;
+
+  const anchors = rows.filter((row) => riskPattern.test(row.text));
+  for (const anchor of anchors) {
+    const value = nearestPriceRow(rows, anchor, 520, 55);
+    if (value == null) continue;
+    if (entryPrice == null) return value;
+    if (negative && value < entryPrice) return value;
+    if (!negative && value > entryPrice) return value;
+  }
+  return null;
 }
 
 function normalizeTradingSymbol(raw: string | null): string | null {
