@@ -399,6 +399,7 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
   const orderType = fields.TYPE === "LIMIT" || fields.TYPE === "STOP" || fields.TYPE === "MARKET" ? fields.TYPE : null;
   const quantity = parseSemanticNumber(fields.QTY);
   const entryPrice = parseSemanticNumber(fields.ENTRY);
+  const currentPrice = parseSemanticNumber(fields.CURRENT);
   const stopPrice = parseSemanticNumber(fields.STOP);
   const targetPrice = parseSemanticNumber(fields.TARGET);
   const symbol = normalizeTradingSymbol(fields.SYMBOL || null);
@@ -416,7 +417,7 @@ function inspectLocalOcrExecution(semanticText: string): SemanticExecutionRead |
       side,
       quantity,
       entryPrice,
-      currentPrice: null,
+      currentPrice,
       stopPrice,
       targetPrice,
       openPnl: null,
