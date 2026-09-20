@@ -256,7 +256,7 @@ internal sealed class LocalExecutionOcr
                 order.Action,
                 order.Quantity,
                 order.Type,
-                Price = order.Price is null ? null : Math.Round(order.Price.Value, 4),
+                Price = order.Price is null ? (double?)null : Math.Round(order.Price.Value, 4),
                 order.Contract,
             })
             .Select(group => group.First())
