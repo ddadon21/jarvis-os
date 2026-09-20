@@ -103,14 +103,17 @@ internal sealed class LocalExecutionOcr
             _missingWorkingOrderScans = 0;
             output.Insert(0, canonical);
         }
-        else if (_hadWorkingOrder)
+        else
         {
             _missingWorkingOrderScans++;
-            if (_missingWorkingOrderScans >= 4)
+            if (_missingWorkingOrderScans >= 2)
             {
+                // A healthy OCR surface with no working-order row is explicit negative
+                // evidence. Emit it continuously so a pending state confirmed by the
+                // accessibility lane can still be cleared immediately after cancel.
                 output.Insert(0, "JARVIS_OCR_EXECUTION|STATUS=FLAT");
                 _hadWorkingOrder = false;
-                _missingWorkingOrderScans = 0;
+                _missingWorkingOrderScans = 2;
             }
         }
 
@@ -119,29 +122,56 @@ internal sealed class LocalExecutionOcr
 
     private static string? TryBuildExecution(List<OcrRow> rows)
     {
-        var orderRow = rows
-            .Select(row => new { row, match = Regex.Match(row.Text, @"\b(Buy|Sell)\s+(\d+(?:\.\d+)?)\s+(Limit|Stop|Market)\b", RegexOptions.IgnoreCase) })
-            .FirstOrDefault(x => x.match.Success);
+        // TradingView often OCRs the visible chart order as separate fragments:
+        // "Buy" | "8" | "Limit" | "29,733.75". Reconstruct the horizontal row
+        // instead of requiring one combined OCR sentence.
+        var candidates = rows
+            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Buy|Sell)$", RegexOptions.IgnoreCase))
+            .Select(actionRow =>
+            {
+                var centerY = actionRow.Y + actionRow.Height / 2;
+                var peers = rows
+                    .Where(row => !ReferenceEquals(row, actionRow))
+                    .Where(row => Math.Abs((row.Y + row.Height / 2) - centerY) <= Math.Max(16, actionRow.Height * 1.8))
+                    .Where(row => row.X >= actionRow.X - 8 && row.X <= actionRow.X + 520)
+                    .OrderBy(row => row.X)
+                    .ToList();
 
-        if (orderRow is null) return null;
+                var quantityRow = peers
+                    .Where(row => row.X >= actionRow.X + actionRow.Width - 4)
+                    .FirstOrDefault(row => Regex.IsMatch(row.Text.Trim(), @"^\d+(?:\.\d+)?$"));
 
-        var action = orderRow.match.Groups[1].Value.Equals("Buy", StringComparison.OrdinalIgnoreCase) ? "LONG" : "SHORT";
-        var quantity = ParseNumber(orderRow.match.Groups[2].Value);
-        var type = orderRow.match.Groups[3].Value.ToUpperInvariant();
+                var typeRow = peers
+                    .Where(row => row.X >= actionRow.X + actionRow.Width - 4)
+                    .FirstOrDefault(row => Regex.IsMatch(row.Text.Trim(), @"^(Limit|Stop|Market)$", RegexOptions.IgnoreCase));
+
+                return new { actionRow, quantityRow, typeRow, peers };
+            })
+            .Where(x => x.quantityRow is not null && x.typeRow is not null)
+            .OrderByDescending(x => x.actionRow.Y)
+            .ToList();
+
+        var order = candidates.FirstOrDefault();
+        if (order is null) return null;
+
+        var action = order.actionRow.Text.Trim().Equals("Buy", StringComparison.OrdinalIgnoreCase) ? "LONG" : "SHORT";
+        var quantity = ParseNumber(order.quantityRow!.Text.Trim());
+        var type = order.typeRow!.Text.Trim().ToUpperInvariant();
         var symbol = InferSymbol(rows);
 
-        var entry = FindNearestPrice(rows, orderRow.row, preferRight: true);
+        var entry = FindNearestPrice(rows, order.typeRow!, preferRight: true)
+            ?? FindNearestPrice(rows, order.actionRow, preferRight: true);
 
         var stopAnchor = rows
             .Where(row => Regex.IsMatch(row.Text, @"(^|\s)-\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
                        || Regex.IsMatch(row.Text, @"\b(stop loss|stop)\b", RegexOptions.IgnoreCase))
-            .OrderBy(row => VerticalDistance(row, orderRow.row))
+            .OrderBy(row => VerticalDistance(row, order.actionRow))
             .FirstOrDefault();
 
         var targetAnchor = rows
             .Where(row => Regex.IsMatch(row.Text, @"(^|\s)\+\s*\$?\d[\d,]*(?:\.\d+)?\s*(USD)?\b", RegexOptions.IgnoreCase)
                        || Regex.IsMatch(row.Text, @"\b(take profit|target)\b", RegexOptions.IgnoreCase))
-            .OrderBy(row => VerticalDistance(row, orderRow.row))
+            .OrderBy(row => VerticalDistance(row, order.actionRow))
             .FirstOrDefault();
 
         var stop = stopAnchor is null ? null : FindNearestPrice(rows, stopAnchor, preferRight: true);
