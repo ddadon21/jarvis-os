@@ -69,6 +69,61 @@ type SemanticExecutionRead = {
 };
 
 
+function executionReadCompleteness(frame: FrameRead): number {
+  return [
+    frame.symbol,
+    frame.side,
+    frame.quantity,
+    frame.orderType,
+    frame.entryPrice,
+    frame.currentPrice,
+    frame.stopPrice,
+    frame.targetPrice,
+  ].filter((value) => value != null).length;
+}
+
+function isRichExecutionRead(frame: FrameRead): boolean {
+  const complete = executionReadCompleteness(frame);
+  if (frame.intentState === "PREPARING") {
+    return Boolean(frame.symbol && frame.side && frame.quantity != null && frame.orderType && frame.entryPrice != null && complete >= 6);
+  }
+  if (frame.positionStatus === "PENDING") {
+    return Boolean(frame.symbol && frame.side && frame.quantity != null && frame.orderType && frame.entryPrice != null && complete >= 6);
+  }
+  if (frame.positionStatus === "OPEN") {
+    return Boolean(frame.symbol && frame.side && frame.quantity != null && complete >= 5);
+  }
+  return false;
+}
+
+function mergeVisualWithSemantic(visual: FrameRead, semantic: FrameRead | null): FrameRead {
+  if (!semantic) return visual;
+  const visualScore = executionReadCompleteness(visual);
+  const semanticScore = executionReadCompleteness(semantic);
+  const preferVisual = visualScore >= semanticScore;
+
+  return {
+    ...visual,
+    positionStatus: visual.positionStatus !== "UNKNOWN" ? visual.positionStatus : semantic.positionStatus,
+    symbol: preferVisual ? visual.symbol ?? semantic.symbol : semantic.symbol ?? visual.symbol,
+    orderType: preferVisual ? visual.orderType ?? semantic.orderType : semantic.orderType ?? visual.orderType,
+    side: preferVisual ? visual.side ?? semantic.side : semantic.side ?? visual.side,
+    quantity: preferVisual ? visual.quantity ?? semantic.quantity : semantic.quantity ?? visual.quantity,
+    entryPrice: preferVisual ? visual.entryPrice ?? semantic.entryPrice : semantic.entryPrice ?? visual.entryPrice,
+    currentPrice: visual.currentPrice ?? semantic.currentPrice,
+    stopPrice: preferVisual ? visual.stopPrice ?? semantic.stopPrice : semantic.stopPrice ?? visual.stopPrice,
+    targetPrice: preferVisual ? visual.targetPrice ?? semantic.targetPrice : semantic.targetPrice ?? visual.targetPrice,
+    openPnl: visual.openPnl ?? semantic.openPnl,
+    confidence: Math.max(visual.confidence, semantic.confidence),
+    evidence: [...visual.evidence, ...semantic.evidence].filter((item, index, all) => all.indexOf(item) === index).slice(0, 8),
+    note: visual.note ?? semantic.note,
+    intentState:
+      visual.intentState !== "UNKNOWN" ? visual.intentState :
+      semantic.intentState,
+    orderTicketVisible: visual.orderTicketVisible || semantic.orderTicketVisible,
+  };
+}
+
 export async function POST(request: Request) {
   const auth = request.headers.get("authorization");
   const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
@@ -159,9 +214,13 @@ export async function POST(request: Request) {
     (previous.observer?.status === "PENDING" || previous.observer?.status === "OPEN");
 
   if (
-    semanticExecution?.frame.positionStatus === "PENDING" ||
-    semanticExecution?.frame.positionStatus === "OPEN" ||
-    semanticExecution?.frame.intentState === "PREPARING"
+    semanticExecution &&
+    isRichExecutionRead(semanticExecution.frame) &&
+    (
+      semanticExecution.frame.positionStatus === "PENDING" ||
+      semanticExecution.frame.positionStatus === "OPEN" ||
+      semanticExecution.frame.intentState === "PREPARING"
+    )
   ) {
     const frame = mergeSemanticWithPrevious(semanticExecution.frame, previous.observer);
     const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
@@ -206,6 +265,7 @@ export async function POST(request: Request) {
       previous,
       semanticText,
     );
+    frame = mergeVisualWithSemantic(frame, semanticExecution?.frame ?? null);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown observer vision error.";
     console.error("Observer frame parse degraded:", message);
