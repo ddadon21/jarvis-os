@@ -181,12 +181,12 @@ internal sealed class LocalExecutionOcr
 
         if (bracket is not null)
         {
-            var side = bracket.Action == "SELL" ? "LONG" : "SHORT";
+            var openSide = bracket.Action == "SELL" ? "LONG" : "SHORT";
             return string.Join("|", new[]
             {
                 "JARVIS_OCR_EXECUTION",
                 "STATUS=OPEN",
-                $"SIDE={side}",
+                $"SIDE={openSide}",
                 $"QTY={bracket.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 "TYPE=",
                 $"SYMBOL={symbol ?? ""}",
@@ -245,12 +245,12 @@ internal sealed class LocalExecutionOcr
             target = targetAnchor is null ? null : FindNearestPrice(rows, targetAnchor, preferRight: true);
         }
 
-        var side = entry.Action == "BUY" ? "LONG" : "SHORT";
+        var pendingSide = entry.Action == "BUY" ? "LONG" : "SHORT";
         return string.Join("|", new[]
         {
             "JARVIS_OCR_EXECUTION",
             "STATUS=PENDING",
-            $"SIDE={side}",
+            $"SIDE={pendingSide}",
             $"QTY={entry.Quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""}",
             $"TYPE={entry.Type}",
             $"SYMBOL={symbol ?? ""}",
