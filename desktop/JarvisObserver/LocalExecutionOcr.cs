@@ -35,13 +35,23 @@ internal sealed class LocalExecutionOcr
         {
             var rows = await RecognizeRowsAsync(bitmap, 0, 0, 1.0);
 
-            // TradingView execution labels are small. If the first pass does not
-            // already produce a rich execution read, run one enlarged pass over
-            // the chart/order region instead of repeatedly depending on tiny text.
-            var firstCanonical = TryBuildExecution(rows) ?? TryBuildPreparation(rows);
-            if (!IsRichCanonical(firstCanonical))
+            // First find the actual order interaction cluster. TradingView often renders
+            // qty/type/price as tiny sibling labels, so a whole-window OCR pass can see
+            // "Buy" but miss "10 / Limit / 29,733.75". Re-scan only that active pane.
+            var activeAnchor = FindActiveOrderAnchor(rows);
+            if (activeAnchor is not null)
             {
-                var cropY = Math.Max(0, (int)Math.Round(bitmap.Height * 0.34));
+                var paneRows = await RecognizeActiveOrderPaneAsync(bitmap, activeAnchor);
+                rows = MergeRows(rows, paneRows);
+            }
+
+            var canonical = TryBuildExecution(rows) ?? TryBuildPreparation(rows);
+
+            // If the targeted pass still did not produce a rich object, do one broader
+            // enlarged lower-chart pass. This remains fallback, not the primary reader.
+            if (!IsRichCanonical(canonical))
+            {
+                var cropY = Math.Max(0, (int)Math.Round(bitmap.Height * 0.30));
                 var cropHeight = Math.Max(1, bitmap.Height - cropY);
                 using var crop = new Bitmap(bitmap.Width, cropHeight, PixelFormat.Format32bppArgb);
                 using (var graphics = Graphics.FromImage(crop))
@@ -77,6 +87,81 @@ internal sealed class LocalExecutionOcr
         {
             return null;
         }
+    }
+
+    private static OcrRow? FindActiveOrderAnchor(List<OcrRow> rows)
+    {
+        // Prefer explicit draft controls because they identify the exact pane being edited.
+        var draft = rows
+            .Where(row => Regex.IsMatch(
+                row.Text,
+                @"\b(change order type|change order quantity|add order on|stop loss|take profit)\b",
+                RegexOptions.IgnoreCase))
+            .OrderByDescending(row => row.Y)
+            .FirstOrDefault();
+        if (draft is not null) return draft;
+
+        // Then prefer a real working-order row.
+        var combined = rows
+            .Where(row => Regex.IsMatch(
+                row.Text,
+                @"^(Buy|Sell)\s+\d+(?:\.\d+)?\s+[A-Z]{1,8}[A-Z0-9!]{0,10}\s+@",
+                RegexOptions.IgnoreCase))
+            .OrderByDescending(row => row.Y)
+            .FirstOrDefault();
+        if (combined is not null) return combined;
+
+        // Last resort: a lower-chart Buy/Sell action next to order controls.
+        return rows
+            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Buy|Sell)$", RegexOptions.IgnoreCase))
+            .Where(row => row.Y > 300)
+            .OrderByDescending(row => row.Y)
+            .FirstOrDefault();
+    }
+
+    private async Task<List<OcrRow>> RecognizeActiveOrderPaneAsync(Bitmap bitmap, OcrRow anchor)
+    {
+        // The active order label sits inside the chart pane. Capture a generous box
+        // around it so the pane header, order row, bracket labels, and price axis are
+        // read together. This naturally follows the correct pane in split-screen layouts.
+        var left = Math.Max(0, (int)Math.Floor(anchor.X - 320));
+        var top = Math.Max(0, (int)Math.Floor(anchor.Y - 260));
+        var right = Math.Min(bitmap.Width, (int)Math.Ceiling(anchor.X + 560));
+        var bottom = Math.Min(bitmap.Height, (int)Math.Ceiling(anchor.Y + 240));
+
+        if (right - left < 180 || bottom - top < 120) return new List<OcrRow>();
+
+        var width = right - left;
+        var height = bottom - top;
+        using var crop = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(crop))
+        {
+            graphics.DrawImage(
+                bitmap,
+                new Rectangle(0, 0, width, height),
+                new Rectangle(left, top, width, height),
+                GraphicsUnit.Pixel);
+        }
+
+        var scale = Math.Min(4.25, 4090d / Math.Max(width, height));
+        scale = Math.Max(1.0, scale);
+
+        if (scale <= 1.05)
+        {
+            return await RecognizeRowsAsync(crop, left, top, 1.0);
+        }
+
+        var scaledWidth = Math.Max(1, (int)Math.Round(width * scale));
+        var scaledHeight = Math.Max(1, (int)Math.Round(height * scale));
+        using var enlarged = new Bitmap(scaledWidth, scaledHeight, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(enlarged))
+        {
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            graphics.DrawImage(crop, new Rectangle(0, 0, scaledWidth, scaledHeight));
+        }
+
+        return await RecognizeRowsAsync(enlarged, left, top, 1d / scale);
     }
 
     private async Task<List<OcrRow>> RecognizeRowsAsync(
@@ -264,7 +349,7 @@ internal sealed class LocalExecutionOcr
 
         if (reconstructed.Count == 0) return null;
 
-        var symbol = NormalizeContractRoot(reconstructed.Select(order => order.Contract).FirstOrDefault(contract => !string.IsNullOrWhiteSpace(contract))) ?? InferSymbol(rows);
+        var symbol = NormalizeContractRoot(reconstructed.Select(order => order.Contract).FirstOrDefault(contract => !string.IsNullOrWhiteSpace(contract))) ?? InferSymbol(rows, reconstructed.OrderByDescending(order => order.Anchor.Y).FirstOrDefault()?.Anchor);
 
         // A live bracketed position presents as two same-side exit orders: one STOP
         // and one LIMIT, with the original opposite-side entry order gone.
@@ -404,7 +489,7 @@ internal sealed class LocalExecutionOcr
             .FirstOrDefault();
         if (ticketAnchor is null) return null;
 
-        var symbol = InferSymbol(rows);
+        var symbol = InferSymbol(rows, ticketAnchor);
         var addOrder = rows
             .Select(row => Regex.Match(row.Text, @"Add order on\s+([A-Z0-9! ]{2,20}?)\s+at\s+([\d,]+(?:\.\d+)?)", RegexOptions.IgnoreCase))
             .FirstOrDefault(match => match.Success);
@@ -578,9 +663,22 @@ internal sealed class LocalExecutionOcr
         return known.TryGetValue(symbol, out var normalized) ? normalized : null;
     }
 
-    private static string? InferSymbol(List<OcrRow> rows)
+    private static string? InferSymbol(List<OcrRow> rows, OcrRow? activeAnchor = null)
     {
-        foreach (var row in rows.Take(180))
+        IEnumerable<OcrRow> scoped = rows;
+
+        if (activeAnchor is not null)
+        {
+            // Prefer the same visual pane as the active order. This prevents a second
+            // chart in a split-screen layout from donating the wrong symbol.
+            scoped = rows
+                .Where(row => Math.Abs((row.X + row.Width / 2) - (activeAnchor.X + activeAnchor.Width / 2)) <= 520)
+                .Where(row => row.Y <= activeAnchor.Y + 140);
+        }
+
+        var scopedList = scoped.ToList();
+
+        foreach (var row in scopedList.Take(220))
         {
             var contract = Regex.Match(row.Text.ToUpperInvariant(), @"\b([A-Z]{1,5}[FGHJKMNQUVXZ]\d{2,4})\b");
             if (contract.Success)
@@ -597,13 +695,19 @@ internal sealed class LocalExecutionOcr
             }
         }
 
-        var text = string.Join(" ", rows.Take(180).Select(r => r.Text));
+        var text = string.Join(" ", scopedList.Take(220).Select(r => r.Text));
         if (Regex.IsMatch(text, @"Micro.*Nasdaq.*100", RegexOptions.IgnoreCase)) return "MNQ";
+        if (Regex.IsMatch(text, @"Nasdaq.*100", RegexOptions.IgnoreCase)) return "NQ";
         if (Regex.IsMatch(text, @"Micro.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "MES";
+        if (Regex.IsMatch(text, @"E-?mini.*S\s*&?\s*P", RegexOptions.IgnoreCase)) return "ES";
         if (Regex.IsMatch(text, @"Micro.*Dow", RegexOptions.IgnoreCase)) return "MYM";
+        if (Regex.IsMatch(text, @"E-?mini.*Dow", RegexOptions.IgnoreCase)) return "YM";
         if (Regex.IsMatch(text, @"Micro.*Russell", RegexOptions.IgnoreCase)) return "M2K";
+        if (Regex.IsMatch(text, @"Russell.*2000", RegexOptions.IgnoreCase)) return "RTY";
         if (Regex.IsMatch(text, @"Micro.*Gold", RegexOptions.IgnoreCase)) return "MGC";
+        if (Regex.IsMatch(text, @"Gold.*Futures", RegexOptions.IgnoreCase)) return "GC";
         if (Regex.IsMatch(text, @"Micro.*Crude", RegexOptions.IgnoreCase)) return "MCL";
+        if (Regex.IsMatch(text, @"Crude.*Oil", RegexOptions.IgnoreCase)) return "CL";
 
         return null;
     }
