@@ -111,11 +111,11 @@ export async function POST(request: Request) {
   }
 
   const ocrExecution = semanticText ? inspectLocalOcrExecution(semanticText) : null;
-  const semanticExecution = ocrExecution?.frame.positionStatus === "PENDING"
-    ? ocrExecution
-    : semanticText
-      ? inspectSemanticExecution(semanticText)
-      : null;
+  const accessibilityExecution = semanticText ? inspectSemanticExecution(semanticText) : null;
+  const semanticExecution =
+    ocrExecution?.frame.positionStatus === "PENDING"
+      ? ocrExecution
+      : accessibilityExecution;
 
   // A valid, authenticated screenshot reached Jarvis. Record that transport-level
   // success independently from whether the vision model can interpret the frame.
@@ -126,7 +126,11 @@ export async function POST(request: Request) {
   const previous = await getTradingState();
   const observerVersion = typeof body.observerVersion === "string" ? body.observerVersion : "";
 
-  if (ocrExecution?.frame.positionStatus === "FLAT" && previous.observer?.status === "PENDING") {
+  if (
+    ocrExecution?.frame.positionStatus === "FLAT" &&
+    previous.observer?.status === "PENDING" &&
+    accessibilityExecution?.frame.positionStatus !== "PENDING"
+  ) {
     const flatFrame = ocrExecution.frame;
     const state = await ingestTradingObservation(mapFrameToObservation(flatFrame, capturedAt, previous.openTrades));
     console.info("Observer local OCR execution cleared", {
@@ -177,6 +181,45 @@ export async function POST(request: Request) {
       state: {
         connection: state.account.connection,
         activeGoal: state.activeGoal,
+        observer: state.observer,
+        guardrails: state.guardrails,
+        openTrades: state.openTrades,
+        today: state.today,
+      },
+    });
+  }
+
+  if (semanticExecution?.frame.intentState === "PREPARING") {
+    const frame = semanticExecution.frame;
+    const state = await ingestTradingObservation({
+      connection: "OBSERVING",
+      observer: {
+        status: "UNKNOWN",
+        symbol: frame.symbol,
+        side: frame.side,
+        quantity: frame.quantity,
+        orderType: frame.orderType,
+        entryPrice: frame.entryPrice,
+        currentPrice: null,
+        stopPrice: frame.stopPrice,
+        targetPrice: frame.targetPrice,
+        openPnl: null,
+        confidence: frame.confidence,
+        observedAt: capturedAt,
+        evidence: frame.evidence,
+        intentState: "PREPARING",
+        orderTicketVisible: true,
+      },
+      observedAt: capturedAt,
+    });
+
+    return Response.json({
+      ok: true,
+      accepted: true,
+      source: "semantic-preparing",
+      frame,
+      state: {
+        connection: state.account.connection,
         observer: state.observer,
         guardrails: state.guardrails,
         openTrades: state.openTrades,
