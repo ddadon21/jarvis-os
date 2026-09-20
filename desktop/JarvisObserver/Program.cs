@@ -12,6 +12,8 @@ using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
+// Observer release: 0.4.14 active-pane execution reader
+
 internal static class Program
 {
     [STAThread]
