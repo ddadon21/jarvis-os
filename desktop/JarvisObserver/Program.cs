@@ -100,7 +100,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.12", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.13", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
@@ -216,7 +216,10 @@ internal sealed class ObserverContext : ApplicationContext
                     changed = true;
                 }
 
-                if (ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=PENDING", StringComparison.OrdinalIgnoreCase))
+                if (
+                    ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=PENDING", StringComparison.OrdinalIgnoreCase) ||
+                    ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=OPEN", StringComparison.OrdinalIgnoreCase) ||
+                    ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=PREPARING", StringComparison.OrdinalIgnoreCase))
                 {
                     _richExecutionSemanticText = ocr;
                     _richExecutionSemanticAt = DateTime.UtcNow;
@@ -476,7 +479,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.12",
+            observerVersion = "0.4.13",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -487,7 +490,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.12");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.13");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -546,7 +549,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.12");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.13");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
