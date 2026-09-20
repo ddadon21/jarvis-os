@@ -221,6 +221,14 @@ internal sealed class ObserverContext : ApplicationContext
                     _richExecutionSemanticText = ocr;
                     _richExecutionSemanticAt = DateTime.UtcNow;
                 }
+                else if (ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=FLAT", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Two consecutive clean OCR scans with no chart order are stronger
+                    // than a stale accessibility snapshot. Drop the old pending hold so
+                    // cancel returns Jarvis to WAITING on the next upload.
+                    _richExecutionSemanticText = null;
+                    _richExecutionSemanticAt = DateTime.MinValue;
+                }
             }
 
             if (changed)
