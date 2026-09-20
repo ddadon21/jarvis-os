@@ -4,8 +4,10 @@ on:
   push:
     branches:
       - claude/jarvis-ai-backend-Iw0x3
+      - codex/observer-current-state
     paths:
       - 'desktop/JarvisObserver/**'
+      - 'desktop/JarvisObserver.Tests/**'
       - '.github/workflows/build-jarvis-observer.yml'
   workflow_dispatch:
 
@@ -23,6 +25,9 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Verify order reader regressions
+        run: dotnet run --project ./desktop/JarvisObserver.Tests/JarvisObserver.Tests.csproj -c Release
 
       - name: Publish single-file observer
         shell: pwsh

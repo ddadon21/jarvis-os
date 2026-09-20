@@ -1,37 +1,30 @@
-# Jarvis Trading Observer
+# Jarvis Trading Observer 0.4.15
 
-Windows x64 tray companion for TradingView Desktop.
+Read-only Windows x64 companion for TradingView Desktop.
 
-## What v0.1 does
-- Detects when a visible `TradingView` desktop process is open.
-- Activates automatically; there is no daily Start Journal button.
-- Captures only the TradingView window using Win32 `PrintWindow` (no keyboard capture, no mouse control, no full-desktop screen recording).
-- Uses a low-resolution visual signature locally to avoid processing unchanged frames.
-- Keeps capped local snapshots under `%LOCALAPPDATA%\JarvisObserver\sessions` for calibration and verification.
-- Can send materially changed frames to Jarvis `/api/trading/observe-frame` when the secure cloud secret is configured.
-- Never places, cancels, modifies, or closes orders.
+## Update
+1. Right-click the existing Observer tray icon and choose Exit.
+2. Extract this ZIP to a new folder and run JarvisObserver.exe.
+3. Keep the existing pairing/configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
+4. Refresh Jarvis's Work page. Observer Link should show 0.4.15.
 
-## First run
-Run `JarvisObserver.exe`. A shield icon appears in the Windows system tray.
+## Current State
+- Waiting: no visible order setup or position.
+- Preparing order: an on-chart draft/hover widget or an order awaiting a fill.
+- Trade in progress: a visibly confirmed open position.
 
-States:
-- `standby` — TradingView is closed.
-- `ACTIVE` — TradingView Desktop is visible and Jarvis is observing it.
-- `paused` — observation is manually paused from the tray menu.
+The reader captures the active chart pane and supplies symbol, direction, contracts, order type, entry, current chart price, stop and target. It keeps accessibility values ahead of OCR text, recognizes compact Buy/Sell + quantity + type widgets, and prevents other panes or old trades from filling the current setup's fields.
 
-Right-click the tray icon to open the observer folder, pause/resume, open config, or exit.
+Unreadable or unset values remain blank. The current-price field is not fabricated from the bid/ask midpoint. Full screenshot completion needs a working server-side vision provider; a provider failure is displayed in Current State rather than hidden behind a successful connection indicator.
 
-## Cloud pairing
-The observer records locally even when cloud pairing is not enabled. Cloud vision remains disabled until the server and local app share `JARVIS_TRADING_SECRET` securely. Do not commit that secret to GitHub or paste it into chat.
+## Verification
+The Windows build runs order-reader regression fixtures for all eight requested futures roots in both directions and a split-chart scenario. The web build runs state/merge regression checks. These fixtures do not replace a live end-to-end TradingView test on the user's Windows desktop.
 
-Config path: `%LOCALAPPDATA%\JarvisObserver\config.json`
-
-## Privacy / safety
-The companion does not request Tradovate or Lucid credentials. It does not log keystrokes and contains no order-execution code. `PrintWindow` is intentionally used instead of full-screen capture so unrelated apps are not recorded. If TradingView does not permit reliable window capture on a particular machine/GPU configuration, the observer logs `capture.unavailable` instead of falling back to whole-desktop recording.
+## Behavior
+The companion observes only the TradingView window. It never clicks, places, cancels, changes or closes orders. Local calibration frames remain under %LOCALAPPDATA%\JarvisObserver\sessions.
 
 ## Build
 ```powershell
+dotnet run --project .\desktop\JarvisObserver.Tests\JarvisObserver.Tests.csproj -c Release
 dotnet publish .\desktop\JarvisObserver\JarvisObserver.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
-
-Output is under `desktop\JarvisObserver\bin\Release\net8.0-windows\win-x64\publish`.

@@ -32,7 +32,7 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly System.Threading.Timer _semanticTimer;
     private readonly System.Threading.Timer _ocrTimer;
     private readonly LocalExecutionOcr _executionOcr = new();
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(25) };
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(45) };
     private readonly UIA3Automation _automation = new();
     private readonly string _root;
     private readonly string _configPath;
@@ -55,6 +55,8 @@ internal sealed class ObserverContext : ApplicationContext
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
     private string? _latestOcrText;
+    private DateTime _latestOcrAt;
+    private DateTime _latestSemanticAt;
     private string? _lastOcrHash;
     private string? _richExecutionSemanticText;
     private DateTime _richExecutionSemanticAt = DateTime.MinValue;
@@ -160,6 +162,7 @@ internal sealed class ObserverContext : ApplicationContext
             lock (_semanticGate)
             {
                 _latestSemanticText = semantic;
+                _latestSemanticAt = now;
                 if (IsRichExecutionSemantic(semantic))
                 {
                     _richExecutionSemanticText = semantic;
@@ -204,7 +207,10 @@ internal sealed class ObserverContext : ApplicationContext
             using var frame = CaptureWindow(target);
             if (frame is null) return;
 
-            var ocr = await _executionOcr.ReadAsync(frame);
+            Point? pointer = null;
+            if (GetCursorPos(out var cursor) && GetWindowRect(target, out var rect))
+                pointer = new Point(cursor.X - rect.Left, cursor.Y - rect.Top);
+            var ocr = await _executionOcr.ReadAsync(frame, pointer);
             if (string.IsNullOrWhiteSpace(ocr)) return;
 
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ocr)));
@@ -212,6 +218,7 @@ internal sealed class ObserverContext : ApplicationContext
             lock (_semanticGate)
             {
                 _latestOcrText = ocr;
+                _latestOcrAt = DateTime.UtcNow;
                 if (!string.Equals(hash, _lastOcrHash, StringComparison.Ordinal))
                 {
                     _lastOcrHash = hash;
@@ -369,24 +376,17 @@ internal sealed class ObserverContext : ApplicationContext
         lock (_semanticGate)
         {
             var parts = new List<string>();
-
-            if (!string.IsNullOrWhiteSpace(_latestOcrText))
-            {
-                parts.Add(_latestOcrText);
-            }
-
-            if (!string.IsNullOrWhiteSpace(_richExecutionSemanticText) &&
-                now - _richExecutionSemanticAt <= TimeSpan.FromSeconds(8) &&
-                !parts.Any(x => x.Contains(_richExecutionSemanticText, StringComparison.Ordinal)))
-            {
-                parts.Add(_richExecutionSemanticText);
-            }
-
-            if (!string.IsNullOrWhiteSpace(_latestSemanticText))
-            {
+            // Fresh accessibility values come before verbose OCR coordinates. Previously
+            // OCR plus a retained copy could consume the entire upload budget, truncating
+            // the exact Buy/qty/type/price values at the end of the payload.
+            var ocrFresh = now - _latestOcrAt <= TimeSpan.FromSeconds(4);
+            if (ocrFresh && !string.IsNullOrWhiteSpace(_latestOcrText))
+                parts.AddRange(_latestOcrText.Split('\n').Where(line => line.StartsWith("JARVIS_OCR_EXECUTION|")));
+            if (now - _latestSemanticAt <= TimeSpan.FromSeconds(4) && !string.IsNullOrWhiteSpace(_latestSemanticText))
                 parts.Add(_latestSemanticText);
-            }
-
+            if (ocrFresh && !string.IsNullOrWhiteSpace(_latestOcrText))
+                parts.AddRange(_latestOcrText.Split('\n').Where(line => !line.StartsWith("JARVIS_OCR_EXECUTION|")));
+            // Never append a second old snapshot: it may describe another pane or order.
             return parts.Count == 0 ? null : string.Join(Environment.NewLine, parts);
         }
     }
@@ -481,7 +481,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.14",
+            observerVersion = "0.4.15",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -1006,7 +1006,7 @@ internal sealed class ObserverContext : ApplicationContext
             {
                 try
                 {
-                    if (element.Properties.IsPassword.ValueOrDefault) continue;
+                    if (element.Properties.IsPassword.ValueOrDefault || element.Properties.IsOffscreen.ValueOrDefault) continue;
 
                     var control = element.Properties.LocalizedControlType.ValueOrDefault?.Trim()
                         ?? element.ControlType.ToString();
@@ -1065,7 +1065,7 @@ internal sealed class ObserverContext : ApplicationContext
                         string.IsNullOrWhiteSpace(value) ? string.Empty : $"value={value}",
                         selection,
                         toggle,
-                        string.IsNullOrWhiteSpace(className) ? string.Empty : $"class={className}",
+                        // CSS class names contain no order values and used most of the text budget.
                     }.Where(x => !string.IsNullOrWhiteSpace(x)));
 
                     if (string.IsNullOrWhiteSpace(payload)) continue;
@@ -1125,7 +1125,7 @@ internal sealed class ObserverContext : ApplicationContext
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
         var maskedLongNumbers = Regex.Replace(text, @"\b\d{7,}\b", "[MASKED-ID]");
-        return maskedLongNumbers.Length > 16000 ? maskedLongNumbers[..16000] : maskedLongNumbers;
+        return maskedLongNumbers.Length > 60000 ? maskedLongNumbers[..60000] : maskedLongNumbers;
     }
 
     private static Bitmap? CaptureWindow(IntPtr hwnd)
@@ -1251,6 +1251,10 @@ internal sealed class ObserverContext : ApplicationContext
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out Point point);
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
@@ -1339,3 +1343,4 @@ internal sealed class ObserverConfig
         }
     }
 }
+

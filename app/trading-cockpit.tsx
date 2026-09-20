@@ -19,6 +19,7 @@ type ObserverState = {
   evidence: string[];
   intentState?: "NONE" | "PREPARING" | "ORDER_WORKING" | "POSITION_OPEN" | "UNKNOWN";
   orderTicketVisible?: boolean;
+  readingIssue?: string | null;
 };
 
 type Trade = {
@@ -252,7 +253,7 @@ export default function TradingCockpit() {
   const state = data?.state;
   const observer = state?.observer;
   const observing = data?.observing === true;
-  const current = state?.openTrades[0];
+  const current = state?.openTrades.find(trade => observer?.status === "OPEN" && trade.symbol === observer.symbol && trade.side === observer.side);
   const status = observer?.status ?? (current ? "OPEN" : "UNKNOWN");
   const sampleCount = (state?.recentTrades.length ?? 0) + (state?.openTrades.length ?? 0);
   const confidence = Math.round((observer?.confidence ?? 0) * 100);
@@ -260,7 +261,9 @@ export default function TradingCockpit() {
   const controlWatching = link?.command === "WATCH";
   const paired = Boolean(controllerToken && link && !linkAuthFailed);
   const frameAgeMs = link?.lastFrameAt ? Date.now() - Date.parse(link.lastFrameAt) : Number.POSITIVE_INFINITY;
-  const frameFresh = Number.isFinite(frameAgeMs) && frameAgeMs < 10_000;
+  const frameFresh = Number.isFinite(frameAgeMs) && frameAgeMs < 45_000;
+  const observationAgeMs = Date.now() - Date.parse(observer?.observedAt ?? "");
+  const observationFresh = Number.isFinite(observationAgeMs) && observationAgeMs >= 0 && observationAgeMs < 45_000;
   const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing && frameFresh;
   const intentState = observer?.intentState ?? "UNKNOWN";
   const executionActive = status === "PENDING" || status === "OPEN" || intentState === "PREPARING";
@@ -273,13 +276,13 @@ export default function TradingCockpit() {
         : !observing || !frameFresh
           ? "WAITING"
           : status === "OPEN"
-            ? "OPEN"
+            ? "TRADE IN PROGRESS"
             : status === "PENDING"
-              ? "PENDING"
+              ? "PREPARING ORDER"
               : intentState === "PREPARING"
-                ? "PREPARING"
-                : "WAITING";
-  const showExecutionDetails = liveStateFresh && executionActive;
+                ? "PREPARING ORDER"
+                : observer?.readingIssue ? "READING UNAVAILABLE" : "WAITING";
+  const showExecutionDetails = liveStateFresh && observationFresh && executionActive;
   const guardrails = state?.guardrails;
   const activeAlert = liveStateFresh ? guardrails?.activeAlert ?? null : null;
 
@@ -314,11 +317,11 @@ export default function TradingCockpit() {
     if (!link?.online) return "DESKTOP OFFLINE";
     if (!controlWatching) return "OBSERVER PAUSED";
     if (controlWatching && (!observing || !frameFresh)) return "WAITING";
-    if (status === "PENDING") return "WATCHING PENDING ORDER";
+    if (status === "PENDING") return "PREPARING ORDER";
     if (status === "OPEN") return "TRADE IN PROGRESS";
     if (intentState === "PREPARING") return "PREPARING ORDER";
-    return "WAITING";
-  }, [controlWatching, error, frameFresh, intentState, link?.online, observing, paired, status]);
+    return observer?.readingIssue ? "READING UNAVAILABLE" : "WAITING";
+  }, [controlWatching, error, frameFresh, intentState, link?.online, observing, paired, status, observer?.readingIssue]);
 
   async function confirmPairing() {
     const code = pairCode.trim().toUpperCase();
@@ -457,6 +460,7 @@ export default function TradingCockpit() {
             <span>CURRENT STATE</span>
             <b>{displayStatus}</b>
           </div>
+          {liveStateFresh && observer?.readingIssue ? <small role="status">{observer.readingIssue}</small> : null}
           <div className="trading-symbol-row">
             <div>
               <small>SYMBOL</small>

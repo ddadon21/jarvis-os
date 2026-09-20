@@ -48,6 +48,8 @@ export type TradingObserverState = {
   evidence: string[];
   intentState?: TradingIntentState;
   orderTicketVisible?: boolean;
+  readingIssue?: string | null;
+  detailsObservedAt?: string | null;
 };
 
 export type TradingAccountState = {
@@ -177,6 +179,10 @@ export async function getTradingState(): Promise<TradingRuntimeState> {
 
 export async function ingestTradingObservation(input: TradingObservationInput): Promise<TradingRuntimeState> {
   const previous = await getTradingState();
+  // A slower vision response must not replace a more recent screen state.
+  const incomingAt = Date.parse(input.observedAt ?? "");
+  const priorAt = Date.parse(previous.account.lastObservedAt ?? "");
+  if (Number.isFinite(incomingAt) && Number.isFinite(priorAt) && incomingAt < priorAt) return previous;
   const next = buildState(input, previous);
   await writeState(next);
 
@@ -276,7 +282,7 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     profitTarget: safeNullable(input.profitTarget ?? priorAccount?.profitTarget ?? null),
     dailyLossLimit: safeNullable(input.dailyLossLimit ?? priorAccount?.dailyLossLimit ?? null),
     maxLossLimit: safeNullable(input.maxLossLimit ?? priorAccount?.maxLossLimit ?? null),
-    lastObservedAt: connection === "OBSERVING" ? observedAt : (priorAccount?.lastObservedAt ?? null),
+    lastObservedAt: connection === "OBSERVING" || connection === "DEGRADED" ? observedAt : (priorAccount?.lastObservedAt ?? null),
   };
 
   const todayKey = observedAt.slice(0, 10);
@@ -390,6 +396,8 @@ function normalizeObserver(
       typeof input?.orderTicketVisible === "boolean"
         ? input.orderTicketVisible
         : previous?.orderTicketVisible ?? false,
+    readingIssue: input?.readingIssue === undefined ? previous?.readingIssue ?? null : nullableClean(input.readingIssue, 200),
+    detailsObservedAt: normalizeDate(input?.detailsObservedAt ?? input?.observedAt ?? observedAt ?? null),
   };
 }
 

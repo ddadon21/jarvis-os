@@ -10,6 +10,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishReadyToRun>true</PublishReadyToRun>
     <AssemblyName>JarvisObserver</AssemblyName>
+    <Version>0.4.15</Version>
     <RootNamespace>JarvisObserver</RootNamespace>
   </PropertyGroup>
   <ItemGroup>

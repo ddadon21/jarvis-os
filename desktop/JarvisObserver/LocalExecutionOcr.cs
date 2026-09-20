@@ -27,7 +27,7 @@ internal sealed class LocalExecutionOcr
 
     public bool Available => _engine is not null;
 
-    public async Task<string?> ReadAsync(Bitmap bitmap)
+    public async Task<string?> ReadAsync(Bitmap bitmap, Point? pointer = null)
     {
         if (_engine is null) return null;
 
@@ -38,7 +38,7 @@ internal sealed class LocalExecutionOcr
             // First find the actual order interaction cluster. TradingView often renders
             // qty/type/price as tiny sibling labels, so a whole-window OCR pass can see
             // "Buy" but miss "10 / Limit / 29,733.75". Re-scan only that active pane.
-            var activeAnchor = FindActiveOrderAnchor(rows);
+            var activeAnchor = FindActiveOrderAnchor(rows, pointer);
             if (activeAnchor is not null)
             {
                 var paneRows = await RecognizeActiveOrderPaneAsync(bitmap, activeAnchor);
@@ -81,7 +81,7 @@ internal sealed class LocalExecutionOcr
                 }
             }
 
-            return BuildSemantic(rows);
+            return BuildSemantic(ScopeToOrderPane(rows, FindActiveOrderAnchor(rows, pointer)));
         }
         catch
         {
@@ -89,34 +89,36 @@ internal sealed class LocalExecutionOcr
         }
     }
 
-    private static OcrRow? FindActiveOrderAnchor(List<OcrRow> rows)
+    private static OcrRow? FindActiveOrderAnchor(List<OcrRow> rows, Point? pointer = null)
     {
-        // Prefer explicit draft controls because they identify the exact pane being edited.
-        var draft = rows
-            .Where(row => Regex.IsMatch(
-                row.Text,
-                @"\b(change order type|change order quantity|add order on|stop loss|take profit)\b",
-                RegexOptions.IgnoreCase))
-            .OrderByDescending(row => row.Y)
-            .FirstOrDefault();
-        if (draft is not null) return draft;
+        var candidates = rows.Where(row => Regex.IsMatch(row.Text,
+            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+\d|^(Buy|Sell)$",
+            RegexOptions.IgnoreCase)).Where(row => row.Y > 120).ToList();
+        if (candidates.Count == 0) return null;
+        if (pointer is not null)
+        {
+            var near = candidates.OrderBy(row => Math.Abs(row.X - pointer.Value.X) + Math.Abs(row.Y - pointer.Value.Y)).First();
+            if (Math.Abs(near.X - pointer.Value.X) + Math.Abs(near.Y - pointer.Value.Y) < 220) return near;
+        }
+        return candidates.OrderByDescending(row => Regex.IsMatch(row.Text, @"change order|add order on", RegexOptions.IgnoreCase))
+            .ThenByDescending(row => row.Y).First();
+    }
 
-        // Then prefer a real working-order row.
-        var combined = rows
-            .Where(row => Regex.IsMatch(
-                row.Text,
-                @"^(Buy|Sell)\s+\d+(?:\.\d+)?\s+[A-Z]{1,8}[A-Z0-9!]{0,10}\s+@",
-                RegexOptions.IgnoreCase))
-            .OrderByDescending(row => row.Y)
-            .FirstOrDefault();
-        if (combined is not null) return combined;
-
-        // Last resort: a lower-chart Buy/Sell action next to order controls.
-        return rows
-            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(Buy|Sell)$", RegexOptions.IgnoreCase))
-            .Where(row => row.Y > 300)
-            .OrderByDescending(row => row.Y)
-            .FirstOrDefault();
+    private static List<OcrRow> ScopeToOrderPane(List<OcrRow> rows, OcrRow? anchor)
+    {
+        if (anchor is null) return rows;
+        // Chart headers, not browser tabs or watchlist tickers, define pane bounds.
+        var headers = rows.Where(row => Regex.IsMatch(row.Text,
+            @"(?:E.?mini|Micro).*?(?:Futures|CME|CBOT)|(?:Gold|Dow).*?Futures|\b(?:MNQ|NQ|MES|ES|MYM|YM|MGC|GC)[12]!\s*,",
+            RegexOptions.IgnoreCase)).ToList();
+        var header = headers.Where(row => row.X <= anchor.X + 30 && row.Y < anchor.Y)
+            .OrderByDescending(row => row.Y).ThenByDescending(row => row.X).FirstOrDefault();
+        if (header is null) return rows;
+        var right = headers.Where(row => Math.Abs(row.Y - header.Y) < 40 && row.X > header.X + 120)
+            .Select(row => row.X - 15).DefaultIfEmpty(double.MaxValue).Min();
+        var bottom = headers.Where(row => Math.Abs(row.X - header.X) < 100 && row.Y > header.Y + 80)
+            .Select(row => row.Y - 10).DefaultIfEmpty(double.MaxValue).Min();
+        return rows.Where(row => row.X >= header.X - 40 && row.X < right && row.Y >= header.Y - 10 && row.Y < bottom).ToList();
     }
 
     private async Task<List<OcrRow>> RecognizeActiveOrderPaneAsync(Bitmap bitmap, OcrRow anchor)
@@ -190,28 +192,29 @@ internal sealed class LocalExecutionOcr
             BitmapAlphaMode.Premultiplied);
 
         var result = await _engine!.RecognizeAsync(softwareBitmap);
-        return result.Lines
-            .Select(line =>
+        var rows = new List<OcrRow>();
+        foreach (var line in result.Lines)
+        {
+            var words = line.Words.ToList();
+            if (words.Count == 0) continue;
+            var text = string.Join(" ", words.Select(w => w.Text)).Trim();
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            var left = words.Min(w => w.BoundingRect.X);
+            var top = words.Min(w => w.BoundingRect.Y);
+            var right = words.Max(w => w.BoundingRect.X + w.BoundingRect.Width);
+            var bottom = words.Max(w => w.BoundingRect.Y + w.BoundingRect.Height);
+            rows.Add(new OcrRow(text, left * coordinateScale + originX, top * coordinateScale + originY,
+                (right - left) * coordinateScale, (bottom - top) * coordinateScale));
+            // Keep actual word boxes as well as complete strings. OCR often returns
+            // "10 Limit x" as one line; the qty and type still have separate boxes.
+            foreach (var word in words.Where(_ => words.Count > 1))
             {
-                var words = line.Words.ToList();
-                var text = string.Join(" ", words.Select(w => w.Text)).Trim();
-                if (string.IsNullOrWhiteSpace(text)) return null;
-
-                var left = words.Min(w => w.BoundingRect.X) * coordinateScale + originX;
-                var top = words.Min(w => w.BoundingRect.Y) * coordinateScale + originY;
-                var right = words.Max(w => w.BoundingRect.X + w.BoundingRect.Width) * coordinateScale + originX;
-                var bottom = words.Max(w => w.BoundingRect.Y + w.BoundingRect.Height) * coordinateScale + originY;
-
-                return new OcrRow(
-                    text,
-                    left,
-                    top,
-                    Math.Max(1, right - left),
-                    Math.Max(1, bottom - top));
-            })
-            .Where(x => x is not null)
-            .Cast<OcrRow>()
-            .ToList();
+                var box = word.BoundingRect;
+                rows.Add(new OcrRow(word.Text, box.X * coordinateScale + originX, box.Y * coordinateScale + originY,
+                    box.Width * coordinateScale, box.Height * coordinateScale));
+            }
+        }
+        return rows;
     }
 
     private static List<OcrRow> MergeRows(List<OcrRow> primary, List<OcrRow> extra)
@@ -251,7 +254,7 @@ internal sealed class LocalExecutionOcr
             "JARVIS_OCR_SURFACE|OK=1"
         };
 
-        foreach (var row in rows.Take(220))
+        foreach (var row in rows.Take(400))
         {
             output.Add($"JARVIS_OCR|X={Math.Round(row.X)}|Y={Math.Round(row.Y)}|W={Math.Round(row.Width)}|H={Math.Round(row.Height)}|TEXT={Sanitize(row.Text)}");
         }
@@ -271,15 +274,16 @@ internal sealed class LocalExecutionOcr
         }
         else
         {
-            _missingWorkingOrderScans++;
-            if (_missingWorkingOrderScans >= 2)
+            if (rows.Count >= 15 && InferSymbol(rows) is not null) _missingWorkingOrderScans++;
+            else _missingWorkingOrderScans = 0;
+            if (_missingWorkingOrderScans >= 3)
             {
                 // A healthy OCR surface with no working-order row is explicit negative
                 // evidence. Emit it continuously so a pending state confirmed by the
                 // accessibility lane can still be cleared immediately after cancel.
                 output.Insert(0, "JARVIS_OCR_EXECUTION|STATUS=FLAT");
                 _hadWorkingOrder = false;
-                _missingWorkingOrderScans = 2;
+                _missingWorkingOrderScans = 3;
             }
         }
 
@@ -334,7 +338,16 @@ internal sealed class LocalExecutionOcr
             .Cast<ReconstructedOrder>()
             .ToList();
 
+        var compact = rows.Select(row =>
+        {
+            var match = Regex.Match(row.Text.Trim(), @"^(Buy|Sell)\s+(\d+(?:\.\d+)?)\s+(Limit|Stop|Market)\b", RegexOptions.IgnoreCase);
+            if (!match.Success) return null;
+            return new ReconstructedOrder(match.Groups[1].Value.ToUpperInvariant(), ParseNumber(match.Groups[2].Value),
+                match.Groups[3].Value.ToUpperInvariant(), FindNearestPrice(rows, row, true), null, null, row);
+        }).Where(order => order is not null).Cast<ReconstructedOrder>();
+
         reconstructed = combinedOrders
+            .Concat(compact)
             .Concat(reconstructed)
             .GroupBy(order => new
             {
@@ -368,19 +381,9 @@ internal sealed class LocalExecutionOcr
 
         if (bracket is not null)
         {
-            var openSide = bracket.Action == "SELL" ? "LONG" : "SHORT";
-            return string.Join("|", new[]
-            {
-                "JARVIS_OCR_EXECUTION",
-                "STATUS=OPEN",
-                $"SIDE={openSide}",
-                $"QTY={bracket.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
-                "TYPE=",
-                $"SYMBOL={symbol ?? ""}",
-                "ENTRY=",
-                $"STOP={Format(bracket.Stop!.Price)}",
-                $"TARGET={Format(bracket.Limit!.Price)}"
-            });
+            // Two same-side orders can be an unsubmitted bracket preview. They
+            // do not establish a fill or a live position's entry/remaining size.
+            return null;
         }
 
         // If an opposite-side entry is still present alongside its protective exits,
@@ -443,13 +446,13 @@ internal sealed class LocalExecutionOcr
         return string.Join("|", new[]
         {
             "JARVIS_OCR_EXECUTION",
-            $"STATUS={(hasFullOrderLine || !hasDraftControls ? "PENDING" : "PREPARING")}",
+            $"STATUS={(hasFullOrderLine && !hasDraftControls ? "PENDING" : "PREPARING")}",
             $"SIDE={pendingSide}",
             $"QTY={entry.Quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""}",
             $"TYPE={entry.Type}",
             $"SYMBOL={symbol ?? ""}",
             $"ENTRY={Format(entry.Price)}",
-            $"CURRENT={Format(FindCurrentQuoteMid(rows, entry.Anchor))}",
+            $"CURRENT={Format(FindCurrentPrice(rows, entry.Anchor))}",
             $"STOP={Format(stop)}",
             $"TARGET={Format(target)}"
         });
@@ -553,7 +556,7 @@ internal sealed class LocalExecutionOcr
             $"TYPE={orderType ?? ""}",
             $"SYMBOL={symbol ?? ""}",
             $"ENTRY={Format(entryPrice)}",
-            $"CURRENT={Format(FindCurrentQuoteMid(rows, ticketAnchor))}",
+            $"CURRENT={Format(FindCurrentPrice(rows, ticketAnchor))}",
             $"STOP={Format(stopPrice)}",
             $"TARGET={Format(targetPrice)}"
         });
@@ -625,11 +628,11 @@ internal sealed class LocalExecutionOcr
             .Where(row => !ReferenceEquals(row, anchor))
             .Select(row => new
             {
-                price = ExtractPrice(row.Text),
+                price = Regex.IsMatch(row.Text, @"USD|\$", RegexOptions.IgnoreCase) ? null : ExtractPrice(row.Text),
                 dy = Math.Abs((row.Y + row.Height / 2) - (anchor.Y + anchor.Height / 2)),
                 dx = row.X - (anchor.X + anchor.Width),
             })
-            .Where(item => item.price is not null && item.dy <= 48 && item.dx >= -35 && item.dx <= 520)
+            .Where(item => item.price is not null && item.dy <= Math.Max(12, anchor.Height) && item.dx >= -8 && item.dx <= 520)
             .OrderBy(item => item.dy * 5 + Math.Abs(item.dx))
             .Select(item => item.price)
             .FirstOrDefault();
@@ -662,21 +665,16 @@ internal sealed class LocalExecutionOcr
             ["HG"] = "HG", ["ZB"] = "ZB", ["ZN"] = "ZN", ["ZF"] = "ZF", ["ZT"] = "ZT"
         };
 
-        return known.TryGetValue(symbol, out var normalized) ? normalized : null;
+        if (known.TryGetValue(symbol, out var normalized)) return normalized;
+        var root = Regex.Replace(symbol, @"(?:[12I]!?|!)$", "");
+        return known.TryGetValue(root, out normalized) ? normalized : null;
     }
 
     private static string? InferSymbol(List<OcrRow> rows, OcrRow? activeAnchor = null)
     {
         IEnumerable<OcrRow> scoped = rows;
 
-        if (activeAnchor is not null)
-        {
-            // Prefer the same visual pane as the active order. This prevents a second
-            // chart in a split-screen layout from donating the wrong symbol.
-            scoped = rows
-                .Where(row => Math.Abs((row.X + row.Width / 2) - (activeAnchor.X + activeAnchor.Width / 2)) <= 520)
-                .Where(row => row.Y <= activeAnchor.Y + 140);
-        }
+        // ReadAsync already restricts all rows to the active chart pane.
 
         var scopedList = scoped.ToList();
 
@@ -689,8 +687,7 @@ internal sealed class LocalExecutionOcr
                 if (normalized is not null) return normalized;
             }
 
-            var continuous = Regex.Match(row.Text.ToUpperInvariant(), @"\b([A-Z0-9]{2,6}[1I]?!?)\b");
-            if (continuous.Success)
+            foreach (Match continuous in Regex.Matches(row.Text.ToUpperInvariant(), @"\b([A-Z0-9]{2,6}[1I]?!?)\b"))
             {
                 var normalized = NormalizeOcrTicker(continuous.Groups[1].Value);
                 if (normalized is not null) return normalized;
@@ -714,44 +711,20 @@ internal sealed class LocalExecutionOcr
         return null;
     }
 
-    private static double? FindCurrentQuoteMid(List<OcrRow> rows, OcrRow activeAnchor)
+    private static double? FindCurrentPrice(List<OcrRow> rows, OcrRow activeAnchor)
     {
-        var paneCenterX = activeAnchor.X + activeAnchor.Width / 2;
-        var topActions = rows
-            .Where(row => row.Y < 340)
-            .Where(row => Math.Abs((row.X + row.Width / 2) - paneCenterX) <= 620)
-            .Where(row => Regex.IsMatch(row.Text.Trim(), @"^(BUY|SELL)$", RegexOptions.IgnoreCase))
-            .ToList();
-
-        double? buy = null;
-        double? sell = null;
-
-        foreach (var action in topActions)
+        // Only explicitly labelled last/current values. Bid/ask midpoints and
+        // nearby indicator/crosshair prices are not the current chart price.
+        foreach (var row in rows)
         {
-            var price = rows
-                .Where(row => !ReferenceEquals(row, action))
-                .Select(row => new
-                {
-                    value = ExtractPrice(row.Text),
-                    dx = Math.Abs((row.X + row.Width / 2) - (action.X + action.Width / 2)),
-                    dy = Math.Abs((row.Y + row.Height / 2) - (action.Y + action.Height / 2)),
-                })
-                .Where(item => item.value is not null && item.dx <= 180 && item.dy <= 85)
-                .OrderBy(item => item.dy * 4 + item.dx)
-                .Select(item => item.value)
-                .FirstOrDefault();
-
-            if (price is null) continue;
-            if (action.Text.Equals("BUY", StringComparison.OrdinalIgnoreCase)) buy = price;
-            if (action.Text.Equals("SELL", StringComparison.OrdinalIgnoreCase)) sell = price;
+            var match = Regex.Match(row.Text, @"\b(?:Last|Current)\s*:?\s*([\d,]+(?:\.\d+)?)", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                var value = ParseNumber(match.Groups[1].Value);
+                if (value >= 100) return value;
+            }
         }
-
-        if (buy is not null && sell is not null)
-        {
-            return Math.Round((buy.Value + sell.Value) / 2d, 4);
-        }
-
-        return buy ?? sell;
+        return null;
     }
 
     private static double? FindNearestPrice(List<OcrRow> rows, OcrRow anchor, bool preferRight)
@@ -761,11 +734,11 @@ internal sealed class LocalExecutionOcr
             .Select(row => new
             {
                 row,
-                price = ExtractPrice(row.Text),
+                price = Regex.IsMatch(row.Text, @"USD|\$", RegexOptions.IgnoreCase) ? null : ExtractPrice(row.Text),
                 dy = Math.Abs((row.Y + row.Height / 2) - (anchor.Y + anchor.Height / 2)),
                 dx = row.X - (anchor.X + anchor.Width)
             })
-            .Where(x => x.price is not null && x.dy <= Math.Max(34, anchor.Height * 2.5))
+            .Where(x => x.price is not null && x.dy <= Math.Max(12, anchor.Height))
             .Where(x => !preferRight || x.dx >= -20)
             .OrderBy(x => x.dy * 4 + Math.Abs(x.dx))
             .FirstOrDefault();
@@ -809,3 +782,4 @@ internal sealed class LocalExecutionOcr
 
     private sealed record OcrRow(string Text, double X, double Y, double Width, double Height);
 }
+

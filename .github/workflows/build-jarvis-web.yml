@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - claude/jarvis-ai-backend-Iw0x3
+      - codex/observer-current-state
     paths:
       - 'app/**'
       - 'lib/**'
+      - 'tests/**'
       - 'package.json'
       - 'tsconfig.json'
       - 'next.config.ts'
@@ -26,10 +28,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Install
         run: npm install
+
+      - name: Verify observer state regressions
+        run: node --test tests/trading-frame.test.mjs
 
       - name: Build
         run: npm run build
