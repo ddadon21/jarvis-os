@@ -1,4 +1,4 @@
-import { executionOcrDiagnostics, isRichExecutionRead, mergeVisualWithSemantic, inspectLocalOcrExecution, inspectSemanticExecution, fuseExecutionReads, mergeSemanticWithPrevious, normalizeFrameRead, normalizeDate, type FrameRead } from "../../../../lib/trading-frame";
+import { inspectOcrLayoutExecution, executionOcrDiagnostics, isRichExecutionRead, mergeVisualWithSemantic, inspectLocalOcrExecution, inspectSemanticExecution, fuseExecutionReads, mergeSemanticWithPrevious, normalizeFrameRead, normalizeDate, type FrameRead } from "../../../../lib/trading-frame";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { getTradingState, ingestTradingObservation, type JournalTrade, type TradingObservationInput } from "../../../../lib/trading-runtime";
@@ -90,7 +90,9 @@ export async function POST(request: Request) {
   }
 
   const explicitlyNoPositions = /\b(no (?:open )?positions|positions\s*\(0\))\b/i.test(semanticText ?? "");
-  const localRead = semanticText ? inspectLocalOcrExecution(semanticText) : null;
+  const canonicalRead = semanticText ? inspectLocalOcrExecution(semanticText) : null;
+  const layoutRead = semanticText ? inspectOcrLayoutExecution(semanticText) : null;
+  const localRead = fuseExecutionReads(layoutRead, canonicalRead?.frame.positionStatus === "FLAT" ? null : canonicalRead) ?? canonicalRead;
   // Old clients emit FLAT merely because their parser missed a position row.
   // Absence of a recognized order is not proof that the account is flat.
   const ocrExecution = localRead?.frame.positionStatus === "FLAT" && !explicitlyNoPositions ? null : localRead;
@@ -268,7 +270,9 @@ export async function POST(request: Request) {
         evidence: frame.evidence,
         intentState: frame.intentState,
         orderTicketVisible: frame.orderTicketVisible,
-        readingIssue: "Vision unavailable. Showing only confirmed screen readings.",
+        readingIssue: /credits?|billing|credit card/i.test(message)
+          ? "AI vision needs API credits. Showing local screen readings."
+          : "Vision unavailable. Showing only confirmed screen readings.",
         detailsObservedAt: frame.detailsObservedAt ?? capturedAt,
       },
       observedAt: capturedAt,

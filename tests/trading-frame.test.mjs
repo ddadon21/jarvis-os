@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectLocalOcrExecution, inspectSemanticExecution, fuseExecutionReads, isRichExecutionRead, mergeSemanticWithPrevious, mergeVisualWithSemantic, normalizeFrameRead } from '../lib/trading-frame.ts';
+import { inspectOcrLayoutExecution, executionOcrDiagnostics, inspectLocalOcrExecution, inspectSemanticExecution, fuseExecutionReads, isRichExecutionRead, mergeSemanticWithPrevious, mergeVisualWithSemantic, normalizeFrameRead } from '../lib/trading-frame.ts';
 
 const at = '2026-09-20T20:00:00.000Z';
 function draft(overrides = {}) {
@@ -108,4 +108,52 @@ test('live trailing stops are valid on either side of entry', () => {
     const result = fuseExecutionReads({source:'semantic', frame}, {source:'semantic', frame}).frame;
     assert.equal(result.stopPrice, frame.stopPrice);
   }
+});
+
+function rowsText(rows) { return rows.map(([text,x,y,w=70,h=12])=>`JARVIS_OCR|X=${x}|Y=${y}|W=${w}|H=${h}|TEXT=${text}`).join('\r\r\n'); }
+const splitLiveRows = [
+ ['MYM1!, 5',20,90], ['1',600,200,12], ['Sell Limit',620,200,65], ['52,571',900,200],
+ ['1',600,400,12], ['Sell Stop',620,400,65], ['52,303',900,400],
+ ['1',600,600,12], ['+102.50 USD',625,600,100], ['52,244',900,600],
+ ['MYMZ2026',815,300,80], ['52,449',900,300],
+];
+test('real Windows split qty/order and qty/P&L labels establish a live position', () => {
+ const frame=inspectOcrLayoutExecution(rowsText(splitLiveRows)).frame;
+ assert.equal(frame.positionStatus,'OPEN'); assert.equal(frame.symbol,'MYM'); assert.equal(frame.side,'LONG');
+ assert.equal(frame.quantity,1); assert.equal(frame.entryPrice,52244); assert.equal(frame.stopPrice,52303);
+ assert.equal(frame.targetPrice,52571); assert.equal(frame.currentPrice,52449); assert.equal(frame.openPnl,102.5);
+ assert.equal(isRichExecutionRead(frame),true);
+});
+test('Windows doubled carriage returns do not discard OCR geometry', () => {
+ assert.equal(executionOcrDiagnostics(rowsText(splitLiveRows)).rowCount,splitLiveRows.length);
+});
+test('split exit labels without a live P&L row do not establish a position', () => {
+ assert.equal(inspectOcrLayoutExecution(rowsText(splitLiveRows.filter(row=>!row[0].includes('USD')))),null);
+});
+test('a zero P&L remains a valid live position reading', () => {
+ const frame=inspectOcrLayoutExecution(rowsText(splitLiveRows.map(row=>row[0].includes('USD')?['+0.00 USD',...row.slice(1)]:row))).frame;
+ assert.equal(frame.positionStatus,'OPEN'); assert.equal(frame.openPnl,0);
+});
+test('fragmented draft quantity and order type populate before submission', () => {
+ const frame=inspectOcrLayoutExecution(rowsText([
+ ['MNQ1!, 5',20,90],['10',600,400,15],['Buy Limit',625,400,70],['29,733.75',900,400],
+ ['10 - 500.00 USD',600,500,150],['29,708.75',900,500],['10 + 1000.00 USD',600,200,150],['29,783.75',900,200],
+ ['MNQZ2026',800,300,80],['29,755.25',900,300],
+ ])).frame;
+ assert.equal(frame.intentState,'PREPARING'); assert.equal(frame.quantity,10); assert.equal(frame.orderType,'LIMIT');
+ assert.equal(frame.entryPrice,29733.75); assert.equal(frame.stopPrice,29708.75); assert.equal(frame.targetPrice,29783.75);
+ assert.equal(frame.currentPrice,29755.25); assert.equal(isRichExecutionRead(frame),true);
+});
+
+test('broker Positions count establishes OPEN even while price extraction is unavailable', () => {
+ const frame=inspectSemanticExecution('tab item | Positions 1 | positions\nbutton | Long position').frame;
+ assert.equal(frame.positionStatus,'OPEN'); assert.equal(frame.symbol,null); assert.equal(frame.side,null);
+});
+test('drawing toolbar position tools do not establish a broker position', () => {
+ assert.equal(inspectSemanticExecution('button | Long position\ngroup | Short position'),null);
+});
+test('account position count does not relabel another pending draft as filled', () => {
+ const count=inspectSemanticExecution('tab item | Positions 1 | positions');
+ const result=fuseExecutionReads({source:'semantic',frame:draft()},count).frame;
+ assert.equal(result.positionStatus,'OPEN'); assert.equal(result.entryPrice,null); assert.equal(result.symbol,null);
 });

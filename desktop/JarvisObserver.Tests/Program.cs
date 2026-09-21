@@ -87,4 +87,15 @@ live.RemoveAt(6);
 var noPosition = Call("TryBuildExecution", live);
 if (noPosition is string unsafeRead && unsafeRead.Contains("STATUS=OPEN")) throw new Exception("Exit orders fabricated a fill");
 checks++;
+// Hovering a quote on the other pane must not crop away a live position.
+var panes = (IList)Activator.CreateInstance(listType)!;
+panes.Add(Row("MNQ1!, 5", 40, 150)); panes.Add(Row("MYM1!, 5", 960, 150));
+panes.Add(Row("BUY", 200, 190)); panes.Add(Row("SELL", 100, 190));
+panes.Add(Row("Sell Limit", 1500, 300)); panes.Add(Row("Sell Stop", 1500, 550));
+panes.Add(Row("+102.50 USD", 1500, 700));
+var liveAnchor = Call("FindActiveOrderAnchor", panes, new Point(210, 195));
+Equal("quote hover must not steal active pane", (string?)rowType.GetProperty("Text")!.GetValue(liveAnchor), "+102.50 USD");
+var visibleRows = (IList)Call("ScopeToOrderPane", panes, liveAnchor)!;
+if (visibleRows.Count != 4) throw new Exception($"Expected complete right pane; got {visibleRows.Count} rows");
+checks++;
 Console.WriteLine($"Observer parser: {checks} regression scenarios passed.");

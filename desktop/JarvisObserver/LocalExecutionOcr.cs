@@ -81,7 +81,7 @@ internal sealed class LocalExecutionOcr
                 }
             }
 
-            return BuildSemantic(ScopeToOrderPane(rows, FindActiveOrderAnchor(rows, pointer)));
+            return BuildSemantic(ScopeToOrderPane(rows, FindActiveOrderAnchor(rows, pointer)), rows);
         }
         catch
         {
@@ -92,15 +92,18 @@ internal sealed class LocalExecutionOcr
     private static OcrRow? FindActiveOrderAnchor(List<OcrRow> rows, Point? pointer = null)
     {
         var candidates = rows.Where(row => Regex.IsMatch(row.Text,
-            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+\d|^\d+\s+(Buy|Sell)\b|^\d+\s+[+−-].*USD|^(Buy|Sell)$",
+            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+(\d|Limit|Stop|Market)|^\d+\s+(Buy|Sell)\b|^(\d+\s+)?[+−-].*USD",
             RegexOptions.IgnoreCase)).Where(row => row.Y > 120).ToList();
+        // Buy/Sell quote buttons exist in every chart. They must never select
+        // another pane merely because the mouse happens to be near them.
         if (candidates.Count == 0) return null;
         if (pointer is not null)
         {
             var near = candidates.OrderBy(row => Math.Abs(row.X - pointer.Value.X) + Math.Abs(row.Y - pointer.Value.Y)).First();
             if (Math.Abs(near.X - pointer.Value.X) + Math.Abs(near.Y - pointer.Value.Y) < 220) return near;
         }
-        return candidates.OrderByDescending(row => Regex.IsMatch(row.Text, @"change order|add order on", RegexOptions.IgnoreCase))
+        return candidates.OrderByDescending(row => Regex.IsMatch(row.Text, @"USD", RegexOptions.IgnoreCase))
+            .ThenByDescending(row => Regex.IsMatch(row.Text, @"change order|add order on", RegexOptions.IgnoreCase))
             .ThenByDescending(row => row.Y).First();
     }
 
@@ -249,14 +252,21 @@ internal sealed class LocalExecutionOcr
     private static string NormalizeText(string value) =>
         Regex.Replace(value.Trim(), @"\s+", " ");
 
-    private string BuildSemantic(List<OcrRow> rows)
+    private string BuildSemantic(List<OcrRow> rows, List<OcrRow>? fullRows = null)
     {
         var output = new List<string>
         {
             "JARVIS_OCR_SURFACE|OK=1"
         };
 
-        foreach (var row in rows.Take(400))
+        // Preserve the full-window evidence for server-side reconstruction.
+        // Scoping the local guess must not erase a live position in another pane.
+        // Complete lines precede redundant words so a large surface stays within
+        // the upload budget while retaining labels, quantities and price axes.
+        var uploadRows = (fullRows ?? rows).OrderByDescending(row =>
+            Regex.IsMatch(row.Text, @"USD|Buy|Sell|Limit|Stop|[A-Z]{2,4}[FGHJKMNQUVXZ]\d{2,4}|Futures", RegexOptions.IgnoreCase))
+            .ThenByDescending(row => Regex.IsMatch(row.Text.Trim(), @"^[\d,]+(?:\.\d+)?$"));
+        foreach (var row in uploadRows.Take(600))
         {
             output.Add($"JARVIS_OCR|X={Math.Round(row.X)}|Y={Math.Round(row.Y)}|W={Math.Round(row.Width)}|H={Math.Round(row.Height)}|TEXT={Sanitize(row.Text)}");
         }

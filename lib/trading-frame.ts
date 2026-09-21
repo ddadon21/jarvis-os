@@ -43,7 +43,13 @@ function executionReadCompleteness(frame: FrameRead): number {
 }
 
 export function isRichExecutionRead(frame: FrameRead): boolean {
-  return (frame.intentState === "PREPARING" || frame.positionStatus === "PENDING" || frame.positionStatus === "OPEN")
+  if (frame.positionStatus === 'OPEN') {
+    // Filled positions often no longer display their original entry order type.
+    // Its absence must not force a paid vision request on every complete frame.
+    return [frame.symbol, frame.side, frame.quantity, frame.entryPrice, frame.currentPrice, frame.stopPrice, frame.targetPrice, frame.openPnl]
+      .every(value => value != null) && (frame.quantity ?? 0) > 0;
+  }
+  return (frame.intentState === "PREPARING" || frame.positionStatus === "PENDING")
     && executionReadCompleteness(frame) === 8 && (frame.quantity ?? 0) > 0;
 }
 
@@ -198,6 +204,13 @@ export function inspectSemanticExecution(semanticText: string, activeSymbol: str
   const orderTicketVisible = hasQuantityEditor || hasOrderTypeControl;
   const details = extractSemanticOrderDetails(lines);
 
+  // TradingView's broker Positions tab is account-state evidence. The drawing
+  // toolbar's "Long position"/"Short position" buttons are not.
+  if (lines.some(line => /^tab item\s*\|\s*Positions\s+([1-9]\d*)\s*\|\s*positions$/i.test(line))) {
+    return {source:'semantic', frame:normalizeFrameRead({brokerPanelVisible:true,positionStatus:'OPEN',intentState:'POSITION_OPEN',
+      confidence:.9, evidence:['TradingView broker Positions tab reports a nonzero open-position count.'],orderTicketVisible:false})};
+  }
+
   if (evidence.cancelControl && !orderTicketVisible) {
     const facts: string[] = ["TradingView accessibility confirms a working order."];
     if (details.side && details.quantity && details.symbol && details.orderType && details.entryPrice != null) {
@@ -276,6 +289,7 @@ export function fuseExecutionReads(
   // orders. An OCR position row with remaining size and live P&L takes
   // precedence; those exits must not become a new opposite-side entry.
   if (o.positionStatus === "OPEN" && a.positionStatus !== "OPEN") return ocr;
+  if (a.positionStatus === "OPEN" && !a.symbol && o.positionStatus !== "OPEN") return accessibility;
 
   if (a.symbol && o.symbol && !compatibleExecution(a, o)) {
     // Prefer the explicit draft being edited; do not fill its blanks from
@@ -547,10 +561,97 @@ type LocalOcrRow = { x: number; y: number; w: number; h: number; text: string };
 
 export function executionOcrDiagnostics(text: string) {
   const rows = parseLocalOcrRows(text.split(/\r?\n/));
-  const anchors = rows.filter(row => /\b(?:Buy|Sell)\s+(?:Limit|Stop)|\bUSD\b/i.test(row.text));
+  const anchors = rows.filter(row => /\b(?:Buy|Sell)\s+(?:Limit|Stop)|[+−-]\s*[\d,]+(?:\.\d+)?\s*USD/i.test(row.text));
   const near = rows.filter(row => anchors.some(anchor => Math.abs(row.y - anchor.y) < 32 && row.x >= anchor.x - 130));
   const symbols = rows.filter(row => /\b(?:MNQ|NQ|MYM|YM|MES|ES|MGC|GC)(?:[12]!|[FGHJKMNQUVXZ]\d{2,4})\b|(?:Micro|E-mini).*Futures/i.test(row.text));
-  return { rowCount: rows.length, rows: [...new Set([...symbols, ...anchors, ...near])].slice(0, 80) };
+  return { rowCount: rows.length, rows: [...new Set([...symbols, ...anchors, ...near])].filter(row=>!/[A-Z]*\d{7,}/i.test(row.text)).slice(0, 80) };
+}
+
+// Windows OCR returns independently boxed pieces such as "1", "Sell Limit"
+// and "+102.50 USD". Reconstruct only spatially related labels in one pane.
+export function inspectOcrLayoutExecution(text: string): SemanticExecutionRead | null {
+  const all = parseLocalOcrRows(text.split(/\r?\n/));
+  const dy = (a: LocalOcrRow, b: LocalOcrRow) => Math.abs(a.y + a.h / 2 - b.y - b.h / 2);
+  const number = (row: LocalOcrRow) => /^[\d,]+(?:\.\d+)?$/.test(row.text) ? parseSemanticNumber(row.text) : null;
+  const quantityNear = (rows: LocalOcrRow[], anchor: LocalOcrRow) => rows
+    .filter(row => row !== anchor && dy(row, anchor) <= 12 && row.x >= anchor.x - 100 && row.x <= anchor.x + anchor.w + 70)
+    .map(row => ({row, n: number(row)})).filter(item => item.n != null && item.n >= 1 && item.n <= 1000)
+    .sort((a,b) => dy(a.row,anchor) - dy(b.row,anchor) || Math.abs(a.row.x-anchor.x) - Math.abs(b.row.x-anchor.x))[0]?.n ?? null;
+  const priceNear = (rows: LocalOcrRow[], anchor: LocalOcrRow) => {
+    const candidates = rows.filter(row => row.x > anchor.x + anchor.w && dy(row, anchor) <= 13)
+      .map(row => ({ row, n: number(row) })).filter(item => item.n != null && item.n >= 100)
+      .sort((a,b) => dy(a.row,anchor) - dy(b.row,anchor));
+    if (!candidates.length) return null;
+    if (candidates.some(item => item.n !== candidates[0].n && Math.abs(dy(item.row,anchor) - dy(candidates[0].row,anchor)) < 3)) return null;
+    return candidates[0].n;
+  };
+  const pane = (anchor: LocalOcrRow) => {
+    const headers = all.filter(row => /(?:Micro|E.?mini).*?(?:Futures|CME|CBOT)|(?:Gold|Dow).*?Futures|\b(?:MNQ|NQ|MES|ES|MYM|YM|MGC|GC)[12]!\s*,/i.test(row.text));
+    const header = headers.filter(row => row.x <= anchor.x + 30 && row.y < anchor.y)
+      .sort((a,b) => b.y-a.y || b.x-a.x)[0];
+    if (!header) return all;
+    const right = Math.min(Infinity,...headers.filter(row => Math.abs(row.y-header.y)<40 && row.x>header.x+120).map(row=>row.x-15));
+    const bottom = Math.min(Infinity,...headers.filter(row => Math.abs(row.x-header.x)<100 && row.y>header.y+80).map(row=>row.y-10));
+    return all.filter(row => row.x >= header.x-40 && row.x<right && row.y>=header.y-10 && row.y<bottom);
+  };
+  const readOrders = (rows: LocalOcrRow[]) => rows.flatMap(row => {
+    let match = row.text.match(/^(?:(\d+(?:\.\d+)?)\s+)?(Buy|Sell)\s+(?:(\d+(?:\.\d+)?)\s+)?(Limit|Stop|Market)\b/i);
+    if (!match) return [];
+    return [{ anchor:row, action:match[2].toUpperCase(), quantity:parseSemanticNumber(match[1] ?? match[3]) ?? quantityNear(rows,row),
+      type:match[4].toUpperCase() as FrameRead['orderType'], price:priceNear(rows,row) }];
+  }).filter((order,index,orders) => orders.findIndex(other => other.action===order.action && other.type===order.type && dy(other.anchor,order.anchor)<15)===index);
+  const current = (rows: LocalOcrRow[]) => {
+    for (const row of rows) {
+      const labeled = row.text.match(/^(?:Last|Current)\s*:?\s*([\d,]+(?:\.\d+)?)$/i);
+      if (labeled) return parseSemanticNumber(labeled[1]);
+      const contract = row.text.match(/^(?:MNQ|NQ|MYM|YM|MES|ES|MGC|GC)[FGHJKMNQUVXZ]\d{2,4}(?:\s+([\d,]+(?:\.\d+)?))?$/i);
+      if (contract) return parseSemanticNumber(contract[1]) ?? priceNear(rows,row);
+    }
+    return null;
+  };
+  const pnlPattern = /^(?:(\d+(?:\.\d+)?)\s+)?([+−-])\s*([\d,]+(?:\.\d+)?)\s*USD(?:\s*[x×✕])?$/i;
+  const pnlRows = all.filter(row => pnlPattern.test(row.text));
+  for (const pnlRow of pnlRows) {
+    const rows = pane(pnlRow);
+    // Two signed dollar labels are a draft risk/reward tool, not live P&L.
+    if (rows.some(row => row !== pnlRow && pnlPattern.test(row.text) && dy(row,pnlRow)>20)) continue;
+    const match = pnlRow.text.match(pnlPattern)!;
+    const quantity = parseSemanticNumber(match[1]) ?? quantityNear(rows,pnlRow);
+    const exits = readOrders(rows).filter(order => order.quantity === quantity);
+    if (!quantity || !exits.length || new Set(exits.map(order=>order.action)).size !== 1) continue;
+    const symbol = inferSymbolFromOcrRows(rows);
+    const entryPrice = priceNear(rows,pnlRow);
+    if (!symbol || entryPrice == null) continue;
+    return { source:'semantic', frame:normalizeFrameRead({ brokerPanelVisible:true, positionStatus:'OPEN', intentState:'POSITION_OPEN',
+      symbol, side:exits[0].action==='SELL'?'LONG':'SHORT', quantity, orderType:null, entryPrice,
+      currentPrice:current(rows), stopPrice:exits.find(order=>order.type==='STOP')?.price ?? null,
+      targetPrice:exits.find(order=>order.type==='LIMIT')?.price ?? null,
+      openPnl:(match[2]==='+'?1:-1)*Number(match[3].replace(/,/g,'')), confidence:.9,
+      evidence:['Live position quantity/P&L row reconstructed from Windows OCR, with matching protective exits in the same chart pane.'],
+      orderTicketVisible:false }) };
+  }
+  // Reconstruct a single draft entry (or an entry plus opposite-side exits).
+  // Same-side exit brackets without a position row are intentionally ambiguous.
+  for (const anchor of all.filter(row=>/^(?:\d+\s+)?(?:Buy|Sell)\s+(?:\d+\s+)?(?:Limit|Stop|Market)\b/i.test(row.text))) {
+    const rows = pane(anchor), orders = readOrders(rows);
+    if (orders.length>1 && new Set(orders.map(order=>order.action)).size===1) continue;
+    const groups = ['BUY','SELL'].map(action=>orders.filter(order=>order.action===action));
+    const entry = orders.length===1 ? orders[0] : groups.find(group=>group.length===1)?.[0];
+    if (!entry?.quantity) continue;
+    const symbol = inferSymbolFromOcrRows(rows);
+    if (!symbol) continue;
+    const side = entry.action==='BUY'?'LONG':'SHORT';
+    const exits = orders.filter(order=>order.action!==entry.action);
+    const risk = (negative:boolean) => {
+      const riskRow = rows.find(row=>new RegExp(negative?'(?:^|\\s)[−-]\\s*[\\d,]+.*USD':'(?:^|\\s)\\+\\s*[\\d,]+.*USD','i').test(row.text));
+      return riskRow ? priceNear(rows,riskRow) : null;
+    };
+    return { source:'semantic', frame:normalizeFrameRead({ brokerPanelVisible:true, positionStatus:'UNKNOWN',intentState:'PREPARING',
+      symbol,side,quantity:entry.quantity,orderType:entry.type,entryPrice:entry.price,currentPrice:current(rows),
+      stopPrice:exits.find(order=>order.type==='STOP')?.price ?? risk(true),targetPrice:exits.find(order=>order.type==='LIMIT')?.price ?? risk(false),
+      confidence:.85,evidence:['Configured order reconstructed from adjacent Windows OCR labels in the same chart pane.'],orderTicketVisible:true }) };
+  }
+  return null;
 }
 
 function parseLocalOcrRows(lines: string[]): LocalOcrRow[] {

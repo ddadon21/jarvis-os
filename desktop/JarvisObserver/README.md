@@ -1,4 +1,4 @@
-# Jarvis Trading Observer 0.4.15
+# Jarvis Trading Observer 0.4.16
 
 Read-only Windows x64 companion for TradingView Desktop.
 
@@ -6,7 +6,7 @@ Read-only Windows x64 companion for TradingView Desktop.
 1. Right-click the existing Observer tray icon and choose Exit.
 2. Extract this ZIP to a new folder and run JarvisObserver.exe.
 3. Keep the existing pairing/configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
-4. Refresh Jarvis's Work page. Observer Link should show 0.4.15.
+4. Refresh Jarvis's Work page. Observer Link should show 0.4.16.
 
 ## Current State
 - Waiting: no visible order setup or position.
