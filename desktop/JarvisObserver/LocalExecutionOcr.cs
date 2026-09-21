@@ -92,7 +92,7 @@ internal sealed class LocalExecutionOcr
     private static OcrRow? FindActiveOrderAnchor(List<OcrRow> rows, Point? pointer = null)
     {
         var candidates = rows.Where(row => Regex.IsMatch(row.Text,
-            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+\d|^(Buy|Sell)$",
+            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+\d|^\d+\s+(Buy|Sell)\b|^\d+\s+[+−-].*USD|^(Buy|Sell)$",
             RegexOptions.IgnoreCase)).Where(row => row.Y > 120).ToList();
         if (candidates.Count == 0) return null;
         if (pointer is not null)
@@ -204,14 +204,16 @@ internal sealed class LocalExecutionOcr
             var right = words.Max(w => w.BoundingRect.X + w.BoundingRect.Width);
             var bottom = words.Max(w => w.BoundingRect.Y + w.BoundingRect.Height);
             rows.Add(new OcrRow(text, left * coordinateScale + originX, top * coordinateScale + originY,
-                (right - left) * coordinateScale, (bottom - top) * coordinateScale));
+                (right - left) * coordinateScale, (bottom - top) * coordinateScale)
+                { MarkerColor = ReadMarkerColor(bitmap, left, top, right - left, bottom - top) });
             // Keep actual word boxes as well as complete strings. OCR often returns
             // "10 Limit x" as one line; the qty and type still have separate boxes.
             foreach (var word in words.Where(_ => words.Count > 1))
             {
                 var box = word.BoundingRect;
                 rows.Add(new OcrRow(word.Text, box.X * coordinateScale + originX, box.Y * coordinateScale + originY,
-                    box.Width * coordinateScale, box.Height * coordinateScale));
+                    box.Width * coordinateScale, box.Height * coordinateScale)
+                    { MarkerColor = ReadMarkerColor(bitmap, box.X, box.Y, box.Width, box.Height) });
             }
         }
         return rows;
@@ -341,9 +343,15 @@ internal sealed class LocalExecutionOcr
         var compact = rows.Select(row =>
         {
             var match = Regex.Match(row.Text.Trim(), @"^(Buy|Sell)\s+(\d+(?:\.\d+)?)\s+(Limit|Stop|Market)\b", RegexOptions.IgnoreCase);
-            if (!match.Success) return null;
+            if (!match.Success)
+            {
+                var reversed = Regex.Match(row.Text.Trim(), @"^(\d+(?:\.\d+)?)\s+(Buy|Sell)\s+(Limit|Stop|Market)\b", RegexOptions.IgnoreCase);
+                if (!reversed.Success) return null;
+                return new ReconstructedOrder(reversed.Groups[2].Value.ToUpperInvariant(), ParseNumber(reversed.Groups[1].Value),
+                    reversed.Groups[3].Value.ToUpperInvariant(), FindOrderPrice(rows, row), null, null, row);
+            }
             return new ReconstructedOrder(match.Groups[1].Value.ToUpperInvariant(), ParseNumber(match.Groups[2].Value),
-                match.Groups[3].Value.ToUpperInvariant(), FindNearestPrice(rows, row, true), null, null, row);
+                match.Groups[3].Value.ToUpperInvariant(), FindOrderPrice(rows, row), null, null, row);
         }).Where(order => order is not null).Cast<ReconstructedOrder>();
 
         reconstructed = combinedOrders
@@ -363,6 +371,11 @@ internal sealed class LocalExecutionOcr
         if (reconstructed.Count == 0) return null;
 
         var symbol = NormalizeContractRoot(reconstructed.Select(order => order.Contract).FirstOrDefault(contract => !string.IsNullOrWhiteSpace(contract))) ?? InferSymbol(rows, reconstructed.OrderByDescending(order => order.Anchor.Y).FirstOrDefault()?.Anchor);
+
+        // A live position has its own quantity/P&L/close row. Exit orders alone
+        // cannot prove a fill, and the exit's LIMIT/STOP is not the entry type.
+        var live = TryBuildLivePosition(rows, reconstructed, symbol);
+        if (live is not null) return live;
 
         // A live bracketed position presents as two same-side exit orders: one STOP
         // and one LIMIT, with the original opposite-side entry order gone.
@@ -466,6 +479,63 @@ internal sealed class LocalExecutionOcr
         string? Contract,
         double? SecondaryLimitPrice,
         OcrRow Anchor);
+
+    private static string? TryBuildLivePosition(List<OcrRow> rows, List<ReconstructedOrder> orders, string? symbol)
+    {
+        if (rows.Any(row => Regex.IsMatch(row.Text, @"change order quantity|change order type", RegexOptions.IgnoreCase))) return null;
+        var candidates = rows.Select(row => new { row, match = Regex.Match(row.Text.Trim(),
+            @"^(\d+(?:\.\d+)?)\s+([+−-]?)\s*([\d,]+(?:\.\d+)?)\s+USD\s*[x×✕]?$", RegexOptions.IgnoreCase) })
+            .Where(item => item.match.Success).ToList();
+        // Draft risk/reward overlays contain two P&L labels; do not promote them.
+        var distinct = candidates.GroupBy(item => Math.Round(item.row.Y / 20)).Select(group => group.First()).ToList();
+        if (distinct.Count != 1) return null;
+        var position = distinct[0];
+        var quantity = ParseNumber(position.match.Groups[1].Value);
+        var exits = orders.Where(order => order.Quantity == quantity).ToList();
+        var actions = exits.Select(order => order.Action).Distinct().ToList();
+        if (actions.Count != 1 || exits.Count == 0) return null;
+        var side = actions[0] == "SELL" ? "LONG" : "SHORT";
+        var entry = FindOrderPrice(rows, position.row);
+        if (entry is null || symbol is null || quantity is null || quantity <= 0) return null;
+        var pnl = ParseNumber(position.match.Groups[3].Value);
+        if (position.match.Groups[2].Value is "-" or "−") pnl = -pnl;
+        return string.Join("|", new[] {
+            "JARVIS_OCR_EXECUTION", "STATUS=OPEN", $"SYMBOL={symbol}", $"SIDE={side}",
+            $"QTY={Format(quantity)}", "TYPE=", $"ENTRY={Format(entry)}",
+            $"CURRENT={Format(FindCurrentPrice(rows, position.row))}",
+            $"STOP={Format(exits.FirstOrDefault(order => order.Type == "STOP")?.Price)}",
+            $"TARGET={Format(exits.FirstOrDefault(order => order.Type == "LIMIT")?.Price)}", $"PNL={Format(pnl)}"
+        });
+    }
+
+    private static double? FindOrderPrice(List<OcrRow> rows, OcrRow anchor)
+    {
+        // Price-axis labels may be displaced slightly to avoid collisions with
+        // indicator labels. Prefer the matching colored order label, not the
+        // neutral indicator that happens to sit exactly at the line's height.
+        if (anchor.MarkerColor is not null)
+        {
+            var colored = rows.Where(row => row.X > anchor.X + anchor.Width && row.MarkerColor == anchor.MarkerColor)
+                .Where(row => Regex.IsMatch(row.Text.Trim(), @"^[\d,]+(?:\.\d+)?$") && VerticalDistance(row, anchor) <= 36)
+                .OrderBy(row => VerticalDistance(row, anchor)).Select(row => ExtractPrice(row.Text)).FirstOrDefault(price => price is not null);
+            if (colored is not null) return colored;
+        }
+        return FindNearestPrice(rows, anchor, true);
+    }
+
+    private static string? ReadMarkerColor(Bitmap bitmap, double x, double y, double width, double height)
+    {
+        var red = 0; var blue = 0; var total = 0;
+        for (var py = Math.Max(0, (int)y); py < Math.Min(bitmap.Height, (int)(y + height)); py += 2)
+            for (var px = Math.Max(0, (int)x); px < Math.Min(bitmap.Width, (int)(x + width)); px += 3)
+            {
+                var c = bitmap.GetPixel(px, py); total++;
+                if (c.R > 140 && c.R > c.G * 1.45 && c.R > c.B * 1.25) red++;
+                if (c.B > 140 && c.B > c.R * 1.4 && c.B > c.G * 1.12) blue++;
+            }
+        return total > 0 && red > total * .08 && red > blue ? "RED" :
+            total > 0 && blue > total * .08 ? "BLUE" : null;
+    }
 
     private static ReconstructedOrder? ParseCombinedOrder(OcrRow row)
     {
@@ -724,6 +794,17 @@ internal sealed class LocalExecutionOcr
                 if (value >= 100) return value;
             }
         }
+        // TradingView's current price marker pairs a contract name with its
+        // price on the right axis (for example MYMZ2026 | 52,383).
+        foreach (var row in rows.Where(row => Regex.IsMatch(row.Text.Trim(), @"^(?:MNQ|NQ|MES|ES|MYM|YM|MGC|GC)[FGHJKMNQUVXZ]\d{2,4}(?:\s|$)", RegexOptions.IgnoreCase)))
+        {
+            var inline = Regex.Match(row.Text.Trim(), @"^\S+\s+([\d,]+(?:\.\d+)?)$");
+            if (inline.Success) return ParseNumber(inline.Groups[1].Value);
+            var price = rows.Where(other => other.X >= row.X + row.Width - 4 && other.X <= row.X + row.Width + 100)
+                .Where(other => Regex.IsMatch(other.Text.Trim(), @"^[\d,]+(?:\.\d+)?$") && VerticalDistance(other, row) < 10)
+                .OrderBy(other => VerticalDistance(other, row)).Select(other => ExtractPrice(other.Text)).FirstOrDefault(value => value is not null);
+            if (price is not null) return price;
+        }
         return null;
     }
 
@@ -780,6 +861,8 @@ internal sealed class LocalExecutionOcr
         return value.Replace("|", "/").Replace("\r", " ").Replace("\n", " ").Trim();
     }
 
-    private sealed record OcrRow(string Text, double X, double Y, double Width, double Height);
+    private sealed record OcrRow(string Text, double X, double Y, double Width, double Height)
+    {
+        public string? MarkerColor { get; init; }
+    }
 }
-

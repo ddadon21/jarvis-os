@@ -84,7 +84,11 @@ export async function POST(request: Request) {
     }
   }
 
-  const ocrExecution = semanticText ? inspectLocalOcrExecution(semanticText) : null;
+  const explicitlyNoPositions = /\b(no (?:open )?positions|positions\s*\(0\))\b/i.test(semanticText ?? "");
+  const localRead = semanticText ? inspectLocalOcrExecution(semanticText) : null;
+  // Old clients emit FLAT merely because their parser missed a position row.
+  // Absence of a recognized order is not proof that the account is flat.
+  const ocrExecution = localRead?.frame.positionStatus === "FLAT" && !explicitlyNoPositions ? null : localRead;
   const accessibilityExecution = semanticText ? inspectSemanticExecution(semanticText, ocrExecution?.frame.symbol) : null;
   const semanticExecution = fuseExecutionReads(ocrExecution, accessibilityExecution);
 
@@ -96,8 +100,6 @@ export async function POST(request: Request) {
 
   const previous = await getTradingState();
   const observerVersion = typeof body.observerVersion === "string" ? body.observerVersion : "";
-
-  const explicitlyNoPositions = /\b(no (?:open )?positions|positions\s*\(0\))\b/i.test(semanticText ?? "");
 
   if (
     ocrExecution?.frame.positionStatus === "FLAT" &&
@@ -371,6 +373,8 @@ Rules:
 - orderTicketVisible is true only when the ticket/order-entry controls are visibly open.
 - tradeRealizedPnl must be the result of the just-closed trade only if the UI makes that explicit; otherwise null.
 - Stop/target must correspond to the live position or its working exit orders, not random chart labels.
+- A position row with remaining quantity and live USD P&L establishes an OPEN position. “1 Sell Stop” and “1 Sell Limit” beside it are exits for a LONG, not a new short. BUY exits indicate SHORT. A live stop can be above a long entry or below a short entry after being moved to protect profit.
+- Do not infer the filled entry's orderType from its protective exit labels; use null if it is no longer visible.
 - Never fabricate strategy reasoning, setup quality, HTF bias, liquidity, confidence level, or rule adherence.`;
 
   let gatewayFailure: string | null = null;

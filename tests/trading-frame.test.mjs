@@ -88,3 +88,24 @@ test('OCR noise is not accepted as a futures symbol', () => {
   assert.equal(draft({ symbol: 'MWAI' }).symbol, null);
   assert.equal(draft({ symbol: 'MGC1!' }).symbol, 'MGC');
 });
+test('live MYM position survives opposite-side exit accessibility labels', () => {
+  const local = inspectLocalOcrExecution('JARVIS_OCR_EXECUTION|STATUS=OPEN|SYMBOL=MYM|SIDE=LONG|QTY=1|TYPE=|ENTRY=52244|CURRENT=52383|STOP=52303|TARGET=52571|PNL=69.5');
+  const exits = inspectSemanticExecution('button | Sell 1 MYMZ2026 @ 52,303 stop\nbutton | Sell 1 MYMZ2026 @ 52,571 limit\nbutton | Cancel order');
+  const frame = fuseExecutionReads(local, exits).frame;
+  assert.equal(frame.positionStatus, 'OPEN');
+  assert.equal(frame.side, 'LONG');
+  assert.equal(frame.quantity, 1);
+  assert.equal(frame.entryPrice, 52244);
+  assert.equal(frame.currentPrice, 52383);
+  assert.equal(frame.stopPrice, 52303);
+  assert.equal(frame.targetPrice, 52571);
+  assert.equal(frame.openPnl, 69.5);
+  assert.equal(frame.orderType, null);
+});
+test('live trailing stops are valid on either side of entry', () => {
+  for (const side of ['LONG', 'SHORT']) {
+    const frame = draft({ side, positionStatus: 'OPEN', intentState: 'POSITION_OPEN', stopPrice: side === 'LONG' ? 29750 : 29700 });
+    const result = fuseExecutionReads({source:'semantic', frame}, {source:'semantic', frame}).frame;
+    assert.equal(result.stopPrice, frame.stopPrice);
+  }
+});

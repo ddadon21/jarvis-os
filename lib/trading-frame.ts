@@ -157,7 +157,7 @@ export function inspectLocalOcrExecution(semanticText: string): SemanticExecutio
       currentPrice,
       stopPrice,
       targetPrice,
-      openPnl: null,
+      openPnl: isOpen ? parseSemanticNumber(fields.PNL) : null,
       tradeRealizedPnl: null,
       balance: null,
       equity: null,
@@ -272,6 +272,11 @@ export function fuseExecutionReads(
   const a = accessibility.frame;
   const o = ocr.frame;
 
+  // Accessibility often lists the protective SELL/BUY exits as working
+  // orders. An OCR position row with remaining size and live P&L takes
+  // precedence; those exits must not become a new opposite-side entry.
+  if (o.positionStatus === "OPEN" && a.positionStatus !== "OPEN") return ocr;
+
   if (a.symbol && o.symbol && !compatibleExecution(a, o)) {
     // Prefer the explicit draft being edited; do not fill its blanks from
     // another pane's pending order.
@@ -296,6 +301,7 @@ export function fuseExecutionReads(
 
   const validStop = (value: number | null) => {
     if (value == null) return false;
+    if (a.positionStatus === "OPEN" || o.positionStatus === "OPEN") return value > 0;
     if (entryPrice == null || side == null) return true;
     return side === "LONG" ? value < entryPrice : value > entryPrice;
   };
