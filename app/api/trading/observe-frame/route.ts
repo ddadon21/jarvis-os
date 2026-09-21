@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     // A bounded execution-only sample exposes OCR segmentation without logging
     // complete accessibility trees, screenshots, credentials or account panels.
     if (new Date(capturedAt).getUTCSeconds() % 30 === 0) {
-      console.info("Observer OCR layout", executionOcrDiagnostics(semanticText));
+      console.info("Observer OCR layout " + JSON.stringify(executionOcrDiagnostics(semanticText)));
     }
   }
 

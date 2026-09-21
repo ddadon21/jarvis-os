@@ -556,7 +556,7 @@ export function executionOcrDiagnostics(text: string) {
 function parseLocalOcrRows(lines: string[]): LocalOcrRow[] {
   return lines
     .map((line) => {
-      const match = line.match(/^JARVIS_OCR\|X=(-?\d+(?:\.\d+)?)\|Y=(-?\d+(?:\.\d+)?)\|W=(-?\d+(?:\.\d+)?)\|H=(-?\d+(?:\.\d+)?)\|TEXT=(.*)$/i);
+      const match = line.trim().match(/^JARVIS_OCR\|X=(-?\d+(?:\.\d+)?)\|Y=(-?\d+(?:\.\d+)?)\|W=(-?\d+(?:\.\d+)?)\|H=(-?\d+(?:\.\d+)?)\|TEXT=(.*)$/i);
       if (!match) return null;
       return {
         x: Number(match[1]),
