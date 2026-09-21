@@ -1,4 +1,4 @@
-import { isRichExecutionRead, mergeVisualWithSemantic, inspectLocalOcrExecution, inspectSemanticExecution, fuseExecutionReads, mergeSemanticWithPrevious, normalizeFrameRead, normalizeDate, type FrameRead } from "../../../../lib/trading-frame";
+import { executionOcrDiagnostics, isRichExecutionRead, mergeVisualWithSemantic, inspectLocalOcrExecution, inspectSemanticExecution, fuseExecutionReads, mergeSemanticWithPrevious, normalizeFrameRead, normalizeDate, type FrameRead } from "../../../../lib/trading-frame";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { getTradingState, ingestTradingObservation, type JournalTrade, type TradingObservationInput } from "../../../../lib/trading-runtime";
@@ -81,6 +81,11 @@ export async function POST(request: Request) {
       .slice(0, 24);
     if (executionLines.length > 0) {
       console.info("Observer semantic execution sample", { lines: executionLines });
+    }
+    // A bounded execution-only sample exposes OCR segmentation without logging
+    // complete accessibility trees, screenshots, credentials or account panels.
+    if (new Date(capturedAt).getUTCSeconds() % 30 === 0) {
+      console.info("Observer OCR layout", executionOcrDiagnostics(semanticText));
     }
   }
 

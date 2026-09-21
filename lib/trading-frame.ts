@@ -545,6 +545,14 @@ function extractSemanticOrderDetails(lines: string[]): Pick<FrameRead, "symbol" 
 
 type LocalOcrRow = { x: number; y: number; w: number; h: number; text: string };
 
+export function executionOcrDiagnostics(text: string) {
+  const rows = parseLocalOcrRows(text.split(/\r?\n/));
+  const anchors = rows.filter(row => /\b(?:Buy|Sell)\s+(?:Limit|Stop)|\bUSD\b/i.test(row.text));
+  const near = rows.filter(row => anchors.some(anchor => Math.abs(row.y - anchor.y) < 32 && row.x >= anchor.x - 130));
+  const symbols = rows.filter(row => /\b(?:MNQ|NQ|MYM|YM|MES|ES|MGC|GC)(?:[12]!|[FGHJKMNQUVXZ]\d{2,4})\b|(?:Micro|E-mini).*Futures/i.test(row.text));
+  return { rowCount: rows.length, rows: [...new Set([...symbols, ...anchors, ...near])].slice(0, 80) };
+}
+
 function parseLocalOcrRows(lines: string[]): LocalOcrRow[] {
   return lines
     .map((line) => {
