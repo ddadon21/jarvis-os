@@ -12,7 +12,7 @@ using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
-// Observer release: 0.4.14 active-pane execution reader
+// Observer release: 0.4.15 active-pane execution reader
 
 internal static class Program
 {
@@ -104,7 +104,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.14", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.15", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
@@ -492,7 +492,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.14");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.15");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -551,7 +551,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.14");
+            req.Headers.Add("x-jarvis-observer-version", "0.4.15");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 

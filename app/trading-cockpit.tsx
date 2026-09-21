@@ -275,7 +275,9 @@ export default function TradingCockpit() {
         ? "PAUSED"
         : !observing || !frameFresh
           ? "WAITING"
-          : status === "OPEN"
+          : !observationFresh
+            ? "READING UNAVAILABLE"
+            : status === "OPEN"
             ? "TRADE IN PROGRESS"
             : status === "PENDING"
               ? "PREPARING ORDER"
@@ -317,11 +319,12 @@ export default function TradingCockpit() {
     if (!link?.online) return "DESKTOP OFFLINE";
     if (!controlWatching) return "OBSERVER PAUSED";
     if (controlWatching && (!observing || !frameFresh)) return "WAITING";
+    if (!observationFresh) return "READING UNAVAILABLE";
     if (status === "PENDING") return "PREPARING ORDER";
     if (status === "OPEN") return "TRADE IN PROGRESS";
     if (intentState === "PREPARING") return "PREPARING ORDER";
     return observer?.readingIssue ? "READING UNAVAILABLE" : "WAITING";
-  }, [controlWatching, error, frameFresh, intentState, link?.online, observing, paired, status, observer?.readingIssue]);
+  }, [controlWatching, error, frameFresh, observationFresh, intentState, link?.online, observing, paired, status, observer?.readingIssue]);
 
   async function confirmPairing() {
     const code = pairCode.trim().toUpperCase();
@@ -476,7 +479,7 @@ export default function TradingCockpit() {
             </div>
             <div>
               <small>ORDER</small>
-              <strong>{showExecutionDetails ? (observer?.orderType ?? "—") : "—"}</strong>
+              <strong>{showExecutionDetails ? (observer?.orderType ?? (status === "OPEN" ? "FILLED" : "READING")) : "—"}</strong>
             </div>
           </div>
 
@@ -487,7 +490,7 @@ export default function TradingCockpit() {
             <Metric label="TARGET" value={showExecutionDetails ? number(observer?.targetPrice ?? current?.targetPrice) : "—"} />
             <Metric
               label="OPEN P&L"
-              value={showExecutionDetails && status === "OPEN" ? money(observer?.openPnl ?? state?.account.openPnl) : "—"}
+              value={showExecutionDetails && status === "OPEN" ? money(observer?.openPnl) : showExecutionDetails ? "NOT OPEN" : "—"}
               strong
             />
             <Metric label="VISION CONF." value={showExecutionDetails ? `${confidence}%` : "—"} />
