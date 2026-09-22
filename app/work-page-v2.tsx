@@ -18,6 +18,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
+import LifeCockpit from "./life-cockpit";
+import lifeStyles from "./life-cockpit.module.css";
 import {
   ChatMessage,
   Domain,
@@ -172,7 +174,7 @@ export default function WorkV2() {
   }
 
   return (
-    <main className="shell">
+    <main className={`shell ${domain === "LIFE" ? lifeStyles.shell : ""}`}>
       <div className="grid-overlay" />
       <header className="topbar">
         <div className="brand-zone">
@@ -194,7 +196,7 @@ export default function WorkV2() {
 
         <aside className="left-column">
           <Panel title="MISSION CONTROL" corner="CORE"><div /></Panel>
-          <Panel title="GOAL READINESS" corner={domain}>
+          <Panel title={domain === "LIFE" ? "DAILY FOUNDATIONS" : "GOAL READINESS"} corner={domain}>
             <DomainGoals domain={domain} events={runtimeEvents} />
           </Panel>
           <Panel title="EVENTS" corner="LIVE">
@@ -206,8 +208,8 @@ export default function WorkV2() {
           </Panel>
         </aside>
 
-        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""}`}>
-          {domain === "FINANCE" ? <FinanceCockpitV2 /> : domain === "TRADING" ? <TradingCockpit /> : (
+        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
+          {domain === "FINANCE" ? <FinanceCockpitV2 /> : domain === "TRADING" ? <TradingCockpit /> : domain === "LIFE" ? <LifeCockpit /> : (
             <div className="core-visual">
               <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
               <div className="radar mid" /><div className="radar inner" />

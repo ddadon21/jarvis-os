@@ -28,7 +28,7 @@ const HABIT_KEY = "jarvis-habit-history-v1";
 
 const LIFE_HABITS: Array<{ id: HabitId; name: string }> = [
   { id: "life.bible", name: "READ BIBLE" },
-  { id: "life.gym", name: "GYM" },
+  { id: "life.gym", name: "TRAIN / PLANNED RECOVERY" },
   { id: "life.read30", name: "READ 30 MINUTES" },
   { id: "life.phonefree", name: "PHONE OFF 30–60 MIN" },
 ];
@@ -141,7 +141,7 @@ function buildHabitSummary(store: HabitStore) {
       ? "CONSISTENT"
       : overall >= 60
         ? "SLIPPING"
-        : "BULLSHITTING";
+        : "RESET & RECOMMIT";
   return {
     verdict,
     life7DayCompletion: overall == null ? null : Math.round(overall),
@@ -153,11 +153,18 @@ function buildHabitSummary(store: HabitStore) {
 export default function DomainGoals({ domain, events }: { domain: Domain; events: GoalEvent[] }) {
   const [finance, setFinance] = useState<FinanceRuntimeState | null>(null);
   const [habits, setHabits] = useState<HabitStore>(() => emptyHabitStore());
+  const [todayKey, setTodayKey] = useState(dateKey);
 
   useEffect(() => {
     const loaded = loadHabitStore();
     setHabits(loaded);
     if (!window.localStorage.getItem(HABIT_KEY)) saveHabitStore(loaded);
+    const refresh = () => { setHabits(loadHabitStore()); setTodayKey(dateKey()); };
+    const sync = (event: StorageEvent) => { if (event.key === HABIT_KEY || event.key === null) refresh(); };
+    const timer = window.setInterval(() => setTodayKey(dateKey()), 30_000);
+    window.addEventListener("storage", sync);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("storage", sync); window.removeEventListener("focus", refresh); };
   }, []);
 
   useEffect(() => {
@@ -194,7 +201,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     });
   }, [events]);
 
-  const summary = useMemo(() => buildHabitSummary(habits), [habits]);
+  const summary = useMemo(() => buildHabitSummary(habits), [habits, todayKey]);
 
   const goals = useMemo<GoalItem[]>(() => {
     if (domain === "TRADING") {
@@ -268,7 +275,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
       { name: "GR SUPRA", status: "SETUP", detail: "Unlocks only when purchase + insurance + post-purchase cash gates are safe.", progress: null },
       { name: "$100M CASH", status: "ULTIMATE", detail: `$${metrics.liquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} current connected cash.`, progress: cash100M },
     ];
-  }, [domain, events, finance, habits, summary]);
+  }, [domain, events, finance, habits, summary, todayKey]);
 
   function toggleHabit(id: HabitId) {
     const today = dateKey();
