@@ -18,7 +18,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
-import LifeCockpit from "./life-cockpit";
+import LifeCockpit, { LifeProgress } from "./life-cockpit";
 import lifeStyles from "./life-cockpit.module.css";
 import {
   ChatMessage,
@@ -196,8 +196,8 @@ export default function WorkV2() {
 
         <aside className="left-column">
           <Panel title="MISSION CONTROL" corner="CORE"><div /></Panel>
-          <Panel title={domain === "LIFE" ? "DAILY FOUNDATIONS" : "GOAL READINESS"} corner={domain}>
-            <DomainGoals domain={domain} events={runtimeEvents} />
+          <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
+            {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
           <Panel title="EVENTS" corner="LIVE">
             <div className="event-list">
