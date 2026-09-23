@@ -59,6 +59,16 @@
 @media(max-width:760px){.panel-body{font-size:.72rem!important}.chat-log .message p{font-size:.72rem!important}.command-box input{font-size:.78rem!important}.workspace{padding:58px 12px 12px!important}.workspace:before{top:16px;left:14px;right:14px;font-size:.58rem;letter-spacing:.045em}.workspace:after{background:radial-gradient(circle at 50% 24%,rgba(183,31,38,.10),transparent 46%)}.center-core{min-height:560px!important}.core-visual{width:min(90vw,430px)!important}.right-column{display:contents!important}.right-column>.chat-panel{max-height:none!important}.right-column .chat-log{height:240px!important}}
 
 
+/* Shared cockpit surfaces: Trading and Life use one set of panel values. */
+:root {
+  --jarvis-card-surface: rgba(8,8,10,.72);
+  --jarvis-card-border: rgba(255,255,255,.1);
+  --jarvis-cell-surface: rgba(255,255,255,.018);
+  --jarvis-cell-border: rgba(255,255,255,.075);
+  --jarvis-card-rule: rgba(255,255,255,.08);
+  --jarvis-card-padding: 13px;
+}
+
 /* === Trading cockpit === */
 .center-core.trading-mode { align-items: stretch; overflow: auto; }
 .center-core.trading-mode .domain-switcher,
@@ -110,9 +120,9 @@
   gap: 10px;
 }
 .trading-card {
-  border: 1px solid rgba(255,255,255,.1);
-  background: rgba(8,8,10,.72);
-  padding: 13px;
+  border: 1px solid var(--jarvis-card-border);
+  background: var(--jarvis-card-surface);
+  padding: var(--jarvis-card-padding);
   min-width: 0;
 }
 .trading-primary { grid-row: span 2; }
@@ -596,3 +606,4 @@
   .jarvis-rule-alert-orb{margin:auto}
   .trading-rule-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
