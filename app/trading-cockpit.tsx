@@ -101,6 +101,10 @@ type PayoutSummary = {
   connected: boolean;
   source: string;
   count: number;
+  recordedCount?: number;
+  lifetimeCount?: number;
+  nextPayoutNumber?: number;
+  unitemizedCount?: number;
   totalNet: number;
   totalGross: number;
   averageNet: number | null;
@@ -577,9 +581,16 @@ export default function TradingCockpit() {
             </div>
           </div>
           <div className="payout-total">
-            <span>{payoutRange === "ALL" ? "ALL-TIME NET PAYOUTS" : `${payoutRange} NET PAYOUTS`}</span>
+            <span>{payoutRange === "ALL" ? "RECORDED NET PAYOUTS" : `${payoutRange} NET PAYOUTS`}</span>
             <strong>{payoutSummary?.connected ? money(payoutSummary.totalNet) : "—"}</strong>
-            <small>{payoutSummary?.connected ? `${payoutSummary.count} payouts · avg ${money(payoutSummary.averageNet)}` : "Lucid payout history not connected yet"}</small>
+            <small>
+              {payoutSummary?.connected
+                ? `${payoutSummary.lifetimeCount ?? payoutSummary.count} payouts complete · #${payoutSummary.nextPayoutNumber ?? (payoutSummary.count + 1)} next`
+                : "Lucid payout history not connected yet"}
+            </small>
+            {payoutSummary?.connected && (payoutSummary.unitemizedCount ?? 0) > 0 ? (
+              <small>{payoutSummary.recordedCount ?? payoutSummary.count} payout amount on file · {payoutSummary.unitemizedCount} earlier payouts not itemized</small>
+            ) : null}
           </div>
           <div className="trading-lines">
             <Line label="Source" value={payoutSummary?.source ?? "PENDING"} />
