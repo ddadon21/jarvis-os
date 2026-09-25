@@ -24,7 +24,73 @@ type HabitStore = {
   tradingDays: Record<string, true>;
 };
 
+type TradingGoalAccount = {
+  id: string;
+  firm: string;
+  label: string;
+  stage: "EVAL" | "FUNDED";
+  startBalance: number;
+  currentBalance: number;
+  lossLimit: number;
+  profitTarget: number;
+  fundedBuffer: number;
+  requiredTradingDays: number;
+  cycle: number;
+};
+
+type TradingGoalSnapshot = {
+  account: TradingGoalAccount;
+  tradingDays: number;
+  totalPnl: number;
+  targetBalance: number;
+  remaining: number;
+  progress: number;
+  dayProgress: number;
+};
+
+type TradingGoalRuntime = {
+  account?: {
+    connection?: string;
+    stage?: string;
+    balance?: number | null;
+    closedPnl?: number;
+  };
+  observer?: {
+    status?: string;
+    openPnl?: number | null;
+  };
+  guardrails?: {
+    rules?: { maxTradesPerDay?: number; riskTargetDollars?: number };
+    todayTradeCount?: number;
+    remainingTrades?: number;
+    plannedRisk?: number | null;
+    activeAlert?: { severity?: string; title?: string } | null;
+  };
+  today?: {
+    trades?: number;
+    wins?: number;
+    losses?: number;
+    realizedPnl?: number;
+  };
+  activeGoal?: {
+    title?: string;
+    status?: string;
+    progress?: number | null;
+    nextRightStep?: string;
+  };
+};
+
+type TradingGoalPayoutSummary = {
+  connected?: boolean;
+  lifetimeCount?: number;
+  nextPayoutNumber?: number;
+  latest?: { approvedAt: string; traderNetAmount: number } | null;
+};
+
 const HABIT_KEY = "jarvis-habit-history-v1";
+const TRADING_ACCOUNTS_KEY = "jarvis-trading-accounts-v1";
+const TRADING_SELECTED_KEY = "jarvis-trading-selected-account-v1";
+const TRADING_JOURNAL_KEY = "jarvis-trading-journal-v1";
 
 const LIFE_HABITS: Array<{ id: HabitId; name: string }> = [
   { id: "life.bible", name: "READ BIBLE" },
@@ -36,6 +102,45 @@ const LIFE_HABITS: Array<{ id: HabitId; name: string }> = [
 function percentLabel(value: number) {
   if (value > 0 && value < 0.01) return "<0.01%";
   return `${Math.round(value * 10) / 10}%`;
+}
+
+function dollars(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const rawAccounts = window.localStorage.getItem(TRADING_ACCOUNTS_KEY);
+    if (!rawAccounts) return null;
+    const accounts = JSON.parse(rawAccounts) as TradingGoalAccount[];
+    if (!Array.isArray(accounts) || accounts.length === 0) return null;
+
+    const selectedId = window.localStorage.getItem(TRADING_SELECTED_KEY);
+    const account = accounts.find((item) => item.id === selectedId) ?? accounts[0];
+    const journalRaw = window.localStorage.getItem(TRADING_JOURNAL_KEY);
+    const journal = journalRaw ? JSON.parse(journalRaw) as Record<string, { pnl?: number | null; notes?: string; hasImage?: boolean }> : {};
+    const prefix = `${account.id}:cycle-${account.cycle}:${account.stage}:`;
+    const entries = Object.entries(journal).filter(([key]) => key.startsWith(prefix));
+    const tradingDays = entries.filter(([, entry]) => entry.pnl != null || Boolean(entry.notes?.trim()) || entry.hasImage === true).length;
+    const totalPnl = entries.reduce((sum, [, entry]) => sum + (typeof entry.pnl === "number" ? entry.pnl : 0), 0);
+    const targetBalance = account.stage === "EVAL"
+      ? account.startBalance + Math.max(0, account.profitTarget)
+      : account.startBalance + Math.max(0, account.fundedBuffer);
+    const denominator = targetBalance - account.lossLimit;
+    const progress = denominator > 0
+      ? Math.max(0, Math.min(100, ((account.currentBalance - account.lossLimit) / denominator) * 100))
+      : 0;
+    const remaining = Math.max(0, targetBalance - account.currentBalance);
+    const dayProgress = account.requiredTradingDays > 0
+      ? Math.max(0, Math.min(100, (tradingDays / account.requiredTradingDays) * 100))
+      : 0;
+
+    return { account, tradingDays, totalPnl, targetBalance, remaining, progress, dayProgress };
+  } catch {
+    return null;
+  }
 }
 
 function tone(goal: GoalItem) {
@@ -154,6 +259,9 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
   const [finance, setFinance] = useState<FinanceRuntimeState | null>(null);
   const [habits, setHabits] = useState<HabitStore>(() => emptyHabitStore());
   const [todayKey, setTodayKey] = useState(dateKey);
+  const [tradingRuntime, setTradingRuntime] = useState<TradingGoalRuntime | null>(null);
+  const [tradingPayouts, setTradingPayouts] = useState<TradingGoalPayoutSummary | null>(null);
+  const [tradingAccount, setTradingAccount] = useState<TradingGoalSnapshot | null>(null);
 
   useEffect(() => {
     const loaded = loadHabitStore();
@@ -183,6 +291,61 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [domain]);
 
+
+  useEffect(() => {
+    if (domain !== "TRADING") return;
+
+    const refreshLocal = () => setTradingAccount(loadTradingGoalSnapshot());
+    refreshLocal();
+
+    const syncStorage = (event: StorageEvent) => {
+      if (!event.key || [TRADING_ACCOUNTS_KEY, TRADING_SELECTED_KEY, TRADING_JOURNAL_KEY].includes(event.key)) refreshLocal();
+    };
+
+    window.addEventListener("storage", syncStorage);
+    window.addEventListener("focus", refreshLocal);
+    window.addEventListener("jarvis-trading-account-updated", refreshLocal as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", syncStorage);
+      window.removeEventListener("focus", refreshLocal);
+      window.removeEventListener("jarvis-trading-account-updated", refreshLocal as EventListener);
+    };
+  }, [domain]);
+
+  useEffect(() => {
+    if (domain !== "TRADING") return;
+    let cancelled = false;
+
+    async function refreshRuntime() {
+      try {
+        const response = await fetch("/api/trading/state", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { state?: TradingGoalRuntime };
+        if (!cancelled && body.state) setTradingRuntime(body.state);
+      } catch {}
+    }
+
+    async function refreshPayouts() {
+      try {
+        const response = await fetch("/api/trading/payouts?range=ALL", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { summary?: TradingGoalPayoutSummary };
+        if (!cancelled && body.summary) setTradingPayouts(body.summary);
+      } catch {}
+    }
+
+    void refreshRuntime();
+    void refreshPayouts();
+    const runtimeTimer = window.setInterval(refreshRuntime, 2_000);
+    const payoutTimer = window.setInterval(refreshPayouts, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(runtimeTimer);
+      window.clearInterval(payoutTimer);
+    };
+  }, [domain]);
+
   useEffect(() => {
     const tradeDays = events
       .filter((event) => event.type === "trading.trade_closed" && event.occurredAt)
@@ -205,25 +368,82 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
 
   const goals = useMemo<GoalItem[]>(() => {
     if (domain === "TRADING") {
-      const passed = hasEvent(events, "trading.account_passed");
-      const payout = hasEvent(events, "trading.payout_received");
       const reviewDone = habits.days[dateKey()]?.["trading.review"] === true;
       const reviewRate = habitRate(habits, "trading.review", 7);
+      const payoutCount = Math.max(0, tradingPayouts?.lifetimeCount ?? (hasEvent(events, "trading.payout_received") ? 1 : 0));
+      const nextPayoutNumber = tradingPayouts?.nextPayoutNumber ?? (payoutCount + 1);
+      const fifthPayoutProgress = Math.min(100, (payoutCount / 5) * 100);
+      const latestPayout = tradingPayouts?.latest;
+      const latestPayoutDetail = latestPayout
+        ? `Last payout ${dollars(latestPayout.traderNetAmount)} · ${new Date(latestPayout.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`
+        : "Waiting for the latest payout record.";
+
+      const accountGoal: GoalItem = tradingAccount
+        ? tradingAccount.account.stage === "EVAL"
+          ? {
+              name: "CURRENT ACCOUNT",
+              status: tradingAccount.remaining <= 0 ? "DONE" : "ACTIVE",
+              detail: `${tradingAccount.account.label} · balance ${dollars(tradingAccount.account.currentBalance)} · ${dollars(tradingAccount.remaining)} to pass · MLL ${dollars(tradingAccount.account.lossLimit)}.`,
+              progress: tradingAccount.progress,
+              active: tradingAccount.remaining > 0,
+            }
+          : {
+              name: "CURRENT FUNDED ACCOUNT",
+              status: tradingAccount.remaining <= 0 && tradingAccount.dayProgress >= 100 ? "DONE" : "ACTIVE",
+              detail: `${tradingAccount.account.label} · ${dollars(tradingAccount.remaining)} buffer left · ${tradingAccount.tradingDays}/${tradingAccount.account.requiredTradingDays} qualifying days.`,
+              progress: Math.min(tradingAccount.progress, tradingAccount.dayProgress || tradingAccount.progress),
+              active: tradingAccount.remaining > 0 || tradingAccount.dayProgress < 100,
+            }
+        : {
+            name: "CURRENT ACCOUNT",
+            status: tradingRuntime?.activeGoal?.status === "COMPLETE" ? "DONE" : "ACTIVE",
+            detail: tradingRuntime?.activeGoal?.nextRightStep ?? "Waiting for the selected account details.",
+            progress: tradingRuntime?.activeGoal?.progress ?? null,
+            active: tradingRuntime?.activeGoal?.status !== "COMPLETE",
+          };
+
+      const maxTrades = tradingRuntime?.guardrails?.rules?.maxTradesPerDay;
+      const todayTrades = tradingRuntime?.guardrails?.todayTradeCount ?? tradingRuntime?.today?.trades ?? 0;
+      const observerOnline = tradingRuntime?.account?.connection === "OBSERVING";
+      const alert = tradingRuntime?.guardrails?.activeAlert;
+
       return [
+        accountGoal,
+        {
+          name: "5TH PAYOUT",
+          status: payoutCount >= 5 ? "DONE" : "ACTIVE",
+          detail: `${payoutCount}/5 payouts completed · ${latestPayoutDetail} ${payoutCount < 5 ? `Payout #${nextPayoutNumber} is the target.` : "Milestone complete."}`,
+          progress: fifthPayoutProgress,
+          active: payoutCount < 5,
+        },
+        {
+          name: "LIVE EXECUTION",
+          status: observerOnline ? (alert ? "YELLOW" : "GREEN") : "WAITING",
+          detail: observerOnline
+            ? `Observer online · ${todayTrades}${maxTrades ? `/${maxTrades}` : ""} trades today${alert ? ` · ${alert.title ?? "guardrail alert"}` : ""}.`
+            : "Goal Readiness is linked to the Trading Observer and will update when the observer is online.",
+          progress: null,
+          active: !observerOnline || Boolean(alert),
+        },
         {
           name: "REVIEW TRADE",
           status: reviewDone ? "DONE" : "ACTIVE",
           detail: reviewRate == null
-            ? "Manual check-off after you trade. Jarvis will score consistency automatically once Observer trade days are flowing."
+            ? "Check off the review after trading. Observer trade days feed this automatically."
             : `${Math.round(reviewRate)}% of the last observed trading days reviewed · streak ${habitStreak(habits, "trading.review")}.`,
           progress: reviewDone ? 100 : 0,
           active: !reviewDone,
           habitId: "trading.review",
         },
-        { name: "PASS CURRENT ACCOUNT", status: passed ? "DONE" : "ACTIVE", detail: passed ? "Passed." : "Current objective. Progress will automate once trading data is connected.", progress: passed ? 100 : null, active: !passed },
-        { name: "FIRST PAYOUT", status: payout ? "DONE" : passed ? "ACTIVE" : "NEXT", detail: payout ? "Payout recorded." : "Unlocks after the account is funded.", progress: payout ? 100 : null, active: passed && !payout },
-        { name: "REPEAT PAYOUTS", status: payout ? "ACTIVE" : "LOCKED", detail: "Build consistency before scaling risk.", progress: null, active: payout },
-        { name: "SCALE FUNDED CAPITAL", status: "LOCKED", detail: "Scale only after repeatable payout evidence.", progress: null },
+        {
+          name: "SCALE FUNDED CAPITAL",
+          status: payoutCount >= 5 ? "NEXT" : "LOCKED",
+          detail: payoutCount >= 5
+            ? "Five payouts are proven. Scale only while account buffer, drawdown and execution discipline remain healthy."
+            : "Unlock after payout #5 so scale follows repeatable payout evidence instead of account size alone.",
+          progress: null,
+          active: payoutCount >= 5,
+        },
       ];
     }
 
@@ -275,7 +495,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
       { name: "GR SUPRA", status: "SETUP", detail: "Unlocks only when purchase + insurance + post-purchase cash gates are safe.", progress: null },
       { name: "$100M CASH", status: "ULTIMATE", detail: `$${metrics.liquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} current connected cash.`, progress: cash100M },
     ];
-  }, [domain, events, finance, habits, summary, todayKey]);
+  }, [domain, events, finance, habits, summary, todayKey, tradingAccount, tradingPayouts, tradingRuntime]);
 
   function toggleHabit(id: HabitId) {
     const today = dateKey();
