@@ -158,6 +158,7 @@ export default function TradingCockpit() {
   const linkAuthFailures = useRef(0);
   const [payoutRange, setPayoutRange] = useState<PayoutRange>("ALL");
   const [payoutSummary, setPayoutSummary] = useState<PayoutSummary | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<TradingAccountView | null>(null);
   const lastAlertSoundId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -458,6 +459,8 @@ export default function TradingCockpit() {
         </div>
       ) : null}
 
+      <TradingAccountManager onAccountChange={setSelectedAccount} />
+
       <div className="trading-grid">
         <article className="trading-card trading-primary">
           <div className="trading-card-head">
@@ -501,15 +504,24 @@ export default function TradingCockpit() {
         <article className="trading-card">
           <div className="trading-card-head">
             <span>ACCOUNT CONTEXT</span>
-            <b>{state?.account.connection ?? "DISCONNECTED"}</b>
+            <b>{selectedAccount ? `${selectedAccount.stage} · ${selectedAccount.label}` : state?.account.connection ?? "DISCONNECTED"}</b>
           </div>
           <div className="trading-lines">
-            <Line label="Prop firm" value={state?.account.propFirm ?? "Lucid Trading"} />
+            <Line label="Prop firm" value={selectedAccount?.firm ?? state?.account.propFirm ?? "Lucid Trading"} />
             <Line label="Execution" value={state?.account.provider === "NOT CONNECTED" ? "Tradovate via TradingView" : state?.account.provider ?? "Tradovate via TradingView"} />
-            <Line label="Balance" value={money(state?.account.balance)} />
-            <Line label="Equity" value={money(state?.account.equity)} />
-            <Line label="Closed P&L" value={money(state?.account.closedPnl)} />
-            <Line label="Goal" value={state?.account.stage ?? "PASS CURRENT ACCOUNT"} />
+            <Line label="Balance" value={selectedAccount ? money(selectedAccount.currentBalance) : money(state?.account.balance)} />
+            <Line label="Equity" value={selectedAccount ? money(selectedAccount.currentBalance) : money(state?.account.equity)} />
+            <Line label="Closed P&L" value={selectedAccount ? money(selectedAccount.totalPnl) : money(state?.account.closedPnl)} />
+            <Line
+              label="Goal"
+              value={
+                selectedAccount
+                  ? selectedAccount.stage === "EVAL"
+                    ? `${money(selectedAccount.remaining)} TO PASS`
+                    : `${selectedAccount.tradingDays}/${selectedAccount.requiredTradingDays} DAYS · ${money(selectedAccount.remaining)} BUFFER LEFT`
+                  : state?.account.stage ?? "PASS CURRENT ACCOUNT"
+              }
+            />
           </div>
         </article>
 
