@@ -607,3 +607,493 @@
   .trading-rule-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
+
+
+/* Trading account command center + Lucid-style journal calendar */
+.trading-account-system{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:2px;
+}
+.trading-account-overview{
+  padding:14px 15px;
+}
+.trading-account-toolbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  padding-bottom:12px;
+  margin-bottom:11px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+.trading-account-toolbar>div:first-child{
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+.trading-account-kicker{
+  font-size:8px;
+  letter-spacing:.16em;
+  opacity:.48;
+}
+.trading-account-toolbar strong{
+  font-size:16px;
+  letter-spacing:.08em;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.trading-account-toolbar small{
+  font-size:8px;
+  letter-spacing:.09em;
+  opacity:.48;
+}
+.trading-account-actions{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+.trading-account-actions select,
+.trading-account-actions button{
+  height:31px;
+  border:1px solid rgba(255,255,255,.11);
+  background:rgba(255,255,255,.018);
+  color:#d7dcdf;
+  padding:0 9px;
+  font-size:8px;
+  font-weight:700;
+  letter-spacing:.08em;
+}
+.trading-account-actions select{
+  min-width:170px;
+  outline:none;
+}
+.trading-account-actions option{background:#0b0c0d;color:#e8ecee}
+.trading-account-actions button{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  cursor:pointer;
+}
+.trading-account-actions button:hover{border-color:rgba(255,255,255,.24);color:#fff}
+.trading-account-actions button.is-pass{
+  border-color:rgba(72,209,142,.28);
+  color:#74dfa9;
+  background:rgba(72,209,142,.04);
+}
+.trading-account-actions button.is-danger{
+  border-color:rgba(183,31,38,.42);
+  color:#d76a70;
+  background:rgba(183,31,38,.055);
+}
+.trading-account-actions .icon-only{width:31px;padding:0;justify-content:center}
+.trading-account-actions button:disabled{opacity:.3;cursor:not-allowed}
+.trading-account-stats{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:7px;
+}
+.trading-account-stats>div{
+  padding:9px 10px;
+  border:1px solid rgba(255,255,255,.072);
+  background:rgba(255,255,255,.016);
+}
+.trading-account-stats span{
+  display:block;
+  margin-bottom:4px;
+  font-size:7px;
+  letter-spacing:.11em;
+  opacity:.48;
+}
+.trading-account-stats b{
+  font-size:12px;
+  letter-spacing:.03em;
+}
+.trading-account-progress{
+  margin-top:13px;
+  padding:12px 4px 2px;
+  border-top:1px solid rgba(255,255,255,.065);
+}
+.progress-labels{
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  align-items:end;
+  gap:10px;
+  margin-bottom:8px;
+}
+.progress-labels span{
+  display:grid;
+  gap:2px;
+  font:700 10px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.progress-labels span.align-right{text-align:right}
+.progress-labels em{
+  font-style:normal;
+  font-size:7px;
+  letter-spacing:.12em;
+  color:#b9555a;
+}
+.progress-labels strong{
+  font-size:8px;
+  letter-spacing:.15em;
+  opacity:.52;
+}
+.account-progress-track{
+  height:13px;
+  position:relative;
+  overflow:visible;
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(90deg,rgba(183,31,38,.12),rgba(255,255,255,.025));
+}
+.account-progress-danger{
+  position:absolute;
+  left:0;
+  top:-1px;
+  bottom:-1px;
+  width:2px;
+  background:#b71f26;
+  box-shadow:0 0 11px rgba(183,31,38,.5);
+}
+.account-progress-fill{
+  position:absolute;
+  left:0;
+  top:3px;
+  height:5px;
+  background:linear-gradient(90deg,rgba(183,31,38,.74),rgba(238,241,243,.88));
+  box-shadow:0 0 12px rgba(255,255,255,.12);
+  transition:width .22s ease;
+}
+.account-progress-marker{
+  position:absolute;
+  top:-4px;
+  width:1px;
+  height:19px;
+  background:#f1f3f4;
+  box-shadow:0 0 8px rgba(255,255,255,.45);
+  transform:translateX(-1px);
+  transition:left .22s ease;
+}
+.progress-foot{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+  margin-top:9px;
+  font-size:8px;
+  letter-spacing:.08em;
+  opacity:.56;
+}
+.progress-foot span:nth-child(2){text-align:center}
+.progress-foot span:last-child{text-align:right}
+.progress-foot b{color:#e7eaec}
+.funded-days-progress{
+  display:grid;
+  grid-template-columns:190px minmax(0,1fr);
+  align-items:center;
+  gap:12px;
+  margin-top:11px;
+  padding-top:10px;
+  border-top:1px solid rgba(255,255,255,.06);
+}
+.funded-days-progress>div:first-child{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:8px;
+  letter-spacing:.09em;
+}
+.funded-days-progress span{opacity:.5}
+.funded-days-track{
+  height:7px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.02);
+}
+.funded-days-track span{
+  display:block;
+  height:100%;
+  background:linear-gradient(90deg,rgba(183,31,38,.72),rgba(255,255,255,.78));
+  transition:width .22s ease;
+}
+.trading-account-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1.45fr) minmax(250px,.8fr);
+  gap:10px;
+  align-items:start;
+}
+.trading-calendar-card{
+  min-height:520px;
+  display:flex;
+  flex-direction:column;
+}
+.trading-calendar-head>span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.trading-calendar-head>div{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.trading-calendar-head button{
+  width:29px;
+  height:29px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.09);
+  background:rgba(255,255,255,.018);
+  color:#cfd4d7;
+  cursor:pointer;
+}
+.trading-calendar-head button:hover{border-color:rgba(183,31,38,.38);color:#fff}
+.trading-calendar-head b{
+  min-width:118px;
+  text-align:center;
+  font-size:10px;
+  letter-spacing:.06em;
+}
+.trading-calendar-weekdays,
+.trading-calendar-grid{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:6px;
+}
+.trading-calendar-weekdays{
+  margin-bottom:6px;
+}
+.trading-calendar-weekdays span{
+  padding:7px 4px;
+  text-align:center;
+  font-size:7px;
+  font-weight:700;
+  letter-spacing:.12em;
+  opacity:.42;
+  background:rgba(255,255,255,.012);
+}
+.trading-calendar-grid{
+  flex:1;
+  grid-template-rows:repeat(6,minmax(58px,1fr));
+}
+.trading-calendar-day{
+  min-width:0;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  border:1px solid rgba(255,255,255,.075);
+  background:rgba(255,255,255,.012);
+  color:#e6eaec;
+  cursor:pointer;
+  transition:border-color .16s ease,background .16s ease,transform .12s ease;
+}
+.trading-calendar-day:hover{
+  transform:translateY(-1px);
+  border-color:rgba(255,255,255,.18);
+  background:rgba(255,255,255,.025);
+}
+.trading-calendar-day.is-outside{opacity:.24}
+.trading-calendar-day.is-selected{
+  border-color:rgba(183,31,38,.58);
+  box-shadow:inset 0 0 22px rgba(183,31,38,.06);
+}
+.trading-calendar-day.is-win{
+  border-color:rgba(63,188,127,.26);
+  background:linear-gradient(180deg,rgba(63,188,127,.055),rgba(63,188,127,.015));
+}
+.trading-calendar-day.is-loss{
+  border-color:rgba(207,69,75,.3);
+  background:linear-gradient(180deg,rgba(183,31,38,.065),rgba(183,31,38,.018));
+}
+.trading-calendar-day .day-number{
+  position:absolute;
+  top:6px;
+  left:7px;
+  font-size:8px;
+  font-weight:700;
+  opacity:.68;
+}
+.trading-calendar-day strong{
+  font:800 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.trading-calendar-day.is-win strong{color:#5ee2a0}
+.trading-calendar-day.is-loss strong{color:#e36a70}
+.trading-calendar-day i{
+  font-style:normal;
+  font-size:9px;
+  opacity:.2;
+}
+.trading-calendar-day small{
+  font-size:6px;
+  letter-spacing:.09em;
+  opacity:.42;
+}
+.calendar-summary{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:9px;
+  padding-top:9px;
+  border-top:1px solid rgba(255,255,255,.06);
+  font-size:8px;
+  letter-spacing:.09em;
+  opacity:.58;
+}
+.calendar-summary b{color:#e6eaec}
+.calendar-summary b.positive{color:#5ee2a0}
+.calendar-summary b.negative{color:#e36a70}
+.trading-account-side{
+  display:grid;
+  gap:10px;
+}
+.account-input-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:7px;
+}
+.account-input-grid label,
+.journal-pnl,
+.journal-notes{
+  display:grid;
+  gap:5px;
+}
+.account-input-grid label>span,
+.journal-pnl>span,
+.journal-notes>span{
+  font-size:7px;
+  letter-spacing:.11em;
+  opacity:.5;
+}
+.account-input-grid input,
+.account-input-grid select,
+.journal-pnl input,
+.journal-notes textarea{
+  width:100%;
+  min-width:0;
+  border:1px solid rgba(255,255,255,.085);
+  background:rgba(0,0,0,.23);
+  color:#eef1f2;
+  outline:none;
+  font:600 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.account-input-grid input,
+.account-input-grid select,
+.journal-pnl input{
+  height:31px;
+  padding:0 8px;
+}
+.account-input-grid select option{background:#0a0b0c}
+.account-input-grid input:focus,
+.account-input-grid select:focus,
+.journal-pnl input:focus,
+.journal-notes textarea:focus{
+  border-color:rgba(183,31,38,.45);
+  box-shadow:0 0 0 1px rgba(183,31,38,.08);
+}
+.account-input-note{
+  margin:10px 0 0;
+  padding-top:9px;
+  border-top:1px solid rgba(255,255,255,.055);
+  font-size:8px;
+  line-height:1.45;
+  opacity:.47;
+}
+.day-journal-card{
+  display:grid;
+  gap:9px;
+}
+.day-journal-card .trading-card-head{margin-bottom:0}
+.journal-notes textarea{
+  min-height:104px;
+  resize:vertical;
+  padding:8px;
+  line-height:1.45;
+}
+.journal-image-zone{
+  min-height:92px;
+}
+.journal-image-upload{
+  min-height:92px;
+  border:1px dashed rgba(255,255,255,.12);
+  background:rgba(255,255,255,.012);
+  display:grid;
+  place-items:center;
+  align-content:center;
+  gap:4px;
+  cursor:pointer;
+  color:#b8bec2;
+}
+.journal-image-upload:hover{border-color:rgba(183,31,38,.36);color:#fff}
+.journal-image-upload span{font-size:8px;font-weight:700;letter-spacing:.09em}
+.journal-image-upload small{font-size:7px;opacity:.4}
+.journal-image-upload input{display:none}
+.journal-image-preview{
+  position:relative;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.09);
+  background:#050607;
+}
+.journal-image-preview img{
+  display:block;
+  width:100%;
+  max-height:210px;
+  object-fit:contain;
+}
+.journal-image-preview button{
+  position:absolute;
+  right:6px;
+  bottom:6px;
+  border:1px solid rgba(183,31,38,.45);
+  background:rgba(5,6,7,.88);
+  color:#df7a7f;
+  padding:5px 7px;
+  font-size:7px;
+  font-weight:700;
+  letter-spacing:.08em;
+  cursor:pointer;
+}
+.journal-save{
+  height:34px;
+  border:1px solid rgba(183,31,38,.48);
+  background:linear-gradient(180deg,rgba(183,31,38,.11),rgba(183,31,38,.045));
+  color:#f0f2f3;
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.12em;
+  cursor:pointer;
+}
+.journal-save:hover{border-color:rgba(215,70,76,.66);box-shadow:inset 0 0 24px rgba(183,31,38,.05)}
+.journal-image-state{
+  font-size:7px;
+  letter-spacing:.07em;
+  opacity:.4;
+}
+@media(max-width:1180px){
+  .trading-account-grid{grid-template-columns:1fr}
+  .trading-account-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  .trading-account-toolbar{align-items:flex-start;flex-direction:column}
+  .trading-account-actions{justify-content:flex-start;width:100%}
+  .trading-account-actions select{flex:1}
+  .trading-account-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .trading-account-side{grid-template-columns:1fr}
+  .funded-days-progress{grid-template-columns:1fr}
+}
+@media(max-width:700px){
+  .trading-account-actions{display:grid;grid-template-columns:1fr 1fr}
+  .trading-account-actions select{grid-column:1/-1;width:100%}
+  .trading-account-actions button{justify-content:center}
+  .trading-account-actions .icon-only{width:auto}
+  .trading-calendar-card{min-height:0}
+  .trading-calendar-weekdays,.trading-calendar-grid{gap:3px}
+  .trading-calendar-grid{grid-template-rows:repeat(6,70px)}
+  .trading-calendar-day strong{font-size:9px}
+  .account-input-grid{grid-template-columns:1fr}
+  .progress-labels strong{display:none}
+}
