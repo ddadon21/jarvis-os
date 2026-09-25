@@ -1,7 +1,8 @@
 "use client";
 
 import { Activity, Crosshair, Eye, Gauge, Radio, ShieldCheck, TriangleAlert, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";\nimport TradingAccountManager, { TradingAccountView } from "./trading-account-manager";
+import { useEffect, useMemo, useRef, useState } from "react";
+import TradingAccountManager, { TradingAccountView } from "./trading-account-manager";
 
 type ObserverState = {
   status: "FLAT" | "PENDING" | "OPEN" | "UNKNOWN";
