@@ -1,3 +1,5 @@
+import { FINANCE_IMPORT } from "./finance-import";
+import { financeTotals } from "./finance-math";
 import {
   FinanceAccountState,
   FinanceGoalState,
@@ -11,26 +13,6 @@ import {
 
 const FIRST_CAPITAL_MILESTONE = 5_000;
 const HUNDRED_MILLION = 100_000_000;
-
-const SEEDED_ACCOUNTS: FinanceAccountState[] = [
-  { key: "chase-checking", institution: "CHASE", name: "CHASE SECURE BANKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "PERSONAL CONTROL", current: 14.52, available: 6.25, limit: null },
-  { key: "bofa-personal", institution: "BANK OF AMERICA", name: "FINANCIAL OPS", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "CONTROLLED BILLS", current: 1.64, available: 1.64, limit: null },
-  { key: "bofa-business", institution: "BANK OF AMERICA", name: "BUSINESS ADV FUNDAMENTALS", type: "depository", subtype: "checking", ownership: "BUSINESS", role: "CAPITAL GENERATION", current: 661.50, available: 596.54, limit: null },
-  { key: "schwab-checking", institution: "CHARLES SCHWAB", name: "INVESTOR CHECKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "INVESTMENT ROUTING", current: 0.93, available: 0.93, limit: null },
-  { key: "schwab-brokerage", institution: "CHARLES SCHWAB", name: "INDIVIDUAL", type: "investment", subtype: "brokerage", ownership: "PERSONAL", role: "COMPOUNDING", current: 1.78, available: 1.78, limit: null },
-  { key: "amex-hysa", institution: "AMERICAN EXPRESS", name: "HIGH YIELD SAVINGS ACCOUNT", type: "depository", subtype: "savings", ownership: "PERSONAL", role: "LIQUIDITY / RESERVE", current: 0.74, available: 0.74, limit: null },
-  { key: "rbfcu-checking", institution: "RBFCU", name: "CHECKING", type: "depository", subtype: "checking", ownership: "PERSONAL", role: "CASH", current: 0.05, available: 0.05, limit: null },
-  { key: "rbfcu-savings", institution: "RBFCU", name: "PRIMARY SAVINGS", type: "depository", subtype: "savings", ownership: "PERSONAL", role: "CASH", current: 3.99, available: 2.99, limit: null },
-  { key: "rbfcu-platinum", institution: "RBFCU", name: "PLATINUM PREMIER", type: "credit", subtype: "credit card", ownership: "AUTHORIZED_USER", role: "CREDIT CONTEXT", current: 8205.97, available: 4294.0, limit: 12500.0 },
-  { key: "rbfcu-world", institution: "RBFCU", name: "WORLD CARD", type: "credit", subtype: "credit card", ownership: "PERSONAL", role: "LIABILITY", current: 598.12, available: 1.0, limit: 600.0 },
-  { key: "capitalone-quicksilver", institution: "CAPITAL ONE", name: "QUICKSILVER", type: "credit", subtype: "credit card", ownership: "PERSONAL", role: "LIABILITY", current: 528.05, available: null, limit: null },
-];
-
-const SEEDED_LIABILITIES: FinanceLiabilityState[] = [
-  { accountKey: "rbfcu-world", apr: 18, minimum: 25, due: "2026-09-21" },
-  { accountKey: "capitalone-quicksilver", apr: null, minimum: 25, due: "2026-09-14" },
-  { accountKey: "rbfcu-platinum", apr: 11.2, minimum: 0, due: "2026-10-04" },
-];
 
 export function getNextNetWorthMilestone(netWorth: number) {
   const step = netWorth < 100_000 ? 5_000 : 10_000;
@@ -54,12 +36,7 @@ export function buildFinanceState(input: {
 }): FinanceRuntimeState {
   const liabilities = input.liabilities ?? [];
   const accounts = input.accounts.map(sanitizeAccount);
-  const liquidity = roundMoney(accounts.filter((account) => account.type === "depository").reduce((sum, account) => sum + Math.max(0, account.current), 0));
-  const investmentValue = roundMoney(accounts.filter((account) => account.type === "investment").reduce((sum, account) => sum + account.current, 0));
-  const personalDebt = roundMoney(accounts.filter((account) => (account.type === "credit" || account.type === "loan") && account.ownership !== "AUTHORIZED_USER").reduce((sum, account) => sum + Math.max(0, account.current), 0));
-  const authorizedUserBalance = roundMoney(accounts.filter((account) => (account.type === "credit" || account.type === "loan") && account.ownership === "AUTHORIZED_USER").reduce((sum, account) => sum + Math.max(0, account.current), 0));
-  const providerNetWorth = roundMoney(liquidity + investmentValue - personalDebt - authorizedUserBalance);
-  const personalNetWorth = roundMoney(liquidity + investmentValue - personalDebt);
+  const { liquidity, investmentValue, personalDebt, authorizedUserBalance, providerNetWorth, personalNetWorth } = financeTotals(accounts);
   const { currentStage, nextStage } = determineStage({ personalDebt, liquidity, personalNetWorth });
 
   return {
@@ -85,7 +62,7 @@ export function buildFinanceState(input: {
 
 export async function getOrSeedFinanceState(): Promise<FinanceRuntimeState> {
   const existing = await getFinanceState();
-  if (existing) {
+  if (existing && (Date.parse(existing.asOf) >= Date.parse(FINANCE_IMPORT.asOf))) {
     const refreshed = buildFinanceState({
       accounts: existing.accounts,
       liabilities: existing.liabilities,
@@ -101,17 +78,7 @@ export async function getOrSeedFinanceState(): Promise<FinanceRuntimeState> {
     return refreshed;
   }
 
-  const seeded = buildFinanceState({
-    accounts: SEEDED_ACCOUNTS,
-    liabilities: SEEDED_LIABILITIES,
-    mode: "SYNCED_SNAPSHOT",
-    source: "CHATGPT FINANCES",
-    asOf: "2026-09-19T19:25:00.000Z",
-    connectionCount: 7,
-    transactionHistory: "FULL HISTORY READY",
-    recurringHistory: "FULL HISTORY READY",
-    note: "Connected-account snapshot synchronized from ChatGPT Finances on Sep 19, 2026. Jarvis is still in Phase 1 snapshot mode until direct provider refresh is connected.",
-  });
+  const seeded = buildFinanceState(FINANCE_IMPORT);
   await setFinanceState(seeded);
   return seeded;
 }
@@ -227,3 +194,4 @@ function roundMoney(value: number) { return Math.round((value + Number.EPSILON) 
 function clampPercent(value: number) { return Math.max(0, Math.min(100, value)); }
 function money(value: number) { return `$${Math.max(0, value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function signedMoney(value: number) { return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+

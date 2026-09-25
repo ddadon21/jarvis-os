@@ -34,7 +34,7 @@ jobs:
         run: npm install
 
       - name: Verify observer state regressions
-        run: node --test tests/trading-*.test.mjs
+        run: node --test tests/*.test.mjs
 
       - name: Build
         run: npm run build

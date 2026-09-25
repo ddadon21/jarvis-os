@@ -38,7 +38,9 @@ export function deriveFinanceFocus(state: FinanceRuntimeState): FinanceFocus {
         return (b.utilization ?? -1) - (a.utilization ?? -1);
       });
 
-    const target = debts[0];
+    const missingApr = debts.filter((debt) => debt.liability?.apr == null);
+    // An unknown APR cannot be ranked below a known APR as if it were cheaper.
+    const target = missingApr.length ? undefined : debts[0];
     const details = target
       ? [
           target.liability?.apr != null ? `${target.liability.apr.toFixed(1)}% APR` : null,
@@ -50,12 +52,14 @@ export function deriveFinanceFocus(state: FinanceRuntimeState): FinanceFocus {
       stage: "DEBT",
       title: "CLEAR PERSONAL REVOLVING DEBT",
       reason: `${money(state.metrics.personalDebt)} of personal revolving debt is the current drag on net worth, credit flexibility, and capital growth.`,
-      nextStep: target
+      nextStep: missingApr.length
+        ? `Confirm available bank cash, current statement minimums, and the missing APR for ${missingApr.map((debt) => debt.account.name).join(", ")} before ranking extra payments. Keep the next payout plan separate from actual balances.`
+        : target
         ? `Protect enough operating cash to avoid recreating debt, then route the next safe debt dollar to ${target.account.name}${details ? ` (${details})` : ""}.`
         : "Protect enough operating cash to avoid recreating debt, then route the next safe debt dollar to the highest-cost personal revolving balance.",
       moneyInRule: "New money gets assigned before it gets spent: protect required operating cash, then attack the active debt target.",
       moneyOutRule: "Required spending can pass. Discretionary spending should be challenged whenever it delays the debt target or increases utilization.",
-      targetLabel: target?.account.name ?? "PERSONAL DEBT",
+      targetLabel: missingApr.length ? "VERIFY CARD TERMS + AVAILABLE CASH" : target?.account.name ?? "PERSONAL DEBT",
     };
   }
 

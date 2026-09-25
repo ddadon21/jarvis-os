@@ -94,6 +94,9 @@ export type FinanceAccountState = {
   current: number;
   available: number | null;
   limit: number | null;
+  balanceUpdatedAt?: string | null;
+  balanceAsOf?: string | null;
+  balanceFreshness?: string;
 };
 
 export type FinanceLiabilityState = {
@@ -101,6 +104,9 @@ export type FinanceLiabilityState = {
   apr: number | null;
   minimum: number | null;
   due: string | null;
+  statementDate?: string | null;
+  lastPaymentDate?: string | null;
+  isOverdue?: boolean;
 };
 
 export type FinanceGoalState = {
