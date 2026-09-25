@@ -377,6 +377,7 @@ export default function TradingAccountManager({
     if (!window.confirm("Reset this account as a fresh evaluation? The old calendar stays archived under the previous cycle.")) return;
     patchAccount({
       stage: "EVAL",
+      label: /FUNDED/i.test(account.label) ? account.label.replace(/FUNDED/gi, "EVAL") : account.label,
       currentBalance: account.startBalance,
       cycle: account.cycle + 1,
     });
@@ -389,6 +390,7 @@ export default function TradingAccountManager({
     if (!window.confirm("Mark this evaluation as passed and start a fresh funded calendar?")) return;
     patchAccount({
       stage: "FUNDED",
+      label: /EVAL/i.test(account.label) ? account.label.replace(/EVAL/gi, "FUNDED") : account.label,
       currentBalance: account.startBalance,
     });
     setSelectedDay(dateKey(new Date()));
