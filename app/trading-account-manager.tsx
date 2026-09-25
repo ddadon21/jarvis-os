@@ -258,16 +258,19 @@ export default function TradingAccountManager({
   useEffect(() => {
     if (!hydrated) return;
     window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+    window.dispatchEvent(new CustomEvent("jarvis-trading-account-updated"));
   }, [accounts, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
     window.localStorage.setItem(SELECTED_KEY, selectedId);
+    window.dispatchEvent(new CustomEvent("jarvis-trading-account-updated"));
   }, [selectedId, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
     window.localStorage.setItem(JOURNAL_KEY, JSON.stringify(journal));
+    window.dispatchEvent(new CustomEvent("jarvis-trading-account-updated"));
   }, [journal, hydrated]);
 
   const account = accounts.find((item) => item.id === selectedId) ?? accounts[0] ?? null;
