@@ -12,7 +12,7 @@ using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
-// Observer release: 0.4.15 active-pane execution reader
+// Local Agent release: 0.5.0 — Trading Observer + Obsidian bridge
 
 internal static class Program
 {
@@ -90,6 +90,9 @@ internal sealed class ObserverContext : ApplicationContext
         menu.Items.Add("Open observer folder", null, (_, _) => OpenFolder(_root));
         menu.Items.Add("Show / New pairing code", null, async (_, _) => await ShowOrCreatePairingCodeAsync());
         menu.Items.Add("Set / replace Vercel access key", null, (_, _) => PromptAndStoreVercelBypassSecret(showSuccess: true));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Obsidian: Set / replace API key", null, (_, _) => PromptAndStoreObsidianApiKey(showSuccess: true));
+        menu.Items.Add("Obsidian: Test connection", null, async (_, _) => await TestObsidianConnectionAsync(showSuccess: true));
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
@@ -98,13 +101,13 @@ internal sealed class ObserverContext : ApplicationContext
         _tray = new NotifyIcon
         {
             Icon = SystemIcons.Shield,
-            Text = "Jarvis Trading Observer — standby",
+            Text = "JARVIS Local Agent — standby",
             Visible = true,
             ContextMenuStrip = menu,
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.4.15", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.5.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
@@ -481,7 +484,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.4.15",
+            observerVersion = "0.5.0",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -492,7 +495,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.15");
+            req.Headers.Add("x-jarvis-observer-version", "0.5.0");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -551,7 +554,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.4.15");
+            req.Headers.Add("x-jarvis-observer-version", "0.5.0");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -761,6 +764,136 @@ internal sealed class ObserverContext : ApplicationContext
         catch
         {
             return null;
+        }
+    }
+
+    private string? GetObsidianApiKey()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_config.ObsidianApiKeyProtected)) return null;
+            var protectedBytes = Convert.FromBase64String(_config.ObsidianApiKeyProtected);
+            var clearBytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(clearBytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private bool PromptAndStoreObsidianApiKey(bool showSuccess)
+    {
+        var value = PromptSecret(
+            "Paste the API key shown in Obsidian → Settings → Local REST API.\n\nThe key is encrypted with Windows DPAPI for this Windows user and never uploaded to JARVIS Cloud.",
+            "JARVIS Local Agent — Obsidian API key");
+
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        try
+        {
+            var clearBytes = Encoding.UTF8.GetBytes(value.Trim());
+            var protectedBytes = ProtectedData.Protect(clearBytes, null, DataProtectionScope.CurrentUser);
+            _config.ObsidianApiKeyProtected = Convert.ToBase64String(protectedBytes);
+            SaveConfig();
+            Log(new { type = "obsidian.api_key.saved", at = DateTime.UtcNow, storage = "windows-dpapi" });
+        }
+        catch (Exception ex)
+        {
+            Log(new { type = "obsidian.api_key.save_failed", at = DateTime.UtcNow, error = ex.Message });
+            MessageBox.Show(
+                "Could not securely save the Obsidian API key.\n\n" + ex.Message,
+                "JARVIS Local Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
+
+        if (showSuccess)
+        {
+            MessageBox.Show(
+                "Obsidian API key saved locally and encrypted with Windows DPAPI.\n\nNext, enable the HTTP server in Obsidian → Settings → Local REST API, then choose “Obsidian: Test connection” from the JARVIS tray menu.",
+                "JARVIS Local Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        return true;
+    }
+
+    private async Task<bool> TestObsidianConnectionAsync(bool showSuccess)
+    {
+        var apiKey = GetObsidianApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            if (!PromptAndStoreObsidianApiKey(showSuccess: false)) return false;
+            apiKey = GetObsidianApiKey();
+        }
+
+        if (string.IsNullOrWhiteSpace(apiKey)) return false;
+
+        var baseUrl = string.IsNullOrWhiteSpace(_config.ObsidianApiUrl)
+            ? "http://127.0.0.1:27123"
+            : _config.ObsidianApiUrl.TrimEnd('/');
+
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) ||
+            !(baseUri.IsLoopback || string.Equals(baseUri.Host, "localhost", StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show(
+                "For safety, the JARVIS Obsidian bridge only connects to localhost / 127.0.0.1.",
+                "JARVIS Local Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
+        }
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, baseUrl + "/vault/");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var res = await _http.SendAsync(req, cts.Token);
+            var responseText = await res.Content.ReadAsStringAsync(cts.Token);
+
+            Log(new
+            {
+                type = "obsidian.connection.test",
+                at = DateTime.UtcNow,
+                status = (int)res.StatusCode,
+                connected = res.IsSuccessStatusCode,
+                url = baseUrl,
+            });
+
+            if (!res.IsSuccessStatusCode)
+            {
+                MessageBox.Show(
+                    $"Obsidian responded with HTTP {(int)res.StatusCode}.\n\nMake sure Local REST API is enabled, its HTTP server is enabled, and the saved API key is current.",
+                    "JARVIS Local Agent — Obsidian",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (showSuccess)
+            {
+                MessageBox.Show(
+                    "Obsidian is connected to the JARVIS Local Agent.\n\nThe API key remains encrypted on this PC and the bridge only talks to loopback.",
+                    "JARVIS Local Agent — Obsidian connected",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log(new { type = "obsidian.connection.error", at = DateTime.UtcNow, error = ex.Message });
+            MessageBox.Show(
+                "JARVIS could not reach Obsidian.\n\nIn Obsidian → Settings → Local REST API, enable the plugin and enable its HTTP server (127.0.0.1:27123), then try again.\n\n" + ex.Message,
+                "JARVIS Local Agent — Obsidian",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
         }
     }
 
@@ -1279,6 +1412,12 @@ internal sealed class ObserverConfig
 
     [JsonPropertyName("vercelBypassSecretProtected")]
     public string? VercelBypassSecretProtected { get; set; }
+
+    [JsonPropertyName("obsidianApiUrl")]
+    public string? ObsidianApiUrl { get; set; } = "http://127.0.0.1:27123";
+
+    [JsonPropertyName("obsidianApiKeyProtected")]
+    public string? ObsidianApiKeyProtected { get; set; }
 
     [JsonPropertyName("tradingSecret")]
     public string? TradingSecret { get; set; }
