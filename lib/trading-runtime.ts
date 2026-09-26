@@ -177,6 +177,14 @@ export async function getTradingState(): Promise<TradingRuntimeState> {
   return initial;
 }
 
+export async function restoreTradingState(state: TradingRuntimeState): Promise<TradingRuntimeState> {
+  if (!state || state.version !== 1 || !state.account || !state.activeGoal || !Array.isArray(state.openTrades) || !Array.isArray(state.recentTrades)) {
+    throw new Error("Invalid trading runtime snapshot.");
+  }
+  await writeState(state);
+  return state;
+}
+
 export async function ingestTradingObservation(input: TradingObservationInput): Promise<TradingRuntimeState> {
   const previous = await getTradingState();
   // A slower vision response must not replace a more recent screen state.
