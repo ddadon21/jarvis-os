@@ -148,7 +148,7 @@ const RECENT_EVENTS_KEY = "jarvis:runtime:recent-events:v1";
 const LAST_PULSE_AT_KEY = "jarvis:runtime:last-pulse-at:v1";
 const WORKFORCE_STATE_KEY = "jarvis:runtime:workforce:v1";
 const FINANCE_STATE_KEY = "jarvis:runtime:finance:v2";
-const THIRTY_DAYS = 60 * 60 * 24 * 30;
+const DURABLE_RUNTIME_TTL = 60 * 60 * 24 * 365;
 
 type FallbackStore = Map<string, unknown>;
 
@@ -169,7 +169,7 @@ async function readValue<T>(key: string): Promise<T | null> {
   }
 }
 
-async function writeValue<T>(key: string, value: T, ttl = THIRTY_DAYS): Promise<void> {
+async function writeValue<T>(key: string, value: T, ttl = DURABLE_RUNTIME_TTL): Promise<void> {
   fallbackStore.set(key, value);
 
   try {
