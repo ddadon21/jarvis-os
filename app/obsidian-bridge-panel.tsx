@@ -7,7 +7,7 @@ type BridgeState = "UNPAIRED" | "READY" | "WORKING" | "ONLINE" | "ERROR";
 
 type CommandResult = {
   id: string;
-  action: "LIST" | "READ" | "WRITE";
+  action: "LIST" | "READ" | "WRITE" | "SEARCH";
   ok: boolean;
   path: string | null;
   data: string | null;
@@ -39,6 +39,8 @@ export default function ObsidianBridgePanel() {
   const [message, setMessage] = useState("PAIR LOCAL AGENT");
   const [detail, setDetail] = useState("Obsidian stays local to this PC.");
   const [files, setFiles] = useState<string[]>([]);
+  const [query, setQuery] = useState("JARVIS");
+  const [searchPreview, setSearchPreview] = useState("");
 
   useEffect(() => {
     const token = controllerToken();
@@ -84,7 +86,7 @@ export default function ObsidianBridgePanel() {
     };
   }, []);
 
-  async function run(action: "LIST" | "WRITE") {
+  async function run(action: "LIST" | "WRITE" | "SEARCH") {
     const token = controllerToken();
     if (!token) {
       setState("UNPAIRED");
@@ -93,25 +95,27 @@ export default function ObsidianBridgePanel() {
     }
 
     setState("WORKING");
-    setMessage(action === "LIST" ? "READING VAULT…" : "WRITING TEST NOTE…");
+    setMessage(action === "LIST" ? "READING VAULT…" : action === "SEARCH" ? "SEARCHING VAULT…" : "WRITING TEST NOTE…");
     setDetail("JARVIS Cloud → Local Agent → Obsidian");
 
     try {
       const body = action === "LIST"
         ? { action: "LIST" as const, path: null }
-        : {
-            action: "WRITE" as const,
-            path: "00 Inbox/JARVIS Cloud Bridge Test.md",
-            content: [
-              "# JARVIS Cloud Bridge Test",
-              "",
-              `Connected: ${new Date().toLocaleString()}`,
-              "",
-              "Route: JARVIS Cloud → Windows Local Agent → Obsidian",
-              "",
-              "Status: ONLINE",
-            ].join("\n"),
-          };
+        : action === "SEARCH"
+          ? { action: "SEARCH" as const, query: query.trim() || "JARVIS" }
+          : {
+              action: "WRITE" as const,
+              path: "00 Inbox/JARVIS Cloud Bridge Test.md",
+              content: [
+                "# JARVIS Cloud Bridge Test",
+                "",
+                `Connected: ${new Date().toLocaleString()}`,
+                "",
+                "Route: JARVIS Cloud → Windows Local Agent → Obsidian",
+                "",
+                "Status: ONLINE",
+              ].join("\n"),
+            };
 
       const response = await fetch("/api/obsidian/command", {
         method: "POST",
@@ -137,6 +141,9 @@ export default function ObsidianBridgePanel() {
         } catch {
           setDetail("Vault responded through Local Agent.");
         }
+      } else if (action === "SEARCH") {
+        setSearchPreview((result.data ?? "").slice(0, 220));
+        setDetail(`Search returned through Local Agent for “${query.trim() || "JARVIS"}”.`);
       } else {
         setDetail("00 Inbox/JARVIS Cloud Bridge Test.md created.");
       }
@@ -170,7 +177,12 @@ export default function ObsidianBridgePanel() {
         <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("LIST")}>TEST VAULT</button>
         <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("WRITE")}>WRITE TEST</button>
       </div>
+      <div className="obsidian-bridge-search">
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SEARCH KNOWLEDGE" />
+        <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("SEARCH")}>SEARCH</button>
+      </div>
       {files.length ? <small className="obsidian-bridge-files">{files.slice(0, 4).join(" · ")}</small> : null}
+      {searchPreview ? <small className="obsidian-bridge-search-result">{searchPreview}</small> : null}
     </div>
   );
 }
