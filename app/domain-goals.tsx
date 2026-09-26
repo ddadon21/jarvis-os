@@ -91,7 +91,7 @@ type TradingGoalPayoutSummary = {
   connected?: boolean;
   lifetimeCount?: number;
   nextPayoutNumber?: number;
-  latest?: { approvedAt: string | null; payoutAmount?: number; traderNetAmount: number } | null;
+  latest?: { approvedAt: string | null; payoutAmount?: number; traderNetAmount: number | null } | null;
 };
 
 const HABIT_KEY = "jarvis-habit-history-v1";
