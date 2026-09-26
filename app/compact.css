@@ -1407,3 +1407,129 @@
   width:31px;
   padding:0!important;
 }
+
+
+/* Jarvis command memo */
+.workspace-memo{
+  position:absolute;
+  top:12px;
+  left:250px;
+  right:250px;
+  z-index:8;
+  display:grid;
+  gap:3px;
+  text-align:center;
+  padding:5px 14px 6px;
+  background:rgba(2,8,13,.96);
+  color:#f1f1f1;
+  pointer-events:none;
+}
+.workspace-memo strong{
+  font-size:.82rem;
+  font-weight:900;
+  letter-spacing:.14em;
+  line-height:1.15;
+}
+.workspace-memo span{
+  font-size:.62rem;
+  font-weight:600;
+  letter-spacing:.075em;
+  line-height:1.3;
+  color:#aeb5b9;
+}
+.workspace:before{display:none!important}
+
+/* Dwight trading rules live under Events */
+.dwight-rules{
+  margin-top:10px;
+  padding:9px 8px 7px;
+  border:1px solid rgba(255,255,255,.08);
+  border-left-color:rgba(183,31,38,.42);
+  background:rgba(255,255,255,.014);
+}
+.dwight-rules-head{
+  margin-bottom:7px;
+  font-size:.58rem;
+  font-weight:800;
+  letter-spacing:.12em;
+  color:#f0f2f3;
+}
+.dwight-rules>div:not(.dwight-rules-head){
+  display:grid;
+  grid-template-columns:14px minmax(0,1fr);
+  align-items:start;
+  gap:5px;
+  padding:4px 0;
+  font-size:.58rem;
+  line-height:1.32;
+  color:#bdc4c8;
+}
+.dwight-rules svg{
+  margin-top:1px;
+  color:#f2f2f2;
+}
+
+/* Trading daily review */
+.journal-review-grid{
+  display:grid;
+  gap:8px;
+}
+.journal-review-grid label{
+  display:grid;
+  gap:5px;
+}
+.journal-review-grid label>span,
+.journal-rating>span{
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.09em;
+  color:#aeb5b9;
+}
+.journal-review-grid textarea{
+  min-height:58px;
+  resize:vertical;
+  padding:8px;
+  line-height:1.42;
+}
+.journal-rating{
+  display:grid;
+  gap:6px;
+  padding:8px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.012);
+}
+.journal-stars{
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+.journal-stars button{
+  appearance:none;
+  border:0;
+  background:transparent;
+  padding:0;
+  min-width:24px;
+  min-height:24px;
+  color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,.72);
+  font-size:22px;
+  line-height:1;
+  cursor:pointer;
+}
+.journal-stars button.is-filled{
+  color:#fff;
+  -webkit-text-stroke:1px #fff;
+  text-shadow:0 0 10px rgba(255,255,255,.18);
+}
+.journal-stars button:hover{
+  -webkit-text-stroke-color:#fff;
+}
+
+@media(max-width:980px){
+  .workspace-memo{left:190px;right:190px}
+}
+@media(max-width:760px){
+  .workspace-memo{top:10px;left:12px;right:12px;padding:4px 8px}
+  .workspace-memo strong{font-size:.68rem}
+  .workspace-memo span{font-size:.52rem}
+}
