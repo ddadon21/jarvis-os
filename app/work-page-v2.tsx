@@ -207,19 +207,23 @@ export default function WorkV2() {
                 <Event key={event.id} text={event.summary} time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)} />
               )) : <><Event text="Jarvis core online" time="NOW" /><Event text="Autonomous workforce ready" time="AI" /><Event text="Finance accounts connected" time="FIN" /></>}
             </div>
-            {domain === "TRADING" ? (
-              <div className="dwight-rules">
-                <div className="dwight-rules-head">DWIGHT&apos;S RULES</div>
-                {[
-                  "Find the trend",
-                  "Look on the 1HR for support and resistance",
-                  "Wait for someone to lose",
-                  "Mark your zone on the 5 MIN",
-                  "Enter when price taps zone and target a 1:2 or 1:3",
-                ].map((rule) => <div key={rule}><Check size={11} /><span>{rule}</span></div>)}
-              </div>
-            ) : null}
           </Panel>
+          {domain === "TRADING" ? (
+            <Panel title="DWIGHT'S RULES" corner="PROCESS">
+              <div className="dwight-rules">
+                {[
+                  "Mark out 4H and 1D zones",
+                  "Identify trend",
+                  "Wait for price to hit HTF zone",
+                  "Wait for someone to lose",
+                  "Wait for confirmation back in my direction",
+                  "Look for entry",
+                ].map((rule, index) => (
+                  <div key={rule}><span className="dwight-rule-check"><Check size={10} /></span><span><b>{index + 1}.</b> {rule}</span></div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
         </aside>
 
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
