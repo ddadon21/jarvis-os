@@ -60,13 +60,21 @@ type TradingState = {
 };
 
 function rawPayload(raw: string) {
-  return { format: "localStorage", raw };
+  return { format: "localStorage", raw, deleted: false };
+}
+
+function deletedPayload() {
+  return { format: "localStorage", raw: null, deleted: true };
 }
 
 function payloadRaw(payload: unknown) {
   if (!payload || typeof payload !== "object") return null;
   const raw = (payload as { raw?: unknown }).raw;
   return typeof raw === "string" ? raw : null;
+}
+
+function payloadDeleted(payload: unknown) {
+  return Boolean(payload && typeof payload === "object" && (payload as { deleted?: unknown }).deleted === true);
 }
 
 function dispatchRestored(key: CloudKey) {
@@ -137,9 +145,16 @@ export default function JarvisCloudBridge() {
       for (const key of CLOUD_KEYS) {
         const row = remote.get(key);
         const cloudRaw = row ? payloadRaw(row.payload) : null;
+        const isDeleted = row ? payloadDeleted(row.payload) : false;
         const localRaw = window.localStorage.getItem(key);
 
-        if (cloudRaw != null) {
+        if (isDeleted) {
+          if (localRaw != null) {
+            window.localStorage.removeItem(key);
+            dispatchRestored(key);
+          }
+          lastRawRef.current[key] = null;
+        } else if (cloudRaw != null) {
           if (localRaw !== cloudRaw) {
             window.localStorage.setItem(key, cloudRaw);
             dispatchRestored(key);
@@ -196,48 +211,28 @@ export default function JarvisCloudBridge() {
       if (!readyRef.current || !workspaceId || syncingRef.current) return;
 
       const changed: Array<Record<string, unknown>> = [];
-      const removed: string[] = [];
       for (const key of CLOUD_KEYS) {
         const raw = window.localStorage.getItem(key);
         if (raw === lastRawRef.current[key]) continue;
         lastRawRef.current[key] = raw;
 
-        if (raw == null) {
-          removed.push(key);
-        } else {
-          changed.push({
-            workspace_id: workspaceId,
-            state_key: key,
-            version: 1,
-            payload: rawPayload(raw),
-            source: "JARVIS CLIENT",
-            client_updated_at: new Date().toISOString(),
-          });
-        }
+        changed.push({
+          workspace_id: workspaceId,
+          state_key: key,
+          version: 1,
+          payload: raw == null ? deletedPayload() : rawPayload(raw),
+          source: raw == null ? "JARVIS CLIENT DELETE" : "JARVIS CLIENT",
+          client_updated_at: new Date().toISOString(),
+        });
       }
 
-      if (!changed.length && !removed.length) return;
+      if (!changed.length) return;
       syncingRef.current = true;
-      let hasError = false;
-
-      if (changed.length) {
-        const { error } = await supabase
-          .from("jarvis_state_snapshots")
-          .upsert(changed, { onConflict: "workspace_id,state_key" });
-        if (error) hasError = true;
-      }
-
-      if (removed.length) {
-        const { error } = await supabase
-          .from("jarvis_state_snapshots")
-          .delete()
-          .eq("workspace_id", workspaceId)
-          .in("state_key", removed);
-        if (error) hasError = true;
-      }
-
+      const { error } = await supabase
+        .from("jarvis_state_snapshots")
+        .upsert(changed, { onConflict: "workspace_id,state_key" });
       syncingRef.current = false;
-      setStatus(hasError ? "ERROR" : "SYNCED");
+      setStatus(error ? "ERROR" : "SYNCED");
     }
 
     const customSync = () => { void syncLocalState(); };
