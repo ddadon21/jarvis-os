@@ -558,6 +558,7 @@ export default function TradingAccountManager({
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>("LOCAL");
   const [cloudMessage, setCloudMessage] = useState("Local cache active");
   const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
 
   useEffect(() => {
     const local = readLocalSnapshot();
@@ -1006,19 +1007,17 @@ export default function TradingAccountManager({
     }
   }
 
-  async function sendSignInLink(event: FormEvent) {
+  async function signInToCloud(event: FormEvent) {
     event.preventDefault();
     const email = authEmail.trim();
-    if (!email) return;
+    const password = authPassword;
+    if (!email || !password) return;
 
     const supabase = getSupabaseBrowserClient();
     setCloudStatus("CONNECTING");
-    setCloudMessage("Sending secure sign-in link…");
+    setCloudMessage("Signing into permanent memory…");
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/work` },
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       setCloudStatus("ERROR");
@@ -1026,8 +1025,36 @@ export default function TradingAccountManager({
       return;
     }
 
-    setCloudStatus("LOCAL");
-    setCloudMessage("Check your email for the JARVIS sign-in link.");
+    setCloudMessage("Signed in. Loading permanent memory…");
+  }
+
+  async function createCloudOwner() {
+    const email = authEmail.trim();
+    const password = authPassword;
+    if (!email || password.length < 6) {
+      setCloudStatus("ERROR");
+      setCloudMessage("Enter your email and a password with at least 6 characters.");
+      return;
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    setCloudStatus("CONNECTING");
+    setCloudMessage("Creating secure JARVIS owner…");
+
+    const { data, error } = await supabase.auth.signUp({ email, password });
+
+    if (error) {
+      setCloudStatus("ERROR");
+      setCloudMessage(error.message);
+      return;
+    }
+
+    if (data.session) {
+      setCloudMessage("Owner created. Loading permanent memory…");
+    } else {
+      setCloudStatus("LOCAL");
+      setCloudMessage("Owner created. Confirm the email once, then return here and press SIGN IN.");
+    }
   }
 
   async function signOut() {
@@ -1069,16 +1096,24 @@ export default function TradingAccountManager({
               <button type="button" onClick={() => void signOut()}><LogOut size={12} /> SIGN OUT</button>
             </div>
           ) : (
-            <form className="trading-cloud-login" onSubmit={(event) => void sendSignInLink(event)}>
+            <form className="trading-cloud-login" onSubmit={(event) => void signInToCloud(event)}>
               <Mail size={13} />
               <input
                 type="email"
-                placeholder="EMAIL FOR JARVIS CLOUD"
+                placeholder="JARVIS CLOUD EMAIL"
                 value={authEmail}
                 onChange={(event) => setAuthEmail(event.target.value)}
                 autoComplete="email"
               />
-              <button type="submit">CONNECT PERMANENT MEMORY</button>
+              <input
+                type="password"
+                placeholder="PASSWORD"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                autoComplete="current-password"
+              />
+              <button type="submit">SIGN IN</button>
+              <button type="button" onClick={() => void createCloudOwner()}>CREATE OWNER</button>
             </form>
           )}
         </div>
