@@ -445,7 +445,6 @@ async function pushCloudSnapshot(
       target_balance: targetBalance,
       funded_buffer: account.fundedBuffer,
       required_trading_days: account.requiredTradingDays,
-      outcome: "ACTIVE",
       metadata: { syncedFrom: "trading-account-manager" },
     }];
   });
@@ -535,6 +534,63 @@ async function getCloudImageUrl(supabase: SupabaseClient, workspaceId: string, t
     .createSignedUrl(String(path), 60 * 60);
   if (signedError) throw signedError;
   return data.signedUrl;
+}
+
+
+async function migrateLocalImagesToCloud(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  snapshot: LocalSnapshot,
+) {
+  for (const [key, entry] of Object.entries(snapshot.journal)) {
+    if (!entry.hasImage) continue;
+    const parsed = parseEntryKey(key);
+    if (!parsed) continue;
+    const account = snapshot.accounts.find((item) => item.id === parsed.clientId);
+    if (!account) continue;
+
+    const localBlob = await getImage(`${key}:image`);
+    if (!localBlob) continue;
+
+    const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
+    if (!tradingDayId) continue;
+
+    const { count, error: countError } = await supabase
+      .from("jarvis_attachments")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("entity_type", "trading_day")
+      .eq("entity_id", tradingDayId);
+    if (countError) throw countError;
+    if ((count ?? 0) > 0) continue;
+
+    const safePhase = parsed.phaseKey.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const objectPath = `${workspaceId}/trading/${account.id}/${safePhase}/${parsed.day}/migrated-${Date.now()}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("jarvis-attachments")
+      .upload(objectPath, localBlob, { contentType: "image/jpeg", upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { error: attachmentError } = await supabase.from("jarvis_attachments").insert({
+      workspace_id: workspaceId,
+      domain: "TRADING",
+      entity_type: "trading_day",
+      entity_id: tradingDayId,
+      bucket: "jarvis-attachments",
+      object_path: objectPath,
+      file_name: `trade-${parsed.day}.jpg`,
+      mime_type: "image/jpeg",
+      size_bytes: localBlob.size,
+      metadata: {
+        clientEntryKey: key,
+        clientId: parsed.clientId,
+        tradeDate: parsed.day,
+        migratedFrom: "indexeddb",
+      },
+    });
+    if (attachmentError) throw attachmentError;
+  }
 }
 
 export default function TradingAccountManager({
@@ -633,6 +689,7 @@ export default function TradingAccountManager({
         const remote = await loadCloudSnapshot(supabase, id);
         if (cancelled) return;
 
+        let activeSnapshot: LocalSnapshot | null = remote;
         if (remote) {
           setAccounts(remote.accounts);
           setSelectedId(remote.selectedId);
@@ -642,11 +699,16 @@ export default function TradingAccountManager({
           await pushCloudSnapshot(supabase, id, local.accounts, local.journal, local.selectedId);
           if (cancelled) return;
           const migrated = await loadCloudSnapshot(supabase, id);
+          activeSnapshot = migrated ?? local;
           if (migrated) {
             setAccounts(migrated.accounts);
             setSelectedId(migrated.selectedId);
             setJournal(migrated.journal);
           }
+        }
+
+        if (activeSnapshot) {
+          await migrateLocalImagesToCloud(supabase, id, activeSnapshot);
         }
 
         if (cancelled) return;
