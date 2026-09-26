@@ -706,6 +706,10 @@ export default function TradingAccountManager({
   const [selectedDay, setSelectedDay] = useState(() => dateKey(new Date()));
   const [draftPnl, setDraftPnl] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
+  const [draftFeeling, setDraftFeeling] = useState("");
+  const [draftTradeManagement, setDraftTradeManagement] = useState("");
+  const [draftErrors, setDraftErrors] = useState("");
+  const [draftRating, setDraftRating] = useState<number | null>(null);
   const [imageItems, setImageItems] = useState<TradeImageItem[]>([]);
   const [activeImage, setActiveImage] = useState<TradeImageItem | null>(null);
   const [imageRevision, setImageRevision] = useState(0);
@@ -867,8 +871,22 @@ export default function TradingAccountManager({
     [phaseEntries],
   );
   const tradingDays = useMemo(
-    () => phaseEntries.filter(([, entry]) => entry.pnl !== null || entry.notes.trim() || entry.hasImage).length,
+    () => phaseEntries.filter(([, entry]) =>
+      entry.pnl !== null ||
+      entry.notes.trim() ||
+      entry.hasImage ||
+      Boolean(entry.feeling?.trim()) ||
+      Boolean(entry.tradeManagement?.trim()) ||
+      Boolean(entry.errors?.trim()) ||
+      entry.sessionRating != null
+    ).length,
     [phaseEntries],
+  );
+  const qualifyingDays = useMemo(
+    () => account?.stage === "FUNDED"
+      ? phaseEntries.filter(([, entry]) => typeof entry.pnl === "number" && entry.pnl >= account.minimumQualifyingPnl).length
+      : tradingDays,
+    [account?.minimumQualifyingPnl, account?.stage, phaseEntries, tradingDays],
   );
 
   const targetBalance = account
@@ -880,7 +898,7 @@ export default function TradingAccountManager({
     ? clamp(((account.currentBalance - account.lossLimit) / (targetBalance - account.lossLimit)) * 100)
     : 0;
   const dayProgress = account?.stage === "FUNDED" && account.requiredTradingDays > 0
-    ? clamp((tradingDays / account.requiredTradingDays) * 100)
+    ? clamp((qualifyingDays / account.requiredTradingDays) * 100)
     : 0;
   const remaining = account ? Math.max(0, targetBalance - account.currentBalance) : 0;
 
@@ -892,17 +910,22 @@ export default function TradingAccountManager({
     onAccountChange?.({
       ...account,
       tradingDays,
+      qualifyingDays,
       totalPnl,
       remaining,
       targetBalance,
     });
-  }, [account, onAccountChange, remaining, targetBalance, totalPnl, tradingDays]);
+  }, [account, onAccountChange, qualifyingDays, remaining, targetBalance, totalPnl, tradingDays]);
 
   useEffect(() => {
     if (!account) return;
     const current = journal[entryKey(account, selectedDay)];
     setDraftPnl(current?.pnl === null || current?.pnl === undefined ? "" : String(current.pnl));
     setDraftNotes(current?.notes ?? "");
+    setDraftFeeling(current?.feeling ?? "");
+    setDraftTradeManagement(current?.tradeManagement ?? "");
+    setDraftErrors(current?.errors ?? "");
+    setDraftRating(current?.sessionRating ?? null);
   }, [account, journal, selectedDay]);
 
   useEffect(() => {
@@ -1025,6 +1048,9 @@ export default function TradingAccountManager({
       stage: "EVAL",
       label: /FUNDED/i.test(account.label) ? account.label.replace(/FUNDED/gi, "EVAL") : account.label,
       currentBalance: account.startBalance,
+      requiredTradingDays: 5,
+      minimumQualifyingPnl: 150,
+      fundedPayoutCount: 0,
       cycle: account.cycle + 1,
     });
     setSelectedDay(dateKey(new Date()));
@@ -1039,6 +1065,9 @@ export default function TradingAccountManager({
       stage: "FUNDED",
       label: /EVAL/i.test(account.label) ? account.label.replace(/EVAL/gi, "FUNDED") : account.label,
       currentBalance: account.startBalance,
+      requiredTradingDays: 5,
+      minimumQualifyingPnl: 150,
+      fundedPayoutCount: 0,
     });
     setSelectedDay(dateKey(new Date()));
     setMonthCursor(new Date());
@@ -1056,6 +1085,10 @@ export default function TradingAccountManager({
       [key]: {
         pnl: nextPnl,
         notes: draftNotes,
+        feeling: draftFeeling,
+        tradeManagement: draftTradeManagement,
+        errors: draftErrors,
+        sessionRating: draftRating,
         hasImage: previous.hasImage,
         imageCount: previous.imageCount ?? (previous.hasImage ? 1 : 0),
       },
@@ -1444,7 +1477,7 @@ export default function TradingAccountManager({
 
         {account.stage === "FUNDED" ? (
           <div className="funded-days-progress">
-            <div><span>PAYOUT / QUALIFYING DAYS</span><b>{tradingDays} / {account.requiredTradingDays}</b></div>
+            <div><span>QUALIFYING DAYS · {money(account.minimumQualifyingPnl)} MIN</span><b>{qualifyingDays} / {account.requiredTradingDays}</b></div>
             <div className="funded-days-track"><span style={{ width: `${dayProgress}%` }} /></div>
           </div>
         ) : null}
@@ -1538,7 +1571,9 @@ export default function TradingAccountManager({
               ) : (
                 <>
                   <label><span>BUFFER REQUIRED</span><input inputMode="decimal" value={account.fundedBuffer} onChange={(event) => patchAccount({ fundedBuffer: parseNumber(event.target.value, account.fundedBuffer) })} /></label>
-                  <label><span>REQUIRED DAYS</span><input inputMode="numeric" value={account.requiredTradingDays} onChange={(event) => patchAccount({ requiredTradingDays: Math.max(1, Math.round(parseNumber(event.target.value, account.requiredTradingDays))) })} /></label>
+                  <label><span>REQUIRED DAYS</span><input type="number" min={1} max={99} step={1} value={account.requiredTradingDays} onFocus={(event) => event.currentTarget.select()} onChange={(event) => patchAccount({ requiredTradingDays: Math.max(1, Math.min(99, Math.round(parseNumber(event.target.value, account.requiredTradingDays)))) })} /></label>
+                  <label><span>MIN P&L / QUALIFYING DAY</span><input type="number" min={0} step={25} value={account.minimumQualifyingPnl} onFocus={(event) => event.currentTarget.select()} onChange={(event) => patchAccount({ minimumQualifyingPnl: Math.max(0, parseNumber(event.target.value, account.minimumQualifyingPnl)) })} /></label>
+                  <label><span>CURRENT CYCLE PAYOUTS</span><input type="number" min={0} max={99} step={1} value={account.fundedPayoutCount} onFocus={(event) => event.currentTarget.select()} onChange={(event) => patchAccount({ fundedPayoutCount: Math.max(0, Math.min(99, Math.round(parseNumber(event.target.value, account.fundedPayoutCount)))) })} /></label>
                 </>
               )}
             </div>
@@ -1563,10 +1598,41 @@ export default function TradingAccountManager({
                 onChange={(event) => setDraftPnl(event.target.value)}
               />
             </label>
+            <div className="journal-review-grid">
+              <label>
+                <span>1. HOW DID YOU FEEL TRADING TODAY?</span>
+                <textarea rows={2} placeholder="Calm, rushed, patient, distracted..." value={draftFeeling} onChange={(event) => setDraftFeeling(event.target.value)} />
+              </label>
+              <label>
+                <span>2. TRADE MANAGEMENT?</span>
+                <textarea rows={2} placeholder="How did you manage entries, stops, targets, size, and patience?" value={draftTradeManagement} onChange={(event) => setDraftTradeManagement(event.target.value)} />
+              </label>
+              <label>
+                <span>3. ANY ERRORS?</span>
+                <textarea rows={2} placeholder="Execution errors, rule breaks, hesitation, over-management..." value={draftErrors} onChange={(event) => setDraftErrors(event.target.value)} />
+              </label>
+              <div className="journal-rating">
+                <span>4. RATE OVERALL TRADING SESSION</span>
+                <div className="journal-stars" role="radiogroup" aria-label="Rate overall trading session from 1 to 5">
+                  {[1,2,3,4,5].map((star) => (
+                    <button
+                      type="button"
+                      key={star}
+                      className={draftRating != null && star <= draftRating ? "is-filled" : ""}
+                      aria-label={`${star} star${star === 1 ? "" : "s"}`}
+                      aria-pressed={draftRating === star}
+                      onClick={() => setDraftRating(star)}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
             <label className="journal-notes">
-              <span>NOTES</span>
+              <span>ADDITIONAL NOTES</span>
               <textarea
-                placeholder="Setup, liquidity sweep, entry reason, execution mistake, lesson..."
+                placeholder="Setup, liquidity sweep, entry reason, lesson..."
                 value={draftNotes}
                 onChange={(event) => setDraftNotes(event.target.value)}
               />
