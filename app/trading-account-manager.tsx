@@ -22,6 +22,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
+import { writeObsidianNote } from "../lib/obsidian-bridge-client";
 
 type AccountStage = "EVAL" | "FUNDED";
 type CloudStatus = "LOCAL" | "CONNECTING" | "SYNCING" | "SYNCED" | "ERROR";
@@ -178,6 +179,97 @@ function parseNumber(value: string, fallback: number) {
   if (value.trim() === "") return 0;
   const parsed = Number(value.replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const DWIGHT_RULES = [
+  "Mark out 4H and 1D zones",
+  "Identify trend",
+  "Wait for price to hit HTF zone",
+  "Wait for someone to lose",
+  "Wait for confirmation back in my direction",
+  "Look for entry",
+] as const;
+
+function safeObsidianFilePart(value: string) {
+  return value.replace(/[<>:"/\\|?*]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "Trading Account";
+}
+
+function tradingRulesForDay(day: string) {
+  try {
+    const raw = window.localStorage.getItem("jarvis-trading-rules-v1");
+    if (!raw) return DWIGHT_RULES.map(() => false);
+    const parsed = JSON.parse(raw) as Record<string, boolean[]>;
+    const saved = Array.isArray(parsed?.[day]) ? parsed[day] : [];
+    return DWIGHT_RULES.map((_, index) => saved[index] === true);
+  } catch {
+    return DWIGHT_RULES.map(() => false);
+  }
+}
+
+async function exportTradingDayToObsidian(account: TradingAccount, day: string, entry: JournalEntry) {
+  if (typeof window === "undefined") return;
+  const controller = window.localStorage.getItem("jarvis-observer-controller-v1");
+  if (!controller) return;
+
+  const rules = tradingRulesForDay(day);
+  const imageCount = Math.max(0, entry.imageCount ?? (entry.hasImage ? 1 : 0));
+  const rating = entry.sessionRating == null ? "Not rated" : `${"★".repeat(entry.sessionRating)}${"☆".repeat(5 - entry.sessionRating)} (${entry.sessionRating}/5)`;
+  const pnl = entry.pnl == null ? "Not recorded" : pnlMoney(entry.pnl);
+  const path = `02 Trading/Daily/${day} - ${safeObsidianFilePart(account.label)}.md`;
+
+  const markdown = [
+    "---",
+    `date: ${day}`,
+    "domain: trading",
+    `firm: "${account.firm.replace(/"/g, "'")}"`,
+    `account: "${account.label.replace(/"/g, "'")}"`,
+    `stage: ${account.stage}`,
+    `cycle: ${account.cycle}`,
+    `pnl: ${entry.pnl ?? "null"}`,
+    `rating: ${entry.sessionRating ?? "null"}`,
+    `screenshots: ${imageCount}`,
+    `review_complete: ${imageCount > 0 ? "true" : "false"}`,
+    "---",
+    "",
+    `# Trading Review — ${day}`,
+    "",
+    "## Session",
+    `- **Firm:** ${account.firm}`,
+    `- **Account:** ${account.label}`,
+    `- **Stage:** ${account.stage} · Cycle ${account.cycle}`,
+    `- **Day P&L:** ${pnl}`,
+    `- **Session rating:** ${rating}`,
+    `- **Trade pictures:** ${imageCount}`,
+    "",
+    "## Review",
+    "",
+    "### 1. How did you feel trading today?",
+    entry.feeling?.trim() || "_Not answered yet._",
+    "",
+    "### 2. Trade management?",
+    entry.tradeManagement?.trim() || "_Not answered yet._",
+    "",
+    "### 3. Any errors?",
+    entry.errors?.trim() || "_Not answered yet._",
+    "",
+    "### 4. Rate overall trading session",
+    rating,
+    "",
+    "## Dwight's Rules",
+    ...DWIGHT_RULES.map((rule, index) => `- [${rules[index] ? "x" : " "}] ${rule}`),
+    "",
+    "## Additional Notes",
+    entry.notes?.trim() || "_No additional notes._",
+    "",
+    "> Source: JARVIS Trading Calendar · Supabase remains the structured source of truth.",
+    "",
+  ].join("\n");
+
+  try {
+    await writeObsidianNote(path, markdown);
+  } catch {
+    // Trading save must never fail because the local knowledge bridge is offline.
+  }
 }
 
 function readLocalSnapshot(): LocalSnapshot {
@@ -1088,19 +1180,23 @@ export default function TradingAccountManager({
     const nextPnl = draftPnl.trim() === "" ? null : parseNumber(draftPnl, previous.pnl ?? 0);
     const delta = (nextPnl ?? 0) - (previous.pnl ?? 0);
 
+    const nextEntry: JournalEntry = {
+      pnl: nextPnl,
+      notes: draftNotes,
+      feeling: draftFeeling,
+      tradeManagement: draftTradeManagement,
+      errors: draftErrors,
+      sessionRating: draftRating,
+      hasImage: previous.hasImage,
+      imageCount: previous.imageCount ?? (previous.hasImage ? 1 : 0),
+    };
+
     setJournal((current) => ({
       ...current,
-      [key]: {
-        pnl: nextPnl,
-        notes: draftNotes,
-        feeling: draftFeeling,
-        tradeManagement: draftTradeManagement,
-        errors: draftErrors,
-        sessionRating: draftRating,
-        hasImage: previous.hasImage,
-        imageCount: previous.imageCount ?? (previous.hasImage ? 1 : 0),
-      },
+      [key]: nextEntry,
     }));
+
+    void exportTradingDayToObsidian(account, selectedDay, nextEntry);
 
     if (delta !== 0) {
       patchAccount({ currentBalance: account.currentBalance + delta });
@@ -1200,6 +1296,11 @@ export default function TradingAccountManager({
             ...current,
             [key]: { ...(current[key] ?? previous), hasImage: actualCount > 0, imageCount: actualCount },
           }));
+          void exportTradingDayToObsidian(account, selectedDay, {
+            ...(nextJournal[key] ?? previous),
+            hasImage: actualCount > 0,
+            imageCount: actualCount,
+          });
         }
 
         setCloudStatus("SYNCED");
@@ -1261,6 +1362,7 @@ export default function TradingAccountManager({
         [key]: { ...previous, hasImage: remainingCount > 0, imageCount: remainingCount },
       };
       setJournal(nextJournal);
+      void exportTradingDayToObsidian(account, selectedDay, nextJournal[key]);
       if (activeImage?.id === item.id) setActiveImage(null);
       setImageRevision((value) => value + 1);
     } catch (error) {
