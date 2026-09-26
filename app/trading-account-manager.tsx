@@ -663,6 +663,10 @@ async function migrateLocalImagesToCloud(
         .update({ screenshot_count: finalCount })
         .eq("workspace_id", workspaceId)
         .eq("id", tradingDayId);
+
+      for (const localImage of localImages) {
+        await removeImage(localImage.key);
+      }
     }
   }
 }
@@ -1160,6 +1164,9 @@ export default function TradingAccountManager({
 
       if (item.source === "CLOUD" && cloudReady && workspaceId && user && item.attachmentId) {
         const supabase = getSupabaseBrowserClient();
+        const staleLocalImages = await listLocalImages(imageKey(account, selectedDay));
+        for (const localImage of staleLocalImages) await removeImage(localImage.key);
+
         if (item.objectPath) {
           const { error: removeError } = await supabase.storage.from("jarvis-attachments").remove([item.objectPath]);
           if (removeError) throw removeError;
