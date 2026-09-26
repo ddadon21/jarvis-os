@@ -392,9 +392,15 @@ export default function JarvisCloudBridge() {
       if (!readyRef.current || !workspaceId || syncingRef.current) return;
 
       const changed: Array<Record<string, unknown>> = [];
+      const dynamicKeys = new Set(discoverBackupLocalKeys());
+      for (const stateKey of Object.keys(lastRawRef.current)) {
+        const localKey = localKeyFromSnapshot(stateKey);
+        if (localKey && shouldBackupLocalKey(localKey)) dynamicKeys.add(localKey);
+      }
+
       const localPairs = [
         ...CLOUD_KEYS.map((key) => ({ localKey: key, stateKey: key, source: "JARVIS CLIENT" })),
-        ...discoverBackupLocalKeys().map((localKey) => ({
+        ...[...dynamicKeys].map((localKey) => ({
           localKey,
           stateKey: snapshotKeyForLocal(localKey),
           source: "JARVIS LOCAL SAFETY BACKUP",
