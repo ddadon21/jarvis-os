@@ -19,9 +19,10 @@ export async function POST(request: Request) {
     action?: LocalAgentObsidianAction;
     path?: string | null;
     content?: string | null;
+    query?: string | null;
   } | null;
 
-  if (!body?.action || !["LIST", "READ", "WRITE"].includes(body.action)) {
+  if (!body?.action || !["LIST", "READ", "WRITE", "SEARCH"].includes(body.action)) {
     return Response.json({ ok: false, error: "Invalid action" }, { status: 400 });
   }
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
     action: body.action,
     path: body.path,
     content: body.content,
+    query: body.query,
   });
 
   if (!command) return Response.json({ ok: false, error: "Local Agent is not paired or command is invalid." }, { status: 401 });
