@@ -84,7 +84,7 @@ type TradingGoalPayoutSummary = {
   connected?: boolean;
   lifetimeCount?: number;
   nextPayoutNumber?: number;
-  latest?: { approvedAt: string; traderNetAmount: number } | null;
+  latest?: { approvedAt: string | null; payoutAmount?: number; traderNetAmount: number } | null;
 };
 
 const HABIT_KEY = "jarvis-habit-history-v1";
@@ -375,7 +375,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
       const fifthPayoutProgress = Math.min(100, (payoutCount / 5) * 100);
       const latestPayout = tradingPayouts?.latest;
       const latestPayoutDetail = latestPayout
-        ? `Last payout ${dollars(latestPayout.traderNetAmount)} · ${new Date(latestPayout.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`
+        ? `Last payout ${dollars(latestPayout.payoutAmount ?? latestPayout.traderNetAmount)}${latestPayout.approvedAt ? ` · ${new Date(latestPayout.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}.`
         : "Waiting for the latest payout record.";
 
       const accountGoal: GoalItem = tradingAccount
