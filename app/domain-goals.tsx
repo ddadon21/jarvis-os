@@ -497,6 +497,21 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     ];
   }, [domain, events, finance, habits, summary, todayKey, tradingAccount, tradingPayouts, tradingRuntime]);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("jarvis-goal-readiness", {
+      detail: {
+        domain,
+        goals: goals.map(({ name, status, detail, progress, active }) => ({
+          name,
+          status,
+          detail,
+          progress,
+          active: Boolean(active),
+        })),
+      },
+    }));
+  }, [domain, goals]);
+
   function toggleHabit(id: HabitId) {
     const today = dateKey();
     setHabits((current) => {
