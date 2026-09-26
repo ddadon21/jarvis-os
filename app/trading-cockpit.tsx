@@ -583,8 +583,8 @@ export default function TradingCockpit() {
             </div>
           </div>
           <div className="payout-total">
-            <span>{payoutRange === "ALL" ? "RECORDED PAYOUT AMOUNTS" : `${payoutRange} PAYOUT AMOUNTS`}</span>
-            <strong>{payoutSummary?.connected ? money(payoutSummary.totalAmount ?? payoutSummary.totalGross ?? payoutSummary.totalNet) : "—"}</strong>
+            <span>{selectedAccount?.stage === "FUNDED" ? "CURRENT FUNDED CYCLE" : payoutRange === "ALL" ? "RECORDED LIFETIME PAYOUT AMOUNTS" : `${payoutRange} LIFETIME PAYOUT AMOUNTS`}</span>
+            <strong>{selectedAccount?.stage === "FUNDED" ? `${selectedAccount.fundedPayoutCount} PAYOUT${selectedAccount.fundedPayoutCount === 1 ? "" : "S"}` : payoutSummary?.connected ? money(payoutSummary.totalAmount ?? payoutSummary.totalGross ?? payoutSummary.totalNet) : "—"}</strong>
             <small>
               {selectedAccount?.stage === "FUNDED"
                 ? `CURRENT FUNDED CYCLE: ${selectedAccount.fundedPayoutCount} PAYOUTS · LIFETIME RECORD: ${payoutSummary?.lifetimeCount ?? payoutSummary?.count ?? 0}`
@@ -597,6 +597,7 @@ export default function TradingCockpit() {
             ) : null}
           </div>
           <div className="trading-lines">
+            <Line label="Lifetime recorded amount" value={payoutSummary?.connected ? money(payoutSummary.totalAmount ?? payoutSummary.totalGross ?? payoutSummary.totalNet) : "—"} />
             <Line label="Source" value={payoutSummary?.source ?? "PENDING"} />
             <Line label={selectedAccount?.stage === "FUNDED" ? "Current cycle payouts" : "Lifetime payouts"} value={selectedAccount?.stage === "FUNDED" ? String(selectedAccount.fundedPayoutCount) : String(payoutSummary?.lifetimeCount ?? payoutSummary?.count ?? 0)} />
             <Line label="Latest lifetime payout" value={payoutSummary?.latest ? money(payoutSummary.latest.payoutAmount ?? payoutSummary.latest.traderNetAmount) : "—"} />
