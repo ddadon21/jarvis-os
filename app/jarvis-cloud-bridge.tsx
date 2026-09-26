@@ -14,6 +14,16 @@ const CLOUD_KEYS = [
 
 type CloudKey = typeof CLOUD_KEYS[number];
 
+const RUNTIME_KEYS = {
+  system: "runtime.system-status.v1",
+  finance: "runtime.finance.v1",
+  workforce: "runtime.workforce.v1",
+  trading: "runtime.trading.v1",
+  pulse: "runtime.pulse.v1",
+} as const;
+
+const ALL_RUNTIME_KEYS = Object.values(RUNTIME_KEYS);
+
 type RuntimeEvent = {
   id?: string;
   type?: string;
@@ -67,6 +77,16 @@ function deletedPayload() {
   return { format: "localStorage", raw: null, deleted: true };
 }
 
+function runtimePayload(data: unknown) {
+  return { format: "runtime-json", data };
+}
+
+function payloadRuntimeData(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as { format?: unknown; data?: unknown };
+  return candidate.format === "runtime-json" ? candidate.data ?? null : null;
+}
+
 function payloadRaw(payload: unknown) {
   if (!payload || typeof payload !== "object") return null;
   const raw = (payload as { raw?: unknown }).raw;
@@ -95,6 +115,7 @@ export default function JarvisCloudBridge() {
   const lastRawRef = useRef<Record<string, string | null>>({});
   const syncingRef = useRef(false);
   const observerSeenRef = useRef<string | null>(null);
+  const runtimeFingerprintsRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -131,7 +152,7 @@ export default function JarvisCloudBridge() {
         .from("jarvis_state_snapshots")
         .select("state_key,payload,updated_at")
         .eq("workspace_id", workspaceId)
-        .in("state_key", [...CLOUD_KEYS]);
+        .in("state_key", [...CLOUD_KEYS, ...ALL_RUNTIME_KEYS]);
 
       if (!active) return;
       if (remoteError) {
@@ -183,6 +204,55 @@ export default function JarvisCloudBridge() {
           setStatus("ERROR");
           return;
         }
+      }
+
+      try {
+        const runtimeByKey = new Map<string, unknown>();
+        for (const key of ALL_RUNTIME_KEYS) {
+          const row = remote.get(key);
+          if (!row) continue;
+          const data = payloadRuntimeData(row.payload);
+          if (data != null) runtimeByKey.set(key, data);
+        }
+
+        const { data: eventRows } = await supabase
+          .from("jarvis_events")
+          .select("id,domain,event_type,source,importance,summary,payload,occurred_at,created_at")
+          .eq("workspace_id", workspaceId)
+          .order("occurred_at", { ascending: false })
+          .limit(75);
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (accessToken && runtimeByKey.size) {
+          await fetch("/api/system/restore", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              finance: runtimeByKey.get(RUNTIME_KEYS.finance) ?? null,
+              workforce: runtimeByKey.get(RUNTIME_KEYS.workforce) ?? null,
+              trading: runtimeByKey.get(RUNTIME_KEYS.trading) ?? null,
+              pulse: runtimeByKey.get(RUNTIME_KEYS.pulse) ?? null,
+              events: (eventRows ?? []).map((row) => ({
+                id: row.id,
+                type: row.event_type,
+                domain: row.domain,
+                source: row.source,
+                importance: row.importance,
+                occurredAt: row.occurred_at,
+                receivedAt: row.payload && typeof row.payload === "object" && "receivedAt" in row.payload
+                  ? (row.payload as { receivedAt?: string }).receivedAt ?? row.created_at
+                  : row.created_at,
+                summary: row.summary,
+              })),
+            }),
+          });
+        }
+      } catch {
+        // Cloud snapshots remain safe even if the temporary runtime cache cannot be restored immediately.
       }
 
       readyRef.current = true;
@@ -260,6 +330,31 @@ export default function JarvisCloudBridge() {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
 
+    async function saveRuntimeSnapshot(stateKey: string, data: unknown) {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId || data == null) return;
+
+      let fingerprint = "";
+      try {
+        fingerprint = JSON.stringify(data);
+      } catch {
+        return;
+      }
+      if (runtimeFingerprintsRef.current[stateKey] === fingerprint) return;
+      runtimeFingerprintsRef.current[stateKey] = fingerprint;
+
+      await supabase
+        .from("jarvis_state_snapshots")
+        .upsert({
+          workspace_id: workspaceId,
+          state_key: stateKey,
+          version: 1,
+          payload: runtimePayload(data),
+          source: "JARVIS RUNTIME BRIDGE",
+          client_updated_at: new Date().toISOString(),
+        }, { onConflict: "workspace_id,state_key" });
+    }
+
     async function syncRuntimeEvents() {
       const workspaceId = workspaceRef.current;
       if (!readyRef.current || !workspaceId) return;
@@ -267,7 +362,17 @@ export default function JarvisCloudBridge() {
       try {
         const response = await fetch("/api/system/status", { cache: "no-store" });
         if (!response.ok) return;
-        const body = (await response.json()) as { events?: RuntimeEvent[] };
+        const body = (await response.json()) as {
+          events?: RuntimeEvent[];
+          workforce?: unknown;
+          backgroundResearch?: { latestPulse?: unknown };
+          [key: string]: unknown;
+        };
+
+        await saveRuntimeSnapshot(RUNTIME_KEYS.system, body);
+        if (body.workforce) await saveRuntimeSnapshot(RUNTIME_KEYS.workforce, body.workforce);
+        if (body.backgroundResearch?.latestPulse) await saveRuntimeSnapshot(RUNTIME_KEYS.pulse, body.backgroundResearch.latestPulse);
+
         const rows = (body.events ?? [])
           .filter((event) => event.id && event.type && event.summary)
           .map((event) => ({
@@ -302,6 +407,42 @@ export default function JarvisCloudBridge() {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
 
+    async function syncFinanceRuntime() {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId) return;
+      try {
+        const response = await fetch("/api/finance/state", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { state?: unknown };
+        if (!body.state) return;
+
+        const fingerprint = JSON.stringify(body.state);
+        if (runtimeFingerprintsRef.current[RUNTIME_KEYS.finance] === fingerprint) return;
+        runtimeFingerprintsRef.current[RUNTIME_KEYS.finance] = fingerprint;
+
+        await supabase
+          .from("jarvis_state_snapshots")
+          .upsert({
+            workspace_id: workspaceId,
+            state_key: RUNTIME_KEYS.finance,
+            version: 1,
+            payload: runtimePayload(body.state),
+            source: "JARVIS FINANCE RUNTIME",
+            client_updated_at: new Date().toISOString(),
+          }, { onConflict: "workspace_id,state_key" });
+      } catch {
+        // Retry on the next interval.
+      }
+    }
+
+    void syncFinanceRuntime();
+    const timer = window.setInterval(() => void syncFinanceRuntime(), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
     async function syncObserverSnapshot() {
       const workspaceId = workspaceRef.current;
       if (!readyRef.current || !workspaceId) return;
@@ -311,8 +452,25 @@ export default function JarvisCloudBridge() {
         if (!response.ok) return;
         const body = (await response.json()) as { state?: TradingState };
         const state = body.state;
-        const observer = state?.observer;
-        const observedAt = observer?.observedAt || state?.account?.lastObservedAt || null;
+        if (!state) return;
+
+        const tradingFingerprint = JSON.stringify(state);
+        if (runtimeFingerprintsRef.current[RUNTIME_KEYS.trading] !== tradingFingerprint) {
+          runtimeFingerprintsRef.current[RUNTIME_KEYS.trading] = tradingFingerprint;
+          await supabase
+            .from("jarvis_state_snapshots")
+            .upsert({
+              workspace_id: workspaceId,
+              state_key: RUNTIME_KEYS.trading,
+              version: 1,
+              payload: runtimePayload(state),
+              source: "JARVIS TRADING RUNTIME",
+              client_updated_at: new Date().toISOString(),
+            }, { onConflict: "workspace_id,state_key" });
+        }
+
+        const observer = state.observer;
+        const observedAt = observer?.observedAt || state.account?.lastObservedAt || null;
         if (!observer || !observedAt || observedAt === observerSeenRef.current) return;
 
         observerSeenRef.current = observedAt;
