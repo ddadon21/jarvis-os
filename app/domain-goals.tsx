@@ -150,12 +150,14 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
     const dayProgress = account.requiredTradingDays > 0
       ? Math.max(0, Math.min(100, (qualifyingDays / account.requiredTradingDays) * 100))
       : 0;
-    const reviewedDays = entries
-      .filter(([, entry]) => Math.max(0, entry.imageCount ?? (entry.hasImage ? 1 : 0)) > 0)
+    const reviewedDays = Object.entries(journal)
+      .filter(([, entry]) => Math.max(entry.imageCount ?? 0, entry.hasImage ? 1 : 0) > 0)
       .map(([key]) => key.slice(-10))
       .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day));
-    const todayEntry = journal[`${prefix}${dateKey()}`];
-    const todayImageCount = Math.max(0, todayEntry?.imageCount ?? (todayEntry?.hasImage ? 1 : 0));
+    const today = dateKey();
+    const todayImageCount = Object.entries(journal)
+      .filter(([key]) => key.endsWith(`:${today}`))
+      .reduce((total, [, entry]) => total + Math.max(entry.imageCount ?? 0, entry.hasImage ? 1 : 0), 0);
 
     return { account, tradingDays, qualifyingDays, totalPnl, targetBalance, remaining, progress, dayProgress, todayImageCount, reviewedDays, trackedDays };
   } catch {
