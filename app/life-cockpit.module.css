@@ -209,3 +209,27 @@
   .agendaRow { flex-wrap: wrap; }
 }
 @media(prefers-reduced-motion:reduce) { .bar i { transition: none; } }
+
+
+.orderActions{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.orderActions button{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+}
+.priority{
+  position:relative;
+}
+.priorityRemove{
+  min-width:28px!important;
+  width:28px;
+  padding:0!important;
+  display:grid!important;
+  place-items:center;
+  border-color:rgba(183,31,38,.28)!important;
+  color:#d47b80!important;
+}
