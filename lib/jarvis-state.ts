@@ -99,6 +99,7 @@ export function saveJarvisState(state: JarvisClientState): void {
   };
 
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+  window.dispatchEvent(new Event("jarvis-state-updated"));
 }
 
 export function mergeMemories(current: JarvisMemory[], updates: Array<{ domain?: string; fact?: string }>): JarvisMemory[] {
