@@ -1115,7 +1115,7 @@ export default function TradingAccountManager({
       setCloudMessage("Owner created. Loading permanent memory…");
     } else {
       setCloudStatus("LOCAL");
-      setCloudMessage("Owner created. Confirm the email once, then return here and press SIGN IN.");
+      setCloudMessage("Owner created. Confirm the email once, then return here and press SIGN IN. If confirmation opens localhost, the email can still be confirmed.");
     }
   }
 
