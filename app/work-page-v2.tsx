@@ -5,7 +5,6 @@ import {
   Bot,
   BrainCircuit,
   BriefcaseBusiness,
-  Check,
   LifeBuoy,
   Mic,
   Radar,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
+import DwightTradingRules from "./dwight-trading-rules";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
 import LifeCockpit, { LifeProgress } from "./life-cockpit";
@@ -209,19 +209,8 @@ export default function WorkV2() {
             </div>
           </Panel>
           {domain === "TRADING" ? (
-            <Panel title="DWIGHT'S RULES" corner="PROCESS">
-              <div className="dwight-rules">
-                {[
-                  "Mark out 4H and 1D zones",
-                  "Identify trend",
-                  "Wait for price to hit HTF zone",
-                  "Wait for someone to lose",
-                  "Wait for confirmation back in my direction",
-                  "Look for entry",
-                ].map((rule, index) => (
-                  <div key={rule}><span className="dwight-rule-check"><Check size={10} /></span><span><b>{index + 1}.</b> {rule}</span></div>
-                ))}
-              </div>
+            <Panel title="RULES" corner="DWIGHT">
+              <DwightTradingRules />
             </Panel>
           ) : null}
         </aside>
