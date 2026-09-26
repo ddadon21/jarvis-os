@@ -57,7 +57,7 @@ export default function DwightTradingRules() {
 
   return (
     <div className="dwight-rules">
-      <div className="dwight-rules-status"><span>DWIGHT / PROCESS</span><b>{ready ? complete : 0}/{RULES.length}</b></div>
+      <div className="dwight-rules-count" aria-label={`${ready ? complete : 0} of ${RULES.length} rules checked`}>{ready ? complete : 0}/{RULES.length}</div>
       {RULES.map((rule, index) => (
         <label className="dwight-rule-row" key={rule}>
           <input
