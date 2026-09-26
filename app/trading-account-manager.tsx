@@ -1031,6 +1031,7 @@ export default function TradingAccountManager({
         pnl: nextPnl,
         notes: draftNotes,
         hasImage: previous.hasImage,
+        imageCount: previous.imageCount ?? (previous.hasImage ? 1 : 0),
       },
     }));
 
@@ -1039,17 +1040,21 @@ export default function TradingAccountManager({
     }
   }
 
-  async function uploadImageToCloud(targetAccount: TradingAccount, day: string, blob: Blob, nextJournal: JournalMap) {
+  async function uploadImageToCloud(
+    targetAccount: TradingAccount,
+    day: string,
+    blob: Blob,
+    fileName: string,
+    imageId: string,
+  ) {
     if (!cloudReady || !workspaceId || !user) return;
     const supabase = getSupabaseBrowserClient();
-
-    await pushCloudSnapshot(supabase, workspaceId, accounts, nextJournal, selectedId);
     const dayKey = entryKey(targetAccount, day);
     const tradingDayId = await getCloudTradingDay(supabase, workspaceId, dayKey);
-    if (!tradingDayId) return;
+    if (!tradingDayId) throw new Error("Trading day is not ready for image upload.");
 
     const safePhase = phaseKey(targetAccount).replace(/[^a-zA-Z0-9_-]/g, "_");
-    const objectPath = `${workspaceId}/trading/${targetAccount.id}/${safePhase}/${day}/trade-${Date.now()}.jpg`;
+    const objectPath = `${workspaceId}/trading/${targetAccount.id}/${safePhase}/${day}/trade-${imageId}.jpg`;
     const { error: uploadError } = await supabase.storage
       .from("jarvis-attachments")
       .upload(objectPath, blob, { contentType: "image/jpeg", upsert: false });
@@ -1062,40 +1067,79 @@ export default function TradingAccountManager({
       entity_id: tradingDayId,
       bucket: "jarvis-attachments",
       object_path: objectPath,
-      file_name: `trade-${day}.jpg`,
+      file_name: fileName,
       mime_type: "image/jpeg",
       size_bytes: blob.size,
-      metadata: { clientEntryKey: dayKey, clientId: targetAccount.id, tradeDate: day },
+      metadata: { clientEntryKey: dayKey, clientId: targetAccount.id, tradeDate: day, imageId },
     });
     if (attachmentError) throw attachmentError;
   }
 
   async function onImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []).slice(0, 12);
     event.target.value = "";
-    if (!account || !file) return;
+    if (!account || !files.length) return;
 
     setImageBusy(true);
     try {
-      const compressed = await compressImage(file);
-      const saved = await putImage(imageKey(account, selectedDay), compressed);
-      if (!saved) return;
+      const prepared: Array<{ blob: Blob; localKey: string; fileName: string; imageId: string }> = [];
+      for (const [index, file] of files.entries()) {
+        const compressed = await compressImage(file);
+        const imageId = crypto.randomUUID();
+        const localKey = imageItemKey(account, selectedDay, imageId);
+        const saved = await putImage(localKey, compressed);
+        if (!saved) continue;
+        prepared.push({
+          blob: compressed,
+          localKey,
+          imageId,
+          fileName: file.name?.trim() || `trade-${selectedDay}-${index + 1}.jpg`,
+        });
+      }
+      if (!prepared.length) return;
 
       const key = entryKey(account, selectedDay);
-      const previous = journal[key] ?? { pnl: null, notes: "", hasImage: false };
-      const nextJournal = {
+      const previous = journal[key] ?? { pnl: null, notes: "", hasImage: false, imageCount: 0 };
+      const previousCount = Math.max(0, previous.imageCount ?? (previous.hasImage ? 1 : 0));
+      const nextCount = previousCount + prepared.length;
+      const nextJournal: JournalMap = {
         ...journal,
-        [key]: { ...previous, hasImage: true },
+        [key]: { ...previous, hasImage: true, imageCount: nextCount },
       };
       setJournal(nextJournal);
 
       if (cloudReady && workspaceId && user) {
         setCloudStatus("SYNCING");
-        setCloudMessage("Uploading trade image…");
-        await uploadImageToCloud(account, selectedDay, compressed, nextJournal);
+        setCloudMessage(`Uploading ${prepared.length} trade image${prepared.length === 1 ? "" : "s"}…`);
+        const supabase = getSupabaseBrowserClient();
+        await pushCloudSnapshot(supabase, workspaceId, accounts, nextJournal, selectedId);
+
+        for (const image of prepared) {
+          await uploadImageToCloud(account, selectedDay, image.blob, image.fileName, image.imageId);
+          await removeImage(image.localKey);
+        }
+
+        const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
+        if (tradingDayId) {
+          const { count } = await supabase
+            .from("jarvis_attachments")
+            .select("id", { count: "exact", head: true })
+            .eq("workspace_id", workspaceId)
+            .eq("entity_type", "trading_day")
+            .eq("entity_id", tradingDayId);
+          const actualCount = Math.max(0, count ?? nextCount);
+          await supabase.from("trading_days").update({ screenshot_count: actualCount }).eq("id", tradingDayId);
+          setJournal((current) => ({
+            ...current,
+            [key]: { ...(current[key] ?? previous), hasImage: actualCount > 0, imageCount: actualCount },
+          }));
+        }
+
         setCloudStatus("SYNCED");
         setCloudMessage("Permanent memory synced");
       }
+
+      setImageRevision((value) => value + 1);
     } catch (error) {
       setCloudStatus("ERROR");
       setCloudMessage(error instanceof Error ? error.message : "Image upload failed");
@@ -1104,50 +1148,72 @@ export default function TradingAccountManager({
     }
   }
 
-  async function deleteImage() {
+  async function deleteImage(item: TradeImageItem) {
     if (!account) return;
-    await removeImage(imageKey(account, selectedDay));
     const key = entryKey(account, selectedDay);
-    const previous = journal[key] ?? { pnl: null, notes: "", hasImage: false };
-    const nextJournal = {
-      ...journal,
-      [key]: { ...previous, hasImage: false },
-    };
-    setJournal(nextJournal);
-    setImageUrl(null);
-
-    if (!cloudReady || !workspaceId || !user) return;
+    const previous = journal[key] ?? { pnl: null, notes: "", hasImage: false, imageCount: 0 };
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
-      if (!tradingDayId) return;
+      if (item.localKey) await removeImage(item.localKey);
 
-      const { data: attachments, error: readError } = await supabase
-        .from("jarvis_attachments")
-        .select("id,object_path")
-        .eq("workspace_id", workspaceId)
-        .eq("entity_type", "trading_day")
-        .eq("entity_id", tradingDayId);
-      if (readError) throw readError;
+      let remainingCount = Math.max(0, (previous.imageCount ?? imageItems.length) - 1);
 
-      const paths = (attachments ?? []).map((item) => String(item.object_path));
-      if (paths.length) {
-        const { error: removeError } = await supabase.storage.from("jarvis-attachments").remove(paths);
-        if (removeError) throw removeError;
-      }
+      if (item.source === "CLOUD" && cloudReady && workspaceId && user && item.attachmentId) {
+        const supabase = getSupabaseBrowserClient();
+        if (item.objectPath) {
+          const { error: removeError } = await supabase.storage.from("jarvis-attachments").remove([item.objectPath]);
+          if (removeError) throw removeError;
+        }
 
-      if (attachments?.length) {
-        const ids = attachments.map((item) => String(item.id));
         const { error: deleteError } = await supabase
           .from("jarvis_attachments")
           .delete()
-          .in("id", ids);
+          .eq("workspace_id", workspaceId)
+          .eq("id", item.attachmentId);
         if (deleteError) throw deleteError;
+
+        const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
+        if (tradingDayId) {
+          const { count, error: countError } = await supabase
+            .from("jarvis_attachments")
+            .select("id", { count: "exact", head: true })
+            .eq("workspace_id", workspaceId)
+            .eq("entity_type", "trading_day")
+            .eq("entity_id", tradingDayId);
+          if (countError) throw countError;
+          remainingCount = Math.max(0, count ?? 0);
+          await supabase.from("trading_days").update({ screenshot_count: remainingCount }).eq("id", tradingDayId);
+        }
       }
+
+      const nextJournal: JournalMap = {
+        ...journal,
+        [key]: { ...previous, hasImage: remainingCount > 0, imageCount: remainingCount },
+      };
+      setJournal(nextJournal);
+      if (activeImage?.id === item.id) setActiveImage(null);
+      setImageRevision((value) => value + 1);
     } catch (error) {
       setCloudStatus("ERROR");
-      setCloudMessage(error instanceof Error ? error.message : "Cloud image removal failed");
+      setCloudMessage(error instanceof Error ? error.message : "Image removal failed");
+    }
+  }
+
+  async function downloadTradeImage(item: TradeImageItem) {
+    try {
+      const response = await fetch(item.url);
+      if (!response.ok) throw new Error("Could not fetch image");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = item.fileName || `trade-${selectedDay}.jpg`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 500);
+    } catch {
+      window.open(item.url, "_blank", "noopener,noreferrer");
     }
   }
 
