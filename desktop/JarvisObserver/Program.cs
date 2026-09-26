@@ -51,6 +51,7 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastControlPollUtc = DateTime.MinValue;
     private DateTime _lastPairAttemptUtc = DateTime.MinValue;
     private string? _pairDialogShownForCode;
+    private string? _lastObsidianCommandId;
     private bool _deploymentAccessPrimed;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
@@ -600,6 +601,12 @@ internal sealed class ObserverContext : ApplicationContext
                 Log(new { type = _paused ? "observer.remote_paused" : "observer.remote_watch", at = DateTime.UtcNow });
             }
 
+            if (link.TryGetProperty("obsidianCommand", out var obsidianCommand) &&
+                obsidianCommand.ValueKind == JsonValueKind.Object)
+            {
+                await HandleObsidianCommandAsync(obsidianCommand);
+            }
+
             if (!string.IsNullOrWhiteSpace(_config.PairingCode))
             {
                 _config.PairingCode = null;
@@ -623,6 +630,177 @@ internal sealed class ObserverContext : ApplicationContext
         catch (Exception ex)
         {
             LogRateLimited("control.link.unavailable:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+        }
+    }
+
+    private async Task HandleObsidianCommandAsync(JsonElement commandNode)
+    {
+        var id = commandNode.TryGetProperty("id", out var idNode) ? idNode.GetString() : null;
+        var action = commandNode.TryGetProperty("action", out var actionNode) ? actionNode.GetString() : null;
+        var path = commandNode.TryGetProperty("path", out var pathNode) && pathNode.ValueKind != JsonValueKind.Null
+            ? pathNode.GetString()
+            : null;
+        var content = commandNode.TryGetProperty("content", out var contentNode) && contentNode.ValueKind != JsonValueKind.Null
+            ? contentNode.GetString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(action)) return;
+        if (string.Equals(_lastObsidianCommandId, id, StringComparison.Ordinal)) return;
+        _lastObsidianCommandId = id;
+
+        string? data = null;
+        string? error = null;
+        var ok = false;
+
+        try
+        {
+            var apiKey = GetObsidianApiKey();
+            if (string.IsNullOrWhiteSpace(apiKey))
+                throw new InvalidOperationException("Obsidian API key is not configured on this PC.");
+
+            var baseUrl = ObsidianBaseUrl();
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) || !baseUri.IsLoopback)
+                throw new InvalidOperationException("Obsidian bridge must use a loopback URL.");
+
+            var normalizedPath = NormalizeObsidianVaultPath(path);
+            var endpoint = baseUrl + "/vault/" + EncodeObsidianVaultPath(normalizedPath);
+
+            if (string.Equals(action, "LIST", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(normalizedPath) && !endpoint.EndsWith('/')) endpoint += "/";
+                using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var response = await _http.SendAsync(request, cts.Token);
+                data = await response.Content.ReadAsStringAsync(cts.Token);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Obsidian LIST returned HTTP {(int)response.StatusCode}: {TrimForBridge(data, 800)}");
+                ok = true;
+            }
+            else if (string.Equals(action, "READ", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(normalizedPath))
+                    throw new InvalidOperationException("READ requires a vault path.");
+                using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var response = await _http.SendAsync(request, cts.Token);
+                data = await response.Content.ReadAsStringAsync(cts.Token);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Obsidian READ returned HTTP {(int)response.StatusCode}: {TrimForBridge(data, 800)}");
+                ok = true;
+            }
+            else if (string.Equals(action, "WRITE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(normalizedPath) || !normalizedPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("WRITE requires a Markdown file path.");
+                using var request = new HttpRequestMessage(HttpMethod.Put, endpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                request.Content = new StringContent(content ?? "", Encoding.UTF8, "text/markdown");
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                using var response = await _http.SendAsync(request, cts.Token);
+                data = await response.Content.ReadAsStringAsync(cts.Token);
+                if (!response.IsSuccessStatusCode)
+                    throw new InvalidOperationException($"Obsidian WRITE returned HTTP {(int)response.StatusCode}: {TrimForBridge(data, 800)}");
+                ok = true;
+            }
+            else
+            {
+                throw new InvalidOperationException("Unsupported Obsidian command.");
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            Log(new { type = "obsidian.command.error", at = DateTime.UtcNow, id, action, path, error });
+        }
+
+        await PostObsidianCommandResultAsync(
+            id!,
+            action!.ToUpperInvariant(),
+            ok,
+            path,
+            data,
+            error);
+    }
+
+    private static string NormalizeObsidianVaultPath(string? value)
+    {
+        var path = (value ?? "").Replace('\\', '/').Trim().TrimStart('/');
+        if (path.Length > 500) path = path[..500];
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Any(part => part == ".." || part.Equals(".obsidian", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Unsafe Obsidian vault path.");
+        return string.Join('/', parts);
+    }
+
+    private static string EncodeObsidianVaultPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        return string.Join("/", path.Split('/').Select(Uri.EscapeDataString));
+    }
+
+    private static string TrimForBridge(string? value, int max)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        return value.Length <= max ? value : value[..max];
+    }
+
+    private async Task PostObsidianCommandResultAsync(
+        string id,
+        string action,
+        bool ok,
+        string? path,
+        string? data,
+        string? error)
+    {
+        if (string.IsNullOrWhiteSpace(_config.ServerUrl) ||
+            string.IsNullOrWhiteSpace(_config.DeviceId) ||
+            string.IsNullOrWhiteSpace(_config.DeviceToken)) return;
+
+        var endpoint = _config.ServerUrl.TrimEnd('/') + "/api/obsidian/result";
+        var body = JsonSerializer.Serialize(new
+        {
+            id,
+            action,
+            ok,
+            path,
+            data = data is null ? null : TrimForBridge(data, 200_000),
+            error = error is null ? null : TrimForBridge(error, 2_000),
+            completedAt = DateTime.UtcNow,
+        });
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            ApplyVercelBypassHeaders(req);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
+            req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
+            req.Headers.Add("x-jarvis-observer-version", "0.6.0");
+            req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var response = await _http.SendAsync(req, cts.Token);
+
+            Log(new
+            {
+                type = "obsidian.command.result",
+                at = DateTime.UtcNow,
+                id,
+                action,
+                ok,
+                status = (int)response.StatusCode,
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // Allow the command to be attempted again if the cloud could not acknowledge it.
+                _lastObsidianCommandId = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _lastObsidianCommandId = null;
+            Log(new { type = "obsidian.command.result_error", at = DateTime.UtcNow, id, error = ex.Message });
         }
     }
 
