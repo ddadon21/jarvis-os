@@ -32,7 +32,9 @@ async function waitForResult(token: string, id: string, timeoutMs = 12_000) {
   throw new Error("Local Agent did not answer in time.");
 }
 
-export async function runObsidianCommand(input: {
+let commandQueue: Promise<void> = Promise.resolve();
+
+async function executeObsidianCommand(input: {
   action: ObsidianAction;
   path?: string | null;
   content?: string | null;
@@ -64,6 +66,18 @@ export async function runObsidianCommand(input: {
   const result = await waitForResult(token, id, input.timeoutMs ?? 12_000);
   if (!result.ok) throw new Error(result.error || "Obsidian command failed.");
   return result;
+}
+
+export function runObsidianCommand(input: {
+  action: ObsidianAction;
+  path?: string | null;
+  content?: string | null;
+  query?: string | null;
+  timeoutMs?: number;
+}) {
+  const task = commandQueue.then(() => executeObsidianCommand(input));
+  commandQueue = task.then(() => undefined, () => undefined);
+  return task;
 }
 
 export async function writeObsidianNote(path: string, content: string) {
