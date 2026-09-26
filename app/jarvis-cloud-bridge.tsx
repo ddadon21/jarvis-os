@@ -14,6 +14,35 @@ const CLOUD_KEYS = [
 
 type CloudKey = typeof CLOUD_KEYS[number];
 
+const LOCAL_BACKUP_PREFIX = "local.";
+const SENSITIVE_LOCAL_KEYS = new Set([
+  "jarvis-observer-controller-v1",
+]);
+
+function shouldBackupLocalKey(key: string) {
+  if (!key.startsWith("jarvis-")) return false;
+  if (SENSITIVE_LOCAL_KEYS.has(key)) return false;
+  const normalized = key.toLowerCase();
+  return !["token", "secret", "password", "credential", "controller", "device-token", "session"].some((part) => normalized.includes(part));
+}
+
+function discoverBackupLocalKeys() {
+  const keys: string[] = [];
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (key && shouldBackupLocalKey(key) && !CLOUD_KEYS.includes(key as CloudKey)) keys.push(key);
+  }
+  return [...new Set(keys)].sort();
+}
+
+function snapshotKeyForLocal(key: string) {
+  return `${LOCAL_BACKUP_PREFIX}${key}`;
+}
+
+function localKeyFromSnapshot(stateKey: string) {
+  return stateKey.startsWith(LOCAL_BACKUP_PREFIX) ? stateKey.slice(LOCAL_BACKUP_PREFIX.length) : null;
+}
+
 const RUNTIME_KEYS = {
   system: "runtime.system-status.v1",
   finance: "runtime.finance.v1",
@@ -120,7 +149,7 @@ function payloadDeleted(payload: unknown) {
   return Boolean(payload && typeof payload === "object" && (payload as { deleted?: unknown }).deleted === true);
 }
 
-function dispatchRestored(key: CloudKey) {
+function dispatchRestored(key: string) {
   if (key === "jarvis-os-state-v1") window.dispatchEvent(new Event("jarvis-state-updated"));
   if (key === "jarvis-life-command-v2" || key === "jarvis-life-plan-v1") window.dispatchEvent(new Event("jarvis-life-updated"));
   if (key === "jarvis-habit-history-v1") window.dispatchEvent(new Event("jarvis-habits-updated"));
@@ -138,6 +167,24 @@ function stableHash(value: string) {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(36);
+}
+
+async function markPersistence(
+  supabase: ReturnType<typeof getSupabaseBrowserClient>,
+  workspaceId: string,
+  domain: "CORE" | "TRADING" | "FINANCE" | "LIFE" | "SENTRYOPS",
+  component: string,
+  detail: Record<string, unknown> = {},
+) {
+  await supabase
+    .from("jarvis_persistence_status")
+    .upsert({
+      workspace_id: workspaceId,
+      domain,
+      component,
+      last_success_at: new Date().toISOString(),
+      detail,
+    }, { onConflict: "workspace_id,domain,component" });
 }
 
 export default function JarvisCloudBridge() {
@@ -183,8 +230,7 @@ export default function JarvisCloudBridge() {
       const { data: remoteRows, error: remoteError } = await supabase
         .from("jarvis_state_snapshots")
         .select("state_key,payload,updated_at")
-        .eq("workspace_id", workspaceId)
-        .in("state_key", [...CLOUD_KEYS, ...ALL_RUNTIME_KEYS]);
+        .eq("workspace_id", workspaceId);
 
       if (!active) return;
       if (remoteError) {
@@ -226,6 +272,39 @@ export default function JarvisCloudBridge() {
         } else {
           lastRawRef.current[key] = null;
         }
+      }
+
+      for (const [stateKey, row] of remote.entries()) {
+        const localKey = localKeyFromSnapshot(stateKey);
+        if (!localKey || !shouldBackupLocalKey(localKey)) continue;
+        const cloudRaw = payloadRaw(row.payload);
+        const isDeleted = payloadDeleted(row.payload);
+        const localRaw = window.localStorage.getItem(localKey);
+
+        if (isDeleted) {
+          if (localRaw != null) window.localStorage.removeItem(localKey);
+          lastRawRef.current[stateKey] = null;
+        } else if (cloudRaw != null) {
+          if (localRaw !== cloudRaw) window.localStorage.setItem(localKey, cloudRaw);
+          lastRawRef.current[stateKey] = cloudRaw;
+          dispatchRestored(localKey);
+        }
+      }
+
+      for (const localKey of discoverBackupLocalKeys()) {
+        const stateKey = snapshotKeyForLocal(localKey);
+        if (remote.has(stateKey)) continue;
+        const localRaw = window.localStorage.getItem(localKey);
+        if (localRaw == null) continue;
+        toUpload.push({
+          workspace_id: workspaceId,
+          state_key: stateKey,
+          version: 1,
+          payload: rawPayload(localRaw),
+          source: "JARVIS LOCAL SAFETY BACKUP",
+          client_updated_at: new Date().toISOString(),
+        });
+        lastRawRef.current[stateKey] = localRaw;
       }
 
       if (toUpload.length) {
@@ -313,17 +392,26 @@ export default function JarvisCloudBridge() {
       if (!readyRef.current || !workspaceId || syncingRef.current) return;
 
       const changed: Array<Record<string, unknown>> = [];
-      for (const key of CLOUD_KEYS) {
-        const raw = window.localStorage.getItem(key);
-        if (raw === lastRawRef.current[key]) continue;
-        lastRawRef.current[key] = raw;
+      const localPairs = [
+        ...CLOUD_KEYS.map((key) => ({ localKey: key, stateKey: key, source: "JARVIS CLIENT" })),
+        ...discoverBackupLocalKeys().map((localKey) => ({
+          localKey,
+          stateKey: snapshotKeyForLocal(localKey),
+          source: "JARVIS LOCAL SAFETY BACKUP",
+        })),
+      ];
+
+      for (const { localKey, stateKey, source } of localPairs) {
+        const raw = window.localStorage.getItem(localKey);
+        if (raw === lastRawRef.current[stateKey]) continue;
+        lastRawRef.current[stateKey] = raw;
 
         changed.push({
           workspace_id: workspaceId,
-          state_key: key,
+          state_key: stateKey,
           version: 1,
           payload: raw == null ? deletedPayload() : rawPayload(raw),
-          source: raw == null ? "JARVIS CLIENT DELETE" : "JARVIS CLIENT",
+          source: raw == null ? "JARVIS CLIENT DELETE" : source,
           client_updated_at: new Date().toISOString(),
         });
       }
@@ -334,6 +422,7 @@ export default function JarvisCloudBridge() {
         .from("jarvis_state_snapshots")
         .upsert(changed, { onConflict: "workspace_id,state_key" });
       syncingRef.current = false;
+      if (!error) await markPersistence(supabase, workspaceId, "CORE", "client-state", { snapshots: changed.length });
       setStatus(error ? "ERROR" : "SYNCED");
     }
 
