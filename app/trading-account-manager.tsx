@@ -512,6 +512,8 @@ async function pushCloudSnapshot(
       target_balance: targetBalance,
       funded_buffer: account.fundedBuffer,
       required_trading_days: account.requiredTradingDays,
+      minimum_qualifying_pnl: account.minimumQualifyingPnl,
+      payout_count: account.fundedPayoutCount,
       metadata: { syncedFrom: "trading-account-manager" },
     }];
   });
