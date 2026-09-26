@@ -209,7 +209,7 @@ export default function WorkV2() {
             </div>
           </Panel>
           {domain === "TRADING" ? (
-            <Panel title="RULES" corner="DWIGHT">
+            <Panel title="RULES" corner="">
               <DwightTradingRules />
             </Panel>
           ) : null}
