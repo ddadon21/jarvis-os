@@ -36,12 +36,15 @@ type TradingGoalAccount = {
   profitTarget: number;
   fundedBuffer: number;
   requiredTradingDays: number;
+  minimumQualifyingPnl: number;
+  fundedPayoutCount: number;
   cycle: number;
 };
 
 type TradingGoalSnapshot = {
   account: TradingGoalAccount;
   tradingDays: number;
+  qualifyingDays: number;
   totalPnl: number;
   targetBalance: number;
   remaining: number;
@@ -141,8 +144,11 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
       ? Math.max(0, Math.min(100, ((account.currentBalance - account.lossLimit) / denominator) * 100))
       : 0;
     const remaining = Math.max(0, targetBalance - account.currentBalance);
+    const qualifyingDays = account.stage === "FUNDED"
+      ? entries.filter(([, entry]) => typeof entry.pnl === "number" && entry.pnl >= Math.max(0, account.minimumQualifyingPnl ?? 150)).length
+      : tradingDays;
     const dayProgress = account.requiredTradingDays > 0
-      ? Math.max(0, Math.min(100, (tradingDays / account.requiredTradingDays) * 100))
+      ? Math.max(0, Math.min(100, (qualifyingDays / account.requiredTradingDays) * 100))
       : 0;
     const reviewedDays = entries
       .filter(([, entry]) => Math.max(0, entry.imageCount ?? (entry.hasImage ? 1 : 0)) > 0)
@@ -151,7 +157,7 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
     const todayEntry = journal[`${prefix}${dateKey()}`];
     const todayImageCount = Math.max(0, todayEntry?.imageCount ?? (todayEntry?.hasImage ? 1 : 0));
 
-    return { account, tradingDays, totalPnl, targetBalance, remaining, progress, dayProgress, todayImageCount, reviewedDays, trackedDays };
+    return { account, tradingDays, qualifyingDays, totalPnl, targetBalance, remaining, progress, dayProgress, todayImageCount, reviewedDays, trackedDays };
   } catch {
     return null;
   }
@@ -388,9 +394,10 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
       const reviewRate = recentTrackedDays.length
         ? (recentTrackedDays.filter((day) => reviewedSet.has(day)).length / recentTrackedDays.length) * 100
         : null;
-      const payoutCount = Math.max(0, tradingPayouts?.lifetimeCount ?? (hasEvent(events, "trading.payout_received") ? 1 : 0));
-      const nextPayoutNumber = tradingPayouts?.nextPayoutNumber ?? (payoutCount + 1);
-      const fifthPayoutProgress = Math.min(100, (payoutCount / 5) * 100);
+      const lifetimePayoutCount = Math.max(0, tradingPayouts?.lifetimeCount ?? (hasEvent(events, "trading.payout_received") ? 1 : 0));
+      const currentFundedPayoutCount = Math.max(0, tradingAccount?.account.fundedPayoutCount ?? 0);
+      const nextPayoutNumber = lifetimePayoutCount + 1;
+      const fifthPayoutProgress = Math.min(100, (lifetimePayoutCount / 5) * 100);
       const latestPayout = tradingPayouts?.latest;
       const latestPayoutDetail = latestPayout
         ? `Last payout ${dollars(latestPayout.payoutAmount ?? latestPayout.traderNetAmount)}${latestPayout.approvedAt ? ` · ${new Date(latestPayout.approvedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}.`
@@ -408,7 +415,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
           : {
               name: "CURRENT FUNDED ACCOUNT",
               status: tradingAccount.remaining <= 0 && tradingAccount.dayProgress >= 100 ? "DONE" : "ACTIVE",
-              detail: `${tradingAccount.account.label} · ${dollars(tradingAccount.remaining)} buffer left · ${tradingAccount.tradingDays}/${tradingAccount.account.requiredTradingDays} qualifying days.`,
+              detail: `${tradingAccount.account.label} · ${dollars(tradingAccount.remaining)} buffer left · ${tradingAccount.qualifyingDays}/${tradingAccount.account.requiredTradingDays} days at ${dollars(tradingAccount.account.minimumQualifyingPnl)}+ · ${currentFundedPayoutCount} current-cycle payouts.`,
               progress: Math.min(tradingAccount.progress, tradingAccount.dayProgress || tradingAccount.progress),
               active: tradingAccount.remaining > 0 || tradingAccount.dayProgress < 100,
             }
@@ -429,10 +436,10 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
         accountGoal,
         {
           name: "5TH PAYOUT",
-          status: payoutCount >= 5 ? "DONE" : "ACTIVE",
-          detail: `${payoutCount}/5 payouts completed · ${latestPayoutDetail} ${payoutCount < 5 ? `Payout #${nextPayoutNumber} is the target.` : "Milestone complete."}`,
+          status: lifetimePayoutCount >= 5 ? "DONE" : "ACTIVE",
+          detail: `${lifetimePayoutCount}/5 lifetime payouts completed · ${latestPayoutDetail} ${lifetimePayoutCount < 5 ? `Lifetime payout #${nextPayoutNumber} is the target.` : "Milestone complete."}`,
           progress: fifthPayoutProgress,
-          active: payoutCount < 5,
+          active: lifetimePayoutCount < 5,
         },
         {
           name: "LIVE EXECUTION",
@@ -457,12 +464,10 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
         },
         {
           name: "SCALE FUNDED CAPITAL",
-          status: payoutCount >= 5 ? "NEXT" : "LOCKED",
-          detail: payoutCount >= 5
-            ? "Five payouts are proven. Scale only while account buffer, drawdown and execution discipline remain healthy."
-            : "Unlock after payout #5 so scale follows repeatable payout evidence instead of account size alone.",
-          progress: null,
-          active: payoutCount >= 5,
+          status: currentFundedPayoutCount > 0 ? "BUILDING" : "LOCKED",
+          detail: `Current funded cycle: ${currentFundedPayoutCount} payouts. Start this cycle at 0 and scale only after this funded account proves repeatable withdrawals while buffer, drawdown and execution stay healthy.`,
+          progress: Math.min(100, (currentFundedPayoutCount / 5) * 100),
+          active: currentFundedPayoutCount > 0,
         },
       ];
     }
