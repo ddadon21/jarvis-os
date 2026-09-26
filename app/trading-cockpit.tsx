@@ -110,7 +110,7 @@ type PayoutSummary = {
   totalGross: number;
   averageAmount?: number | null;
   averageNet: number | null;
-  latest: { approvedAt: string | null; payoutAmount?: number; traderNetAmount: number; firm?: string } | null;
+  latest: { approvedAt: string | null; payoutAmount?: number; traderNetAmount: number | null; firm?: string } | null;
 };
 
 type ObserverLink = {
@@ -586,9 +586,11 @@ export default function TradingCockpit() {
             <span>{payoutRange === "ALL" ? "RECORDED PAYOUT AMOUNTS" : `${payoutRange} PAYOUT AMOUNTS`}</span>
             <strong>{payoutSummary?.connected ? money(payoutSummary.totalAmount ?? payoutSummary.totalGross ?? payoutSummary.totalNet) : "—"}</strong>
             <small>
-              {payoutSummary?.connected
-                ? `${payoutSummary.lifetimeCount ?? payoutSummary.count} payouts complete · #${payoutSummary.nextPayoutNumber ?? (payoutSummary.count + 1)} next`
-                : "Lucid payout history not connected yet"}
+              {selectedAccount?.stage === "FUNDED"
+                ? `CURRENT FUNDED CYCLE: ${selectedAccount.fundedPayoutCount} PAYOUTS · LIFETIME RECORD: ${payoutSummary?.lifetimeCount ?? payoutSummary?.count ?? 0}`
+                : payoutSummary?.connected
+                  ? `Lifetime record: ${payoutSummary.lifetimeCount ?? payoutSummary.count} payouts · #${payoutSummary.nextPayoutNumber ?? (payoutSummary.count + 1)} next`
+                  : "Payout history not connected yet"}
             </small>
             {payoutSummary?.connected && (payoutSummary.unitemizedCount ?? 0) > 0 ? (
               <small>{payoutSummary.recordedCount ?? payoutSummary.count} payout amount on file · {payoutSummary.unitemizedCount} earlier payouts not itemized</small>
@@ -596,7 +598,8 @@ export default function TradingCockpit() {
           </div>
           <div className="trading-lines">
             <Line label="Source" value={payoutSummary?.source ?? "PENDING"} />
-            <Line label="Latest payout" value={payoutSummary?.latest ? money(payoutSummary.latest.payoutAmount ?? payoutSummary.latest.traderNetAmount) : "—"} />
+            <Line label={selectedAccount?.stage === "FUNDED" ? "Current cycle payouts" : "Lifetime payouts"} value={selectedAccount?.stage === "FUNDED" ? String(selectedAccount.fundedPayoutCount) : String(payoutSummary?.lifetimeCount ?? payoutSummary?.count ?? 0)} />
+            <Line label="Latest lifetime payout" value={payoutSummary?.latest ? money(payoutSummary.latest.payoutAmount ?? payoutSummary.latest.traderNetAmount) : "—"} />
             <Line label="Latest approved" value={payoutSummary?.latest?.approvedAt ? new Date(payoutSummary.latest.approvedAt).toLocaleDateString() : "DATE NOT RECORDED"} />
           </div>
         </article>
