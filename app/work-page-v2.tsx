@@ -17,6 +17,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import DwightTradingRules from "./dwight-trading-rules";
+import ObsidianBridgePanel from "./obsidian-bridge-panel";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
 import LifeCockpit, { LifeProgress } from "./life-cockpit";
@@ -207,6 +208,9 @@ export default function WorkV2() {
                 <Event key={event.id} text={event.summary} time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)} />
               )) : <><Event text="Jarvis core online" time="NOW" /><Event text="Autonomous workforce ready" time="AI" /><Event text="Finance accounts connected" time="FIN" /></>}
             </div>
+          </Panel>
+          <Panel title="OBSIDIAN" corner="LOCAL">
+            <ObsidianBridgePanel />
           </Panel>
           {domain === "TRADING" ? (
             <Panel title="" corner="" className="trading-rules-panel">
