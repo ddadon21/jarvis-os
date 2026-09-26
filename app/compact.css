@@ -1656,3 +1656,37 @@
   min-height:21px;
   font-size:19px;
 }
+
+
+/* Trading Rules reference layout: one header, no duplicate labels */
+.trading-rules-panel>.panel-head,
+.trading-rules-panel>.panel-rule{
+  display:none!important;
+}
+.trading-rules-panel>.panel-body{
+  padding-top:0!important;
+}
+.trading-rules-panel .dwight-rules{
+  padding:0;
+}
+.dwight-rules-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:1px 0 7px;
+  margin-bottom:2px;
+  border-bottom:1px solid rgba(68,205,222,.16);
+}
+.dwight-rules-header span{
+  color:#40d2e3;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.12em;
+}
+.dwight-rules-header b{
+  color:#718086;
+  font-size:7px;
+  font-weight:700;
+  letter-spacing:.08em;
+}
