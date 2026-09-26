@@ -3,13 +3,14 @@ import { getCache } from "@vercel/functions";
 
 export type ObserverCommand = "WATCH" | "PAUSE";
 
-export type LocalAgentObsidianAction = "LIST" | "READ" | "WRITE";
+export type LocalAgentObsidianAction = "LIST" | "READ" | "WRITE" | "SEARCH";
 
 export type LocalAgentObsidianCommand = {
   id: string;
   action: LocalAgentObsidianAction;
   path: string | null;
   content: string | null;
+  query: string | null;
   createdAt: string;
 };
 
@@ -179,18 +180,21 @@ export async function setObserverCommand(controllerToken: string, command: Obser
 
 export async function enqueueObsidianCommand(
   controllerToken: string,
-  input: { action: LocalAgentObsidianAction; path?: string | null; content?: string | null },
+  input: { action: LocalAgentObsidianAction; path?: string | null; content?: string | null; query?: string | null },
 ) {
   const link = await resolveController(controllerToken);
   if (!link) return null;
 
   const action = input.action;
-  if (!["LIST", "READ", "WRITE"].includes(action)) return null;
+  if (!["LIST", "READ", "WRITE", "SEARCH"].includes(action)) return null;
 
   const path = String(input.path ?? "").replace(/\\/g, "/").replace(/^\/+/, "").slice(0, 500) || null;
   const content = input.content == null ? null : String(input.content).slice(0, 150_000);
+  const query = input.query == null ? null : String(input.query).trim().slice(0, 500);
   if (action === "WRITE" && !path) return null;
   if (action === "WRITE" && !path!.toLowerCase().endsWith(".md")) return null;
+  if (action === "READ" && !path) return null;
+  if (action === "SEARCH" && !query) return null;
   if (path?.split("/").some(part => part === ".obsidian" || part === "..")) return null;
 
   const command: LocalAgentObsidianCommand = {
@@ -198,6 +202,7 @@ export async function enqueueObsidianCommand(
     action,
     path,
     content,
+    query,
     createdAt: new Date().toISOString(),
   };
 
