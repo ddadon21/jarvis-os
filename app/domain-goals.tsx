@@ -13,6 +13,7 @@ type GoalItem = {
   progress: number | null;
   active?: boolean;
   habitId?: HabitId;
+  autoChecked?: boolean;
 };
 
 type HabitId = "life.bible" | "life.gym" | "life.read30" | "life.phonefree" | "trading.review";
@@ -48,6 +49,7 @@ type TradingGoalSnapshot = {
   dayProgress: number;
   todayImageCount: number;
   reviewedDays: string[];
+  trackedDays: string[];
 };
 
 type TradingGoalRuntime = {
@@ -125,7 +127,11 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
     const journal = journalRaw ? JSON.parse(journalRaw) as Record<string, { pnl?: number | null; notes?: string; hasImage?: boolean; imageCount?: number }> : {};
     const prefix = `${account.id}:cycle-${account.cycle}:${account.stage}:`;
     const entries = Object.entries(journal).filter(([key]) => key.startsWith(prefix));
-    const tradingDays = entries.filter(([, entry]) => entry.pnl != null || Boolean(entry.notes?.trim()) || entry.hasImage === true).length;
+    const trackedDays = entries
+      .filter(([, entry]) => entry.pnl != null || Boolean(entry.notes?.trim()) || entry.hasImage === true)
+      .map(([key]) => key.slice(-10))
+      .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day));
+    const tradingDays = trackedDays.length;
     const totalPnl = entries.reduce((sum, [, entry]) => sum + (typeof entry.pnl === "number" ? entry.pnl : 0), 0);
     const targetBalance = account.stage === "EVAL"
       ? account.startBalance + Math.max(0, account.profitTarget)
@@ -145,7 +151,7 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
     const todayEntry = journal[`${prefix}${dateKey()}`];
     const todayImageCount = Math.max(0, todayEntry?.imageCount ?? (todayEntry?.hasImage ? 1 : 0));
 
-    return { account, tradingDays, totalPnl, targetBalance, remaining, progress, dayProgress, todayImageCount, reviewedDays };
+    return { account, tradingDays, totalPnl, targetBalance, remaining, progress, dayProgress, todayImageCount, reviewedDays, trackedDays };
   } catch {
     return null;
   }
@@ -372,37 +378,16 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     });
   }, [events]);
 
-  useEffect(() => {
-    if (domain !== "TRADING" || !tradingAccount?.reviewedDays.length) return;
-    setHabits((current) => {
-      let changed = false;
-      const days = { ...current.days };
-      const tradingDays = { ...current.tradingDays };
-
-      for (const day of tradingAccount.reviewedDays) {
-        if (days[day]?.["trading.review"] !== true) {
-          days[day] = { ...days[day], "trading.review": true };
-          changed = true;
-        }
-        if (!tradingDays[day]) {
-          tradingDays[day] = true;
-          changed = true;
-        }
-      }
-
-      if (!changed) return current;
-      const next = { ...current, days, tradingDays };
-      saveHabitStore(next);
-      return next;
-    });
-  }, [domain, tradingAccount?.reviewedDays]);
-
   const summary = useMemo(() => buildHabitSummary(habits), [habits, todayKey]);
 
   const goals = useMemo<GoalItem[]>(() => {
     if (domain === "TRADING") {
-      const reviewDone = (tradingAccount?.todayImageCount ?? 0) > 0 || habits.days[dateKey()]?.["trading.review"] === true;
-      const reviewRate = habitRate(habits, "trading.review", 7);
+      const reviewDone = (tradingAccount?.todayImageCount ?? 0) > 0;
+      const recentTrackedDays = (tradingAccount?.trackedDays ?? []).sort().slice(-7);
+      const reviewedSet = new Set(tradingAccount?.reviewedDays ?? []);
+      const reviewRate = recentTrackedDays.length
+        ? (recentTrackedDays.filter((day) => reviewedSet.has(day)).length / recentTrackedDays.length) * 100
+        : null;
       const payoutCount = Math.max(0, tradingPayouts?.lifetimeCount ?? (hasEvent(events, "trading.payout_received") ? 1 : 0));
       const nextPayoutNumber = tradingPayouts?.nextPayoutNumber ?? (payoutCount + 1);
       const fifthPayoutProgress = Math.min(100, (payoutCount / 5) * 100);
@@ -468,7 +453,7 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
               : `${Math.round(reviewRate)}% of the last observed trading days reviewed · streak ${habitStreak(habits, "trading.review")}.`,
           progress: reviewDone ? 100 : 0,
           active: !reviewDone,
-          habitId: "trading.review",
+          autoChecked: reviewDone,
         },
         {
           name: "SCALE FUNDED CAPITAL",
@@ -565,14 +550,18 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
   return (
     <div className="goal-list">
       {goals.map((goal) => {
-        const checked = goal.habitId ? habits.days[dateKey()]?.[goal.habitId] === true : false;
+        const checked = goal.autoChecked === true || (goal.habitId ? habits.days[dateKey()]?.[goal.habitId] === true : false);
         return (
           <div className={`goal ${tone(goal)}`} key={goal.name}>
             <div className="goal-head"><span>{goal.name}</span><b>{goal.progress == null ? goal.status : percentLabel(goal.progress)}</b></div>
             {goal.progress != null && <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }} /></div>}
             <div className="tiny-row">
               <span>{goal.detail}</span>
-              {goal.habitId ? <input aria-label={`Mark ${goal.name} complete`} type="checkbox" checked={checked} onChange={() => toggleHabit(goal.habitId as HabitId)} /> : null}
+              {goal.autoChecked !== undefined ? (
+                <input aria-label={`${goal.name} completion`} type="checkbox" checked={checked} readOnly />
+              ) : goal.habitId ? (
+                <input aria-label={`Mark ${goal.name} complete`} type="checkbox" checked={checked} onChange={() => toggleHabit(goal.habitId as HabitId)} />
+              ) : null}
             </div>
           </div>
         );
