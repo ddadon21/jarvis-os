@@ -1793,3 +1793,51 @@
 @keyframes obsidian-spin{
   to{transform:rotate(360deg)}
 }
+
+
+.obsidian-bridge-search{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:5px;
+}
+.obsidian-bridge-search input{
+  min-width:0;
+  height:25px;
+  padding:0 7px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(0,0,0,.22);
+  color:#dce2e4;
+  outline:none;
+  font:700 6.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:.06em;
+}
+.obsidian-bridge-search input:focus{
+  border-color:rgba(64,210,227,.34);
+}
+.obsidian-bridge-search button{
+  min-width:58px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.018);
+  color:#aeb8bc;
+  font-size:6.5px;
+  font-weight:800;
+  letter-spacing:.08em;
+  cursor:pointer;
+}
+.obsidian-bridge-search button:hover:not(:disabled){
+  border-color:rgba(64,210,227,.36);
+  color:#e9edef;
+}
+.obsidian-bridge-search-result{
+  display:block;
+  max-height:72px;
+  overflow:hidden;
+  padding:6px;
+  border:1px solid rgba(255,255,255,.055);
+  background:rgba(0,0,0,.16);
+  color:#7f8b90;
+  font-size:6.2px;
+  line-height:1.4;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
