@@ -349,6 +349,7 @@ export default function TradingCockpit() {
       const token = payload.pair?.controllerToken;
       if (!response.ok || !token) throw new Error(payload.error || "Pairing failed.");
       window.localStorage.setItem("jarvis-observer-controller-v1", token);
+      window.dispatchEvent(new CustomEvent("jarvis-observer-link-updated"));
       linkAuthFailures.current = 0;
       setLinkAuthFailed(false);
       setLink(null);
@@ -363,6 +364,7 @@ export default function TradingCockpit() {
 
   function resetPairing() {
     window.localStorage.removeItem("jarvis-observer-controller-v1");
+    window.dispatchEvent(new CustomEvent("jarvis-observer-link-updated"));
     setControllerToken("");
     setLink(null);
     setLinkAuthFailed(false);
