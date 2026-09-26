@@ -415,14 +415,14 @@ export default function TradingCockpit() {
             <span className="observer-control-copy">
               <small>{paired ? "OBSERVER CONTROL" : "PAIR REQUIRED"}</small>
               <strong>{controlWatching ? "WATCHING" : "PAUSED"}</strong>
-              <em>{paired ? (link?.online ? "DESKTOP LINK ONLINE" : "DESKTOP OFFLINE") : "ENTER PAIR CODE BELOW"}</em>
+              <em>{paired ? (link?.online ? "DESKTOP LINK ONLINE" : "PAIRED - WAITING FOR LOCAL AGENT HEARTBEAT") : "ENTER PAIR CODE BELOW"}</em>
             </span>
           </button>
           <div className={`trading-live-badge ${paired && link?.online ? "is-live" : ""}`}>
             <Radio size={16} />
             <div>
               <span>OBSERVER LINK</span>
-              <strong>{paired ? (link?.online ? "ONLINE" : "PAIRED") : "WAITING"}</strong>
+              <strong>{paired ? (link?.online ? "ONLINE" : "PAIRED - NO HEARTBEAT") : "WAITING"}</strong>
               <small>{paired ? `${link?.observerVersion ?? "OBSERVER"} · ${age(link?.lastHeartbeatAt)}` : "PAIRING REQUIRED"}</small>
             </div>
           </div>
