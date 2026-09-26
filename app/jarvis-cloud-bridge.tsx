@@ -196,20 +196,14 @@ export default function JarvisCloudBridge() {
       if (!readyRef.current || !workspaceId || syncingRef.current) return;
 
       const changed: Array<Record<string, unknown>> = [];
+      const removed: string[] = [];
       for (const key of CLOUD_KEYS) {
         const raw = window.localStorage.getItem(key);
         if (raw === lastRawRef.current[key]) continue;
         lastRawRef.current[key] = raw;
 
         if (raw == null) {
-          changed.push({
-            workspace_id: workspaceId,
-            state_key: key,
-            version: 1,
-            payload: rawPayload(""),
-            source: "JARVIS CLIENT",
-            client_updated_at: new Date().toISOString(),
-          });
+          removed.push(key);
         } else {
           changed.push({
             workspace_id: workspaceId,
@@ -222,13 +216,28 @@ export default function JarvisCloudBridge() {
         }
       }
 
-      if (!changed.length) return;
+      if (!changed.length && !removed.length) return;
       syncingRef.current = true;
-      const { error } = await supabase
-        .from("jarvis_state_snapshots")
-        .upsert(changed, { onConflict: "workspace_id,state_key" });
+      let hasError = false;
+
+      if (changed.length) {
+        const { error } = await supabase
+          .from("jarvis_state_snapshots")
+          .upsert(changed, { onConflict: "workspace_id,state_key" });
+        if (error) hasError = true;
+      }
+
+      if (removed.length) {
+        const { error } = await supabase
+          .from("jarvis_state_snapshots")
+          .delete()
+          .eq("workspace_id", workspaceId)
+          .in("state_key", removed);
+        if (error) hasError = true;
+      }
+
       syncingRef.current = false;
-      setStatus(error ? "ERROR" : "SYNCED");
+      setStatus(hasError ? "ERROR" : "SYNCED");
     }
 
     const customSync = () => { void syncLocalState(); };
