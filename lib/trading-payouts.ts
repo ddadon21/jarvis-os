@@ -5,7 +5,7 @@ export type TradingPayout = {
   firm: string;
   accountLabel: string | null;
   requestedAt: string | null;
-  approvedAt: string;
+  approvedAt: string | null;
   grossAmount: number | null;
   traderNetAmount: number;
   splitPercent: number | null;
@@ -23,13 +23,25 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     accountLabel: null,
     requestedAt: null,
     approvedAt: "2026-09-07T12:00:00-05:00",
-    grossAmount: null,
-    traderNetAmount: 901,
+    grossAmount: 901,
+    traderNetAmount: 810,
+    splitPercent: 90,
+    status: "PAID",
+    source: "DWIGHT MANUAL RECORD",
+  },
+  {
+    id: "manual-topstep-525",
+    firm: "Topstep",
+    accountLabel: null,
+    requestedAt: null,
+    approvedAt: null,
+    grossAmount: 525,
+    traderNetAmount: 525,
     splitPercent: null,
     status: "PAID",
     source: "DWIGHT MANUAL RECORD",
   },
-];
+]
 
 const LIFETIME_PAYOUT_COUNT_FLOOR = 4;
 
@@ -52,7 +64,11 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
   }
 
   const all = [...merged.values()]
-    .sort((a, b) => Date.parse(b.approvedAt) - Date.parse(a.approvedAt));
+    .sort((a, b) => {
+      const aTime = a.approvedAt ? Date.parse(a.approvedAt) : Number.NEGATIVE_INFINITY;
+      const bTime = b.approvedAt ? Date.parse(b.approvedAt) : Number.NEGATIVE_INFINITY;
+      return bTime - aTime;
+    });
 
   const now = Date.now();
   const cutoff = range === "30D"
@@ -61,7 +77,11 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
       ? now - 183 * 24 * 60 * 60 * 1000
       : Number.NEGATIVE_INFINITY;
 
-  const payouts = all.filter((payout) => Date.parse(payout.approvedAt) >= cutoff);
+  const payouts = all.filter((payout) => {
+    if (range === "ALL") return true;
+    if (!payout.approvedAt) return false;
+    return Date.parse(payout.approvedAt) >= cutoff;
+  });
   const totalNet = payouts.reduce((sum, payout) => sum + payout.traderNetAmount, 0);
   const totalGross = payouts.reduce((sum, payout) => sum + (payout.grossAmount ?? 0), 0);
 
@@ -79,7 +99,7 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
     totalNet: Math.round(totalNet * 100) / 100,
     totalGross: Math.round(totalGross * 100) / 100,
     averageNet: payouts.length ? Math.round((totalNet / payouts.length) * 100) / 100 : null,
-    latest: all[0] ?? null,
+    latest: all.find((payout) => payout.approvedAt) ?? all[0] ?? null,
     payouts: payouts.slice(0, 50),
   };
 }
