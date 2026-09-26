@@ -376,9 +376,9 @@ export default function JarvisCloudBridge() {
 
         const messages = (parsed.messages ?? [])
           .filter((message) => (message.role === "user" || message.role === "assistant") && typeof message.content === "string" && message.content.trim())
-          .map((message, index) => ({
+          .map((message) => ({
             workspace_id: workspaceId,
-            client_key: `msg:${message.createdAt ?? "undated"}:${stableHash(`${message.role}|${message.content}|${index}`)}`,
+            client_key: `msg:${message.createdAt ?? "undated"}:${stableHash(`${message.role}|${message.content}`)}`,
             role: message.role,
             content: message.content,
             message_created_at: message.createdAt && Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null,
