@@ -6,6 +6,7 @@ export type TradingPayout = {
   accountLabel: string | null;
   requestedAt: string | null;
   approvedAt: string | null;
+  payoutAmount: number;
   grossAmount: number | null;
   traderNetAmount: number;
   splitPercent: number | null;
@@ -21,13 +22,40 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     id: "manual-lucid-2026-09-07-901",
     firm: "Lucid Trading",
     accountLabel: null,
-    requestedAt: null,
+    requestedAt: "2026-09-07T12:00:00-05:00",
     approvedAt: "2026-09-07T12:00:00-05:00",
+    payoutAmount: 901,
     grossAmount: 901,
     traderNetAmount: 810,
     splitPercent: 90,
     status: "PAID",
-    source: "DWIGHT MANUAL RECORD",
+    source: "LUCID PAYOUT HISTORY + DWIGHT RECORD",
+  },
+  {
+    id: "manual-lucid-2026-07-29-80393",
+    firm: "Lucid Trading",
+    accountLabel: null,
+    requestedAt: "2026-07-29T12:00:00-05:00",
+    approvedAt: "2026-07-29T12:00:00-05:00",
+    payoutAmount: 803.93,
+    grossAmount: 803.93,
+    traderNetAmount: 803.93,
+    splitPercent: null,
+    status: "PAID",
+    source: "LUCID PAYOUT HISTORY",
+  },
+  {
+    id: "manual-lucid-2026-07-16-105185",
+    firm: "Lucid Trading",
+    accountLabel: null,
+    requestedAt: "2026-07-16T12:00:00-05:00",
+    approvedAt: "2026-07-16T12:00:00-05:00",
+    payoutAmount: 1051.85,
+    grossAmount: 1051.85,
+    traderNetAmount: 1051.85,
+    splitPercent: null,
+    status: "PAID",
+    source: "LUCID PAYOUT HISTORY",
   },
   {
     id: "manual-topstep-525",
@@ -35,6 +63,7 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     accountLabel: null,
     requestedAt: null,
     approvedAt: null,
+    payoutAmount: 525,
     grossAmount: 525,
     traderNetAmount: 525,
     splitPercent: null,
@@ -82,8 +111,9 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
     if (!payout.approvedAt) return false;
     return Date.parse(payout.approvedAt) >= cutoff;
   });
+  const totalAmount = payouts.reduce((sum, payout) => sum + (payout.payoutAmount ?? payout.grossAmount ?? payout.traderNetAmount), 0);
   const totalNet = payouts.reduce((sum, payout) => sum + payout.traderNetAmount, 0);
-  const totalGross = payouts.reduce((sum, payout) => sum + (payout.grossAmount ?? 0), 0);
+  const totalGross = payouts.reduce((sum, payout) => sum + (payout.grossAmount ?? payout.payoutAmount ?? 0), 0);
 
   const lifetimeCount = Math.max(LIFETIME_PAYOUT_COUNT_FLOOR, all.length);
 
@@ -96,8 +126,10 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
     lifetimeCount,
     nextPayoutNumber: lifetimeCount + 1,
     unitemizedCount: Math.max(0, lifetimeCount - all.length),
+    totalAmount: Math.round(totalAmount * 100) / 100,
     totalNet: Math.round(totalNet * 100) / 100,
     totalGross: Math.round(totalGross * 100) / 100,
+    averageAmount: payouts.length ? Math.round((totalAmount / payouts.length) * 100) / 100 : null,
     averageNet: payouts.length ? Math.round((totalNet / payouts.length) * 100) / 100 : null,
     latest: all.find((payout) => payout.approvedAt) ?? all[0] ?? null,
     payouts: payouts.slice(0, 50),
