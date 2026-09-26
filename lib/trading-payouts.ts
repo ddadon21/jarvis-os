@@ -8,7 +8,7 @@ export type TradingPayout = {
   approvedAt: string | null;
   payoutAmount: number;
   grossAmount: number | null;
-  traderNetAmount: number;
+  traderNetAmount: number | null;
   splitPercent: number | null;
   status: "APPROVED" | "PAID";
   source: string;
@@ -25,9 +25,9 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     requestedAt: "2026-09-07T12:00:00-05:00",
     approvedAt: "2026-09-07T12:00:00-05:00",
     payoutAmount: 901,
-    grossAmount: 901,
-    traderNetAmount: 810,
-    splitPercent: 90,
+    grossAmount: null,
+    traderNetAmount: null,
+    splitPercent: null,
     status: "PAID",
     source: "LUCID PAYOUT HISTORY + DWIGHT RECORD",
   },
@@ -38,8 +38,8 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     requestedAt: "2026-07-29T12:00:00-05:00",
     approvedAt: "2026-07-29T12:00:00-05:00",
     payoutAmount: 803.93,
-    grossAmount: 803.93,
-    traderNetAmount: 803.93,
+    grossAmount: null,
+    traderNetAmount: null,
     splitPercent: null,
     status: "PAID",
     source: "LUCID PAYOUT HISTORY",
@@ -51,8 +51,8 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     requestedAt: "2026-07-16T12:00:00-05:00",
     approvedAt: "2026-07-16T12:00:00-05:00",
     payoutAmount: 1051.85,
-    grossAmount: 1051.85,
-    traderNetAmount: 1051.85,
+    grossAmount: null,
+    traderNetAmount: null,
     splitPercent: null,
     status: "PAID",
     source: "LUCID PAYOUT HISTORY",
@@ -64,8 +64,8 @@ const MANUAL_PAYOUTS: TradingPayout[] = [
     requestedAt: null,
     approvedAt: null,
     payoutAmount: 525,
-    grossAmount: 525,
-    traderNetAmount: 525,
+    grossAmount: null,
+    traderNetAmount: null,
     splitPercent: null,
     status: "PAID",
     source: "DWIGHT MANUAL RECORD",
@@ -88,7 +88,7 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
 
   const merged = new Map<string, TradingPayout>();
   for (const payout of [...MANUAL_PAYOUTS, ...stored]) {
-    const identity = payout.id || `${payout.firm}:${payout.approvedAt}:${payout.traderNetAmount}`;
+    const identity = payout.id || `${payout.firm}:${payout.approvedAt}:${payout.payoutAmount}`;
     merged.set(identity, payout);
   }
 
@@ -112,8 +112,8 @@ export async function getTradingPayoutSummary(range: "30D" | "6M" | "ALL") {
     return Date.parse(payout.approvedAt) >= cutoff;
   });
   const totalAmount = payouts.reduce((sum, payout) => sum + (payout.payoutAmount ?? payout.grossAmount ?? payout.traderNetAmount), 0);
-  const totalNet = payouts.reduce((sum, payout) => sum + payout.traderNetAmount, 0);
-  const totalGross = payouts.reduce((sum, payout) => sum + (payout.grossAmount ?? payout.payoutAmount ?? 0), 0);
+  const totalNet = payouts.reduce((sum, payout) => sum + (payout.traderNetAmount ?? payout.payoutAmount), 0);
+  const totalGross = payouts.reduce((sum, payout) => sum + (payout.grossAmount ?? payout.payoutAmount), 0);
 
   const lifetimeCount = Math.max(LIFETIME_PAYOUT_COUNT_FLOOR, all.length);
 
