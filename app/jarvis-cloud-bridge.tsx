@@ -46,11 +46,34 @@ type GoalReadinessEvent = CustomEvent<{
   }>;
 }>;
 
+type RuntimeTrade = {
+  id?: string;
+  externalId?: string | null;
+  symbol?: string;
+  side?: "LONG" | "SHORT";
+  quantity?: number;
+  status?: "OPEN" | "CLOSED";
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  stopPrice?: number | null;
+  targetPrice?: number | null;
+  openedAt?: string;
+  closedAt?: string | null;
+  realizedPnl?: number | null;
+  fees?: number | null;
+  source?: string;
+  setup?: string | null;
+  notes?: string | null;
+};
+
 type TradingState = {
   account?: {
     connection?: string;
     lastObservedAt?: string | null;
+    accountLabel?: string;
   };
+  openTrades?: RuntimeTrade[];
+  recentTrades?: RuntimeTrade[];
   observer?: {
     status?: string;
     intentState?: string;
@@ -106,6 +129,15 @@ function dispatchRestored(key: CloudKey) {
 
 function goalKey(name: string) {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "goal";
+}
+
+function stableHash(value: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export default function JarvisCloudBridge() {
@@ -330,6 +362,68 @@ export default function JarvisCloudBridge() {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
 
+    async function syncCoreHistory() {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId) return;
+      const raw = window.localStorage.getItem("jarvis-os-state-v1");
+      if (!raw) return;
+
+      try {
+        const parsed = JSON.parse(raw) as {
+          messages?: Array<{ role?: string; content?: string; createdAt?: string }>;
+          memories?: Array<{ id?: string; domain?: string; fact?: string; createdAt?: string }>;
+        };
+
+        const messages = (parsed.messages ?? [])
+          .filter((message) => (message.role === "user" || message.role === "assistant") && typeof message.content === "string" && message.content.trim())
+          .map((message, index) => ({
+            workspace_id: workspaceId,
+            client_key: `msg:${message.createdAt ?? "undated"}:${stableHash(`${message.role}|${message.content}|${index}`)}`,
+            role: message.role,
+            content: message.content,
+            message_created_at: message.createdAt && Number.isFinite(Date.parse(message.createdAt)) ? message.createdAt : null,
+            metadata: { persistedBy: "jarvis-cloud-bridge" },
+          }));
+
+        if (messages.length) {
+          await supabase
+            .from("jarvis_chat_messages")
+            .upsert(messages, { onConflict: "workspace_id,client_key", ignoreDuplicates: true });
+        }
+
+        const memories = (parsed.memories ?? [])
+          .filter((memory) => typeof memory.id === "string" && typeof memory.fact === "string" && memory.fact.trim())
+          .map((memory) => ({
+            workspace_id: workspaceId,
+            client_id: memory.id,
+            domain: memory.domain || "CORE",
+            fact: memory.fact,
+            memory_created_at: memory.createdAt && Number.isFinite(Date.parse(memory.createdAt)) ? memory.createdAt : null,
+            metadata: { persistedBy: "jarvis-cloud-bridge" },
+          }));
+
+        if (memories.length) {
+          await supabase
+            .from("jarvis_memories")
+            .upsert(memories, { onConflict: "workspace_id,client_id" });
+        }
+      } catch {
+        // History remains in the state snapshot and retries later.
+      }
+    }
+
+    void syncCoreHistory();
+    const timer = window.setInterval(() => void syncCoreHistory(), 5000);
+    window.addEventListener("focus", syncCoreHistory);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", syncCoreHistory);
+    };
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
     async function saveRuntimeSnapshot(stateKey: string, data: unknown) {
       const workspaceId = workspaceRef.current;
       if (!readyRef.current || !workspaceId || data == null) return;
@@ -467,6 +561,57 @@ export default function JarvisCloudBridge() {
               source: "JARVIS TRADING RUNTIME",
               client_updated_at: new Date().toISOString(),
             }, { onConflict: "workspace_id,state_key" });
+        }
+
+        const allTrades = [...(state.openTrades ?? []), ...(state.recentTrades ?? [])]
+          .filter((trade) => trade.id && trade.symbol && trade.side && trade.status && trade.openedAt);
+
+        if (allTrades.length) {
+          const { data: selectedSetting } = await supabase
+            .from("jarvis_settings")
+            .select("value")
+            .eq("workspace_id", workspaceId)
+            .eq("scope", "TRADING")
+            .eq("key", "selected_account")
+            .maybeSingle();
+          const selectedClientId = selectedSetting?.value && typeof selectedSetting.value === "object"
+            ? String((selectedSetting.value as { clientId?: string }).clientId ?? "")
+            : "";
+
+          let accountQuery = supabase
+            .from("trading_accounts")
+            .select("id")
+            .eq("workspace_id", workspaceId)
+            .neq("status", "ARCHIVED");
+          if (selectedClientId) accountQuery = accountQuery.eq("client_id", selectedClientId);
+          const { data: accountRows } = await accountQuery.limit(1);
+          const accountId = accountRows?.[0]?.id ? String(accountRows[0].id) : null;
+
+          if (accountId) {
+            const tradeRows = allTrades.map((trade) => ({
+              workspace_id: workspaceId,
+              account_id: accountId,
+              runtime_trade_id: String(trade.id),
+              external_trade_id: trade.externalId ?? null,
+              symbol: String(trade.symbol),
+              side: trade.side,
+              quantity: trade.quantity ?? 0,
+              status: trade.status,
+              entry_price: trade.entryPrice ?? null,
+              exit_price: trade.exitPrice ?? null,
+              stop_price: trade.stopPrice ?? null,
+              target_price: trade.targetPrice ?? null,
+              realized_pnl: trade.realizedPnl ?? null,
+              fees: trade.fees ?? null,
+              opened_at: trade.openedAt,
+              closed_at: trade.closedAt ?? null,
+              setup: trade.setup ?? null,
+              notes: trade.notes ?? null,
+              source: trade.source || "JARVIS OBSERVER",
+              metadata: { persistedBy: "jarvis-cloud-bridge" },
+            }));
+            await supabase.from("trades").upsert(tradeRows, { onConflict: "workspace_id,runtime_trade_id" });
+          }
         }
 
         const observer = state.observer;
