@@ -881,19 +881,11 @@ export default function TradingAccountManager({
 
   useEffect(() => {
     let active = true;
-    let objectUrl: string | null = null;
+    const objectUrls: string[] = [];
 
     async function load() {
       if (!account) {
-        setImageUrl(null);
-        return;
-      }
-
-      const localBlob = await getImage(imageKey(account, selectedDay));
-      if (!active) return;
-      if (localBlob) {
-        objectUrl = URL.createObjectURL(localBlob);
-        setImageUrl(objectUrl);
+        setImageItems([]);
         return;
       }
 
@@ -901,27 +893,41 @@ export default function TradingAccountManager({
         try {
           const supabase = getSupabaseBrowserClient();
           const dayId = await getCloudTradingDay(supabase, workspaceId, entryKey(account, selectedDay));
-          if (!dayId || !active) {
-            if (active) setImageUrl(null);
-            return;
+          if (dayId) {
+            const cloudImages = await getCloudImages(supabase, workspaceId, dayId);
+            if (!active) return;
+            if (cloudImages.length) {
+              setImageItems(cloudImages);
+              return;
+            }
           }
-          const signedUrl = await getCloudImageUrl(supabase, workspaceId, dayId);
-          if (active) setImageUrl(signedUrl);
-          return;
         } catch {
-          // Keep the journal usable even if an attachment cannot be loaded.
+          // Fall through to local cache.
         }
       }
 
-      if (active) setImageUrl(null);
+      const localImages = await listLocalImages(imageKey(account, selectedDay));
+      if (!active) return;
+      const items = localImages.map(({ key, blob }, index) => {
+        const url = URL.createObjectURL(blob);
+        objectUrls.push(url);
+        return {
+          id: key,
+          localKey: key,
+          fileName: `trade-${selectedDay}-${index + 1}.jpg`,
+          url,
+          source: "LOCAL" as const,
+        };
+      });
+      setImageItems(items);
     }
 
     void load();
     return () => {
       active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      for (const url of objectUrls) URL.revokeObjectURL(url);
     };
-  }, [account, selectedDay, journal, cloudReady, workspaceId, user?.id]);
+  }, [account, selectedDay, journal, cloudReady, workspaceId, user?.id, imageRevision]);
 
   function patchAccount(patch: Partial<TradingAccount>) {
     if (!account) return;
