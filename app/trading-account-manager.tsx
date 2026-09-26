@@ -6,14 +6,17 @@ import {
   ChevronRight,
   Cloud,
   CloudOff,
+  Download,
   ImagePlus,
   LogOut,
   Mail,
+  Maximize2,
   NotebookPen,
   Plus,
   RotateCcw,
   Trash2,
   Trophy,
+  X,
 } from "lucide-react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
@@ -41,6 +44,17 @@ type JournalEntry = {
   pnl: number | null;
   notes: string;
   hasImage: boolean;
+  imageCount?: number;
+};
+
+type TradeImageItem = {
+  id: string;
+  url: string;
+  fileName: string;
+  objectPath?: string;
+  localKey?: string;
+  attachmentId?: string;
+  source: "LOCAL" | "CLOUD";
 };
 
 type JournalMap = Record<string, JournalEntry>;
@@ -132,6 +146,10 @@ function entryKey(account: TradingAccount, day: string) {
 
 function imageKey(account: TradingAccount, day: string) {
   return `${phaseKey(account)}:${day}:image`;
+}
+
+function imageItemKey(account: TradingAccount, day: string, id: string) {
+  return `${imageKey(account, day)}:${id}`;
 }
 
 function parseEntryKey(key: string): ParsedEntryKey | null {
@@ -227,6 +245,36 @@ async function getImage(key: string) {
     request.onerror = () => {
       db.close();
       resolve(null);
+    };
+  });
+}
+
+async function listLocalImages(prefix: string) {
+  const db = await openImageDb();
+  if (!db) return [] as Array<{ key: string; blob: Blob }>;
+
+  return new Promise<Array<{ key: string; blob: Blob }>>((resolve) => {
+    const items: Array<{ key: string; blob: Blob }> = [];
+    const tx = db.transaction(IMAGE_STORE, "readonly");
+    const request = tx.objectStore(IMAGE_STORE).openCursor();
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      const key = String(cursor.key);
+      if ((key === prefix || key.startsWith(`${prefix}:`)) && cursor.value instanceof Blob) {
+        items.push({ key, blob: cursor.value });
+      }
+      cursor.continue();
+    };
+
+    tx.oncomplete = () => {
+      db.close();
+      resolve(items);
+    };
+    tx.onerror = () => {
+      db.close();
+      resolve([]);
     };
   });
 }
@@ -364,6 +412,7 @@ async function loadCloudSnapshot(supabase: SupabaseClient, workspaceId: string):
       pnl: row.realized_pnl == null ? null : asNumber(row.realized_pnl),
       notes: String(row.notes ?? ""),
       hasImage: asNumber(row.screenshot_count) > 0,
+      imageCount: Math.max(0, Math.round(asNumber(row.screenshot_count))),
     };
   }
 
@@ -482,7 +531,7 @@ async function pushCloudSnapshot(
       trade_date: parsed.day,
       realized_pnl: entry.pnl,
       notes: entry.notes,
-      screenshot_count: entry.hasImage ? 1 : 0,
+      screenshot_count: Math.max(0, Math.round(entry.imageCount ?? (entry.hasImage ? 1 : 0))),
       metadata: { syncedFrom: "trading-account-manager" },
     }];
   });
@@ -516,24 +565,34 @@ async function getCloudTradingDay(supabase: SupabaseClient, workspaceId: string,
   return data?.id ? String(data.id) : null;
 }
 
-async function getCloudImageUrl(supabase: SupabaseClient, workspaceId: string, tradingDayId: string) {
+async function getCloudImages(supabase: SupabaseClient, workspaceId: string, tradingDayId: string) {
   const { data: rows, error } = await supabase
     .from("jarvis_attachments")
-    .select("object_path")
+    .select("id,object_path,file_name,created_at")
     .eq("workspace_id", workspaceId)
     .eq("entity_type", "trading_day")
     .eq("entity_id", tradingDayId)
-    .order("created_at", { ascending: false })
-    .limit(1);
+    .order("created_at", { ascending: true });
   if (error) throw error;
-  const path = rows?.[0]?.object_path;
-  if (!path) return null;
+  if (!rows?.length) return [] as TradeImageItem[];
 
-  const { data, error: signedError } = await supabase.storage
-    .from("jarvis-attachments")
-    .createSignedUrl(String(path), 60 * 60);
-  if (signedError) throw signedError;
-  return data.signedUrl;
+  const items: TradeImageItem[] = [];
+  for (const row of rows) {
+    const objectPath = String(row.object_path);
+    const { data, error: signedError } = await supabase.storage
+      .from("jarvis-attachments")
+      .createSignedUrl(objectPath, 60 * 60);
+    if (signedError || !data?.signedUrl) continue;
+    items.push({
+      id: String(row.id),
+      attachmentId: String(row.id),
+      objectPath,
+      fileName: String(row.file_name || "trade-image.jpg"),
+      url: data.signedUrl,
+      source: "CLOUD",
+    });
+  }
+  return items;
 }
 
 
