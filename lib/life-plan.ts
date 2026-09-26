@@ -41,7 +41,8 @@ export function loadLifePlan(): LifePlan {
   if (s && (typeof s.title !== "string" || !Number.isFinite(s.endsAt) || !Number.isFinite(s.minutes) || typeof s.day !== "string")) throw new Error("Invalid focus session");
   const missions = parsed.missions ?? [];
   if (!Array.isArray(missions) || missions.some((m: Mission) => !m || typeof m.id !== "string" || !PILLARS.some(p => p.id === m.pillar) || [m.title,m.detail,m.date,m.time,m.evidence].some(v => typeof v !== "string") || typeof m.done !== "boolean" || !Number.isFinite(m.minutes) || m.minutes <= 0)) throw new Error("Invalid mission history");
-  return { version: 2, days: parsed.days, session: s || null, missions, area: typeof parsed.area === "string" ? parsed.area : "All areas" };
+  const area = parsed.area === "Los Angeles" ? "Los Angeles" : "All areas";
+  return { version: 2, days: parsed.days, session: s || null, missions, area };
 }
 export const DAY_BLOCKS = [
   { id: "faith", label: "Start with God", time: "15 min", action: "Read a passage, pray, and write one action you will take from it." },
