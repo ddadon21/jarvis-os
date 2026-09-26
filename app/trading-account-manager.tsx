@@ -1441,7 +1441,11 @@ export default function TradingAccountManager({
                   <span className="day-number">{day.getDate()}</span>
                   {pnl !== null ? <strong>{pnlMoney(pnl)}</strong> : <i>—</i>}
                   {(entry?.notes.trim() || entry?.hasImage) ? (
-                    <small>{entry?.notes.trim() ? "NOTE" : ""}{entry?.notes.trim() && entry?.hasImage ? " · " : ""}{entry?.hasImage ? "IMG" : ""}</small>
+                    <small>
+                      {entry?.notes.trim() ? "NOTE" : ""}
+                      {entry?.notes.trim() && entry?.hasImage ? " · " : ""}
+                      {entry?.hasImage ? `IMG ×${Math.max(1, entry.imageCount ?? 1)}` : ""}
+                    </small>
                   ) : null}
                 </button>
               );
@@ -1511,26 +1515,60 @@ export default function TradingAccountManager({
             </label>
 
             <div className="journal-image-zone">
-              {imageUrl ? (
-                <div className="journal-image-preview">
-                  <img src={imageUrl} alt={`Trade screenshot for ${selectedDay}`} />
-                  <button type="button" onClick={() => void deleteImage()}>REMOVE IMAGE</button>
+              {imageItems.length > 0 ? (
+                <div className="journal-image-gallery">
+                  {imageItems.map((item, index) => (
+                    <div className="journal-image-tile" key={item.id}>
+                      <button
+                        type="button"
+                        className="journal-image-open"
+                        onClick={() => setActiveImage(item)}
+                        aria-label={`Open trade image ${index + 1}`}
+                      >
+                        <img src={item.url} alt={`Trade screenshot ${index + 1} for ${selectedDay}`} />
+                        <span><Maximize2 size={12} /> VIEW</span>
+                      </button>
+                      <div className="journal-image-tile-actions">
+                        <small>TRADE IMG {index + 1}</small>
+                        <button type="button" onClick={() => void downloadTradeImage(item)}><Download size={11} /> SAVE</button>
+                        <button type="button" onClick={() => void deleteImage(item)}>REMOVE</button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <label className="journal-image-upload">
-                  <ImagePlus size={18} />
-                  <span>{imageBusy ? "PROCESSING..." : "ADD TRADE PICTURE"}</span>
-                  <small>{cloudReady ? "Saved to JARVIS Cloud + local cache" : "Stored locally until JARVIS Cloud is connected"}</small>
-                  <input type="file" accept="image/*" onChange={(event) => void onImageChange(event)} disabled={imageBusy} />
-                </label>
-              )}
+              ) : null}
+
+              <label className="journal-image-upload">
+                <ImagePlus size={18} />
+                <span>{imageBusy ? "PROCESSING..." : imageItems.length ? "ADD MORE TRADE PICTURES" : "ADD TRADE PICTURES"}</span>
+                <small>{cloudReady ? "Multiple images save permanently to JARVIS Cloud" : "Stored locally until JARVIS Cloud is connected"}</small>
+                <input type="file" accept="image/*" multiple onChange={(event) => void onImageChange(event)} disabled={imageBusy} />
+              </label>
             </div>
 
             <button type="button" className="journal-save" onClick={saveJournal}>SAVE DAY</button>
-            {selectedEntry?.hasImage && !imageUrl ? <small className="journal-image-state">An image is recorded for this day.</small> : null}
+            {selectedEntry?.hasImage && imageItems.length === 0 ? <small className="journal-image-state">Trade images are recorded for this day and will load when storage is available.</small> : null}
           </article>
         </div>
       </div>
+
+      {activeImage ? (
+        <div className="trading-image-lightbox" role="dialog" aria-modal="true" aria-label="Trade image viewer" onClick={() => setActiveImage(null)}>
+          <div className="trading-image-lightbox-inner" onClick={(event) => event.stopPropagation()}>
+            <div className="trading-image-lightbox-head">
+              <div>
+                <span>TRADE IMAGE</span>
+                <b>{selectedDay}</b>
+              </div>
+              <div>
+                <button type="button" onClick={() => void downloadTradeImage(activeImage)}><Download size={13} /> SAVE IMAGE</button>
+                <button type="button" onClick={() => setActiveImage(null)} aria-label="Close image viewer"><X size={15} /></button>
+              </div>
+            </div>
+            <img src={activeImage.url} alt={`Expanded trade screenshot for ${selectedDay}`} />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
