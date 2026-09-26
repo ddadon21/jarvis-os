@@ -4,19 +4,27 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Cloud,
+  CloudOff,
   ImagePlus,
+  LogOut,
+  Mail,
   NotebookPen,
   Plus,
   RotateCcw,
   Trash2,
   Trophy,
 } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 
 type AccountStage = "EVAL" | "FUNDED";
+type CloudStatus = "LOCAL" | "CONNECTING" | "SYNCING" | "SYNCED" | "ERROR";
 
 type TradingAccount = {
   id: string;
+  cloudId?: string;
   firm: string;
   label: string;
   stage: AccountStage;
@@ -36,6 +44,20 @@ type JournalEntry = {
 };
 
 type JournalMap = Record<string, JournalEntry>;
+
+type LocalSnapshot = {
+  accounts: TradingAccount[];
+  selectedId: string;
+  journal: JournalMap;
+};
+
+type ParsedEntryKey = {
+  clientId: string;
+  cycle: number;
+  stage: AccountStage;
+  day: string;
+  phaseKey: string;
+};
 
 export type TradingAccountView = TradingAccount & {
   tradingDays: number;
@@ -84,6 +106,15 @@ function clamp(value: number, min = 0, max = 100) {
   return Math.min(max, Math.max(min, value));
 }
 
+function asNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 function dateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -103,10 +134,49 @@ function imageKey(account: TradingAccount, day: string) {
   return `${phaseKey(account)}:${day}:image`;
 }
 
+function parseEntryKey(key: string): ParsedEntryKey | null {
+  const match = key.match(/^(.+):cycle-(\d+):(EVAL|FUNDED):(\d{4}-\d{2}-\d{2})$/);
+  if (!match) return null;
+  return {
+    clientId: match[1],
+    cycle: Number(match[2]),
+    stage: match[3] as AccountStage,
+    day: match[4],
+    phaseKey: `${match[1]}:cycle-${match[2]}:${match[3]}`,
+  };
+}
+
 function parseNumber(value: string, fallback: number) {
   if (value.trim() === "") return 0;
   const parsed = Number(value.replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readLocalSnapshot(): LocalSnapshot {
+  let accounts: TradingAccount[] = [defaultAccount];
+  let selectedId = defaultAccount.id;
+  let journal: JournalMap = {};
+
+  try {
+    const storedAccounts = window.localStorage.getItem(ACCOUNTS_KEY);
+    const storedSelected = window.localStorage.getItem(SELECTED_KEY);
+    const storedJournal = window.localStorage.getItem(JOURNAL_KEY);
+
+    if (storedAccounts) {
+      const parsed = JSON.parse(storedAccounts) as TradingAccount[];
+      if (Array.isArray(parsed) && parsed.length) accounts = parsed;
+    }
+    if (storedSelected) selectedId = storedSelected;
+    if (storedJournal) {
+      const parsed = JSON.parse(storedJournal) as JournalMap;
+      if (parsed && typeof parsed === "object") journal = parsed;
+    }
+  } catch {
+    // Local cache is a fallback only. Cloud state becomes authoritative after sign-in.
+  }
+
+  if (!accounts.some((item) => item.id === selectedId)) selectedId = accounts[0]?.id ?? defaultAccount.id;
+  return { accounts, selectedId, journal };
 }
 
 function openImageDb(): Promise<IDBDatabase | null> {
@@ -218,6 +288,255 @@ function makeAccount(index: number): TradingAccount {
   };
 }
 
+async function getPrimaryWorkspaceId(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("jarvis_workspaces")
+    .select("id")
+    .eq("slug", "primary")
+    .maybeSingle();
+
+  if (error) throw error;
+  return typeof data?.id === "string" ? data.id : null;
+}
+
+async function loadCloudSnapshot(supabase: SupabaseClient, workspaceId: string): Promise<LocalSnapshot | null> {
+  const [{ data: accountRows, error: accountError }, { data: cycleRows, error: cycleError }, { data: dayRows, error: dayError }, { data: settingRow, error: settingError }] = await Promise.all([
+    supabase
+      .from("trading_accounts")
+      .select("id,client_id,firm,label,stage,start_balance,current_balance,loss_limit,profit_target,funded_buffer,required_trading_days,cycle_number,status")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "ARCHIVED")
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("trading_account_cycles")
+      .select("id,account_id,client_phase_key,cycle_number,stage")
+      .eq("workspace_id", workspaceId),
+    supabase
+      .from("trading_days")
+      .select("id,account_id,cycle_id,trade_date,realized_pnl,notes,screenshot_count,client_entry_key")
+      .eq("workspace_id", workspaceId)
+      .order("trade_date", { ascending: true }),
+    supabase
+      .from("jarvis_settings")
+      .select("value")
+      .eq("workspace_id", workspaceId)
+      .eq("scope", "TRADING")
+      .eq("key", "selected_account")
+      .maybeSingle(),
+  ]);
+
+  if (accountError) throw accountError;
+  if (cycleError) throw cycleError;
+  if (dayError) throw dayError;
+  if (settingError) throw settingError;
+  if (!accountRows?.length) return null;
+
+  const accounts: TradingAccount[] = accountRows.map((row) => ({
+    id: String(row.client_id || row.id),
+    cloudId: String(row.id),
+    firm: String(row.firm ?? "Unknown Firm"),
+    label: String(row.label ?? "Trading Account"),
+    stage: row.stage === "FUNDED" ? "FUNDED" : "EVAL",
+    startBalance: asNumber(row.start_balance),
+    currentBalance: asNumber(row.current_balance),
+    lossLimit: asNumber(row.loss_limit),
+    profitTarget: asNumber(row.profit_target),
+    fundedBuffer: asNumber(row.funded_buffer),
+    requiredTradingDays: Math.max(0, Math.round(asNumber(row.required_trading_days))),
+    cycle: Math.max(1, Math.round(asNumber(row.cycle_number, 1))),
+  }));
+
+  const accountClientId = new Map(accountRows.map((row) => [String(row.id), String(row.client_id || row.id)]));
+  const cyclePhase = new Map(
+    (cycleRows ?? []).map((row) => [
+      String(row.id),
+      String(row.client_phase_key || `${accountClientId.get(String(row.account_id))}:cycle-${row.cycle_number}:${row.stage}`),
+    ]),
+  );
+
+  const journal: JournalMap = {};
+  for (const row of dayRows ?? []) {
+    const phase = row.cycle_id ? cyclePhase.get(String(row.cycle_id)) : null;
+    const accountId = accountClientId.get(String(row.account_id));
+    const key = row.client_entry_key || (phase && accountId ? `${phase}:${row.trade_date}` : null);
+    if (!key) continue;
+    journal[String(key)] = {
+      pnl: row.realized_pnl == null ? null : asNumber(row.realized_pnl),
+      notes: String(row.notes ?? ""),
+      hasImage: asNumber(row.screenshot_count) > 0,
+    };
+  }
+
+  const preferred = settingRow?.value && typeof settingRow.value === "object"
+    ? String((settingRow.value as { clientId?: string }).clientId ?? "")
+    : "";
+  const selectedId = accounts.some((item) => item.id === preferred) ? preferred : accounts[0].id;
+
+  return { accounts, selectedId, journal };
+}
+
+async function pushCloudSnapshot(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  accounts: TradingAccount[],
+  journal: JournalMap,
+  selectedId: string,
+) {
+  if (!accounts.length) return;
+
+  const accountPayload = accounts.map((account) => ({
+    workspace_id: workspaceId,
+    client_id: account.id,
+    firm: account.firm,
+    label: account.label,
+    stage: account.stage,
+    status: "ACTIVE",
+    start_balance: account.startBalance,
+    current_balance: account.currentBalance,
+    loss_limit: account.lossLimit,
+    profit_target: account.profitTarget,
+    funded_buffer: account.fundedBuffer,
+    required_trading_days: account.requiredTradingDays,
+    cycle_number: account.cycle,
+    source: "JARVIS CLOUD",
+    metadata: { syncedFrom: "trading-account-manager" },
+  }));
+
+  const { error: accountUpsertError } = await supabase
+    .from("trading_accounts")
+    .upsert(accountPayload, { onConflict: "workspace_id,client_id" });
+  if (accountUpsertError) throw accountUpsertError;
+
+  const { data: accountRows, error: accountReadError } = await supabase
+    .from("trading_accounts")
+    .select("id,client_id")
+    .eq("workspace_id", workspaceId)
+    .in("client_id", accounts.map((item) => item.id));
+  if (accountReadError) throw accountReadError;
+
+  const cloudAccountByClient = new Map((accountRows ?? []).map((row) => [String(row.client_id), String(row.id)]));
+
+  const phases = new Map<string, { clientId: string; cycle: number; stage: AccountStage }>();
+  for (const account of accounts) {
+    phases.set(phaseKey(account), { clientId: account.id, cycle: account.cycle, stage: account.stage });
+  }
+  for (const key of Object.keys(journal)) {
+    const parsed = parseEntryKey(key);
+    if (parsed) phases.set(parsed.phaseKey, { clientId: parsed.clientId, cycle: parsed.cycle, stage: parsed.stage });
+  }
+
+  const cyclePayload = [...phases.entries()].flatMap(([clientPhaseKey, phase]) => {
+    const account = accounts.find((item) => item.id === phase.clientId);
+    const accountId = cloudAccountByClient.get(phase.clientId);
+    if (!account || !accountId) return [];
+    const targetBalance = phase.stage === "EVAL"
+      ? account.startBalance + Math.max(0, account.profitTarget)
+      : account.startBalance + Math.max(0, account.fundedBuffer);
+
+    return [{
+      workspace_id: workspaceId,
+      account_id: accountId,
+      client_phase_key: clientPhaseKey,
+      cycle_number: phase.cycle,
+      stage: phase.stage,
+      start_balance: account.startBalance,
+      current_balance: account.currentBalance,
+      loss_limit: account.lossLimit,
+      target_balance: targetBalance,
+      funded_buffer: account.fundedBuffer,
+      required_trading_days: account.requiredTradingDays,
+      outcome: "ACTIVE",
+      metadata: { syncedFrom: "trading-account-manager" },
+    }];
+  });
+
+  if (cyclePayload.length) {
+    const { error: cycleUpsertError } = await supabase
+      .from("trading_account_cycles")
+      .upsert(cyclePayload, { onConflict: "workspace_id,client_phase_key" });
+    if (cycleUpsertError) throw cycleUpsertError;
+  }
+
+  const phaseKeys = [...phases.keys()];
+  const { data: cycleRows, error: cycleReadError } = phaseKeys.length
+    ? await supabase
+        .from("trading_account_cycles")
+        .select("id,client_phase_key")
+        .eq("workspace_id", workspaceId)
+        .in("client_phase_key", phaseKeys)
+    : { data: [], error: null };
+  if (cycleReadError) throw cycleReadError;
+
+  const cycleByPhase = new Map((cycleRows ?? []).map((row) => [String(row.client_phase_key), String(row.id)]));
+
+  const dayPayload = Object.entries(journal).flatMap(([key, entry]) => {
+    const parsed = parseEntryKey(key);
+    if (!parsed) return [];
+    const accountId = cloudAccountByClient.get(parsed.clientId);
+    const cycleId = cycleByPhase.get(parsed.phaseKey);
+    if (!accountId || !cycleId) return [];
+    return [{
+      workspace_id: workspaceId,
+      account_id: accountId,
+      cycle_id: cycleId,
+      client_entry_key: key,
+      trade_date: parsed.day,
+      realized_pnl: entry.pnl,
+      notes: entry.notes,
+      screenshot_count: entry.hasImage ? 1 : 0,
+      metadata: { syncedFrom: "trading-account-manager" },
+    }];
+  });
+
+  if (dayPayload.length) {
+    const { error: dayUpsertError } = await supabase
+      .from("trading_days")
+      .upsert(dayPayload, { onConflict: "workspace_id,client_entry_key" });
+    if (dayUpsertError) throw dayUpsertError;
+  }
+
+  const { error: settingError } = await supabase
+    .from("jarvis_settings")
+    .upsert({
+      workspace_id: workspaceId,
+      scope: "TRADING",
+      key: "selected_account",
+      value: { clientId: selectedId },
+    }, { onConflict: "workspace_id,scope,key" });
+  if (settingError) throw settingError;
+}
+
+async function getCloudTradingDay(supabase: SupabaseClient, workspaceId: string, key: string) {
+  const { data, error } = await supabase
+    .from("trading_days")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("client_entry_key", key)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id ? String(data.id) : null;
+}
+
+async function getCloudImageUrl(supabase: SupabaseClient, workspaceId: string, tradingDayId: string) {
+  const { data: rows, error } = await supabase
+    .from("jarvis_attachments")
+    .select("object_path")
+    .eq("workspace_id", workspaceId)
+    .eq("entity_type", "trading_day")
+    .eq("entity_id", tradingDayId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const path = rows?.[0]?.object_path;
+  if (!path) return null;
+
+  const { data, error: signedError } = await supabase.storage
+    .from("jarvis-attachments")
+    .createSignedUrl(String(path), 60 * 60);
+  if (signedError) throw signedError;
+  return data.signedUrl;
+}
+
 export default function TradingAccountManager({
   onAccountChange,
 }: {
@@ -233,26 +552,19 @@ export default function TradingAccountManager({
   const [draftNotes, setDraftNotes] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>("LOCAL");
+  const [cloudMessage, setCloudMessage] = useState("Local cache active");
+  const [authEmail, setAuthEmail] = useState("");
 
   useEffect(() => {
-    try {
-      const storedAccounts = window.localStorage.getItem(ACCOUNTS_KEY);
-      const storedSelected = window.localStorage.getItem(SELECTED_KEY);
-      const storedJournal = window.localStorage.getItem(JOURNAL_KEY);
-      if (storedAccounts) {
-        const parsed = JSON.parse(storedAccounts) as TradingAccount[];
-        if (Array.isArray(parsed) && parsed.length) setAccounts(parsed);
-      }
-      if (storedSelected) setSelectedId(storedSelected);
-      if (storedJournal) {
-        const parsed = JSON.parse(storedJournal) as JournalMap;
-        if (parsed && typeof parsed === "object") setJournal(parsed);
-      }
-    } catch {
-      // Keep the safe local defaults when stored data is unavailable.
-    } finally {
-      setHydrated(true);
-    }
+    const local = readLocalSnapshot();
+    setAccounts(local.accounts);
+    setSelectedId(local.selectedId);
+    setJournal(local.journal);
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
@@ -272,6 +584,106 @@ export default function TradingAccountManager({
     window.localStorage.setItem(JOURNAL_KEY, JSON.stringify(journal));
     window.dispatchEvent(new CustomEvent("jarvis-trading-account-updated"));
   }, [journal, hydrated]);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    let active = true;
+
+    void supabase.auth.getUser().then(({ data }) => {
+      if (active) setUser(data.user ?? null);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setUser(session?.user ?? null);
+      if (!session?.user) {
+        setWorkspaceId(null);
+        setCloudReady(false);
+        setCloudStatus("LOCAL");
+        setCloudMessage("Local cache active");
+      }
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || !user) return;
+    let cancelled = false;
+    const supabase = getSupabaseBrowserClient();
+
+    async function initializeCloud() {
+      setCloudStatus("CONNECTING");
+      setCloudMessage("Connecting permanent memory…");
+
+      try {
+        const id = await getPrimaryWorkspaceId(supabase);
+        if (cancelled) return;
+        if (!id) {
+          setCloudStatus("ERROR");
+          setCloudMessage("Signed in, but this account does not have JARVIS workspace access.");
+          return;
+        }
+
+        setWorkspaceId(id);
+        const remote = await loadCloudSnapshot(supabase, id);
+        if (cancelled) return;
+
+        if (remote) {
+          setAccounts(remote.accounts);
+          setSelectedId(remote.selectedId);
+          setJournal(remote.journal);
+        } else {
+          const local = readLocalSnapshot();
+          await pushCloudSnapshot(supabase, id, local.accounts, local.journal, local.selectedId);
+          if (cancelled) return;
+          const migrated = await loadCloudSnapshot(supabase, id);
+          if (migrated) {
+            setAccounts(migrated.accounts);
+            setSelectedId(migrated.selectedId);
+            setJournal(migrated.journal);
+          }
+        }
+
+        if (cancelled) return;
+        setCloudReady(true);
+        setCloudStatus("SYNCED");
+        setCloudMessage("Permanent memory synced");
+      } catch (error) {
+        if (cancelled) return;
+        setCloudStatus("ERROR");
+        setCloudMessage(error instanceof Error ? error.message : "Cloud sync failed");
+      }
+    }
+
+    void initializeCloud();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, user?.id]);
+
+  useEffect(() => {
+    if (!hydrated || !cloudReady || !workspaceId || !user) return;
+    const supabase = getSupabaseBrowserClient();
+    const timer = window.setTimeout(() => {
+      setCloudStatus("SYNCING");
+      setCloudMessage("Saving to permanent memory…");
+      void pushCloudSnapshot(supabase, workspaceId, accounts, journal, selectedId)
+        .then(() => {
+          setCloudStatus("SYNCED");
+          setCloudMessage("Permanent memory synced");
+        })
+        .catch((error) => {
+          setCloudStatus("ERROR");
+          setCloudMessage(error instanceof Error ? error.message : "Cloud sync failed");
+        });
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, [accounts, journal, selectedId, hydrated, cloudReady, workspaceId, user?.id]);
 
   const account = accounts.find((item) => item.id === selectedId) ?? accounts[0] ?? null;
 
@@ -337,14 +749,32 @@ export default function TradingAccountManager({
         setImageUrl(null);
         return;
       }
-      const blob = await getImage(imageKey(account, selectedDay));
+
+      const localBlob = await getImage(imageKey(account, selectedDay));
       if (!active) return;
-      if (blob) {
-        objectUrl = URL.createObjectURL(blob);
+      if (localBlob) {
+        objectUrl = URL.createObjectURL(localBlob);
         setImageUrl(objectUrl);
-      } else {
-        setImageUrl(null);
+        return;
       }
+
+      if (cloudReady && workspaceId && user) {
+        try {
+          const supabase = getSupabaseBrowserClient();
+          const dayId = await getCloudTradingDay(supabase, workspaceId, entryKey(account, selectedDay));
+          if (!dayId || !active) {
+            if (active) setImageUrl(null);
+            return;
+          }
+          const signedUrl = await getCloudImageUrl(supabase, workspaceId, dayId);
+          if (active) setImageUrl(signedUrl);
+          return;
+        } catch {
+          // Keep the journal usable even if an attachment cannot be loaded.
+        }
+      }
+
+      if (active) setImageUrl(null);
     }
 
     void load();
@@ -352,7 +782,7 @@ export default function TradingAccountManager({
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [account, selectedDay, journal]);
+  }, [account, selectedDay, journal, cloudReady, workspaceId, user?.id]);
 
   function patchAccount(patch: Partial<TradingAccount>) {
     if (!account) return;
@@ -367,17 +797,59 @@ export default function TradingAccountManager({
     setMonthCursor(new Date());
   }
 
+  async function archiveCloudAccount(clientId: string) {
+    if (!cloudReady || !workspaceId || !user) return;
+    const supabase = getSupabaseBrowserClient();
+    await supabase
+      .from("trading_accounts")
+      .update({ status: "ARCHIVED" })
+      .eq("workspace_id", workspaceId)
+      .eq("client_id", clientId);
+  }
+
   function deleteAccount() {
     if (!account || accounts.length === 1) return;
-    if (!window.confirm(`Delete ${account.label}? Its local account setup will be removed.`)) return;
-    const next = accounts.filter((item) => item.id !== account.id);
+    if (!window.confirm(`Archive ${account.label}? Its cloud history will be preserved.`)) return;
+    const deletingId = account.id;
+    const next = accounts.filter((item) => item.id !== deletingId);
     setAccounts(next);
     setSelectedId(next[0].id);
+    void archiveCloudAccount(deletingId);
+  }
+
+  async function recordCycleOutcome(target: TradingAccount, outcome: "PASSED" | "BLOWN") {
+    if (!cloudReady || !workspaceId || !user) return;
+    const supabase = getSupabaseBrowserClient();
+    try {
+      await pushCloudSnapshot(supabase, workspaceId, accounts, journal, selectedId);
+      await supabase
+        .from("trading_account_cycles")
+        .update({ outcome, ended_at: new Date().toISOString() })
+        .eq("workspace_id", workspaceId)
+        .eq("client_phase_key", phaseKey(target));
+
+      await supabase.from("jarvis_events").insert({
+        workspace_id: workspaceId,
+        domain: "TRADING",
+        event_type: outcome === "PASSED" ? "trading.account_passed" : "trading.account_blown",
+        source: "jarvis.trading.account-manager",
+        importance: "IMPORTANT",
+        summary: outcome === "PASSED"
+          ? `${target.label} evaluation passed.`
+          : `${target.label} cycle marked blown and reset.`,
+        entity_type: "trading_account",
+        entity_id: target.cloudId ?? null,
+        payload: { clientId: target.id, cycle: target.cycle, stage: target.stage },
+      });
+    } catch {
+      // The local transition still completes and will sync again when cloud recovers.
+    }
   }
 
   function resetBlownAccount() {
     if (!account) return;
-    if (!window.confirm("Reset this account as a fresh evaluation? The old calendar stays archived under the previous cycle.")) return;
+    if (!window.confirm("Reset this account as a fresh evaluation? The old calendar and cloud history stay archived under the previous cycle.")) return;
+    void recordCycleOutcome(account, "BLOWN");
     patchAccount({
       stage: "EVAL",
       label: /FUNDED/i.test(account.label) ? account.label.replace(/FUNDED/gi, "EVAL") : account.label,
@@ -391,6 +863,7 @@ export default function TradingAccountManager({
   function markPassed() {
     if (!account || account.stage !== "EVAL") return;
     if (!window.confirm("Mark this evaluation as passed and start a fresh funded calendar?")) return;
+    void recordCycleOutcome(account, "PASSED");
     patchAccount({
       stage: "FUNDED",
       label: /EVAL/i.test(account.label) ? account.label.replace(/EVAL/gi, "FUNDED") : account.label,
@@ -421,6 +894,37 @@ export default function TradingAccountManager({
     }
   }
 
+  async function uploadImageToCloud(targetAccount: TradingAccount, day: string, blob: Blob, nextJournal: JournalMap) {
+    if (!cloudReady || !workspaceId || !user) return;
+    const supabase = getSupabaseBrowserClient();
+
+    await pushCloudSnapshot(supabase, workspaceId, accounts, nextJournal, selectedId);
+    const dayKey = entryKey(targetAccount, day);
+    const tradingDayId = await getCloudTradingDay(supabase, workspaceId, dayKey);
+    if (!tradingDayId) return;
+
+    const safePhase = phaseKey(targetAccount).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const objectPath = `${workspaceId}/trading/${targetAccount.id}/${safePhase}/${day}/trade-${Date.now()}.jpg`;
+    const { error: uploadError } = await supabase.storage
+      .from("jarvis-attachments")
+      .upload(objectPath, blob, { contentType: "image/jpeg", upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { error: attachmentError } = await supabase.from("jarvis_attachments").insert({
+      workspace_id: workspaceId,
+      domain: "TRADING",
+      entity_type: "trading_day",
+      entity_id: tradingDayId,
+      bucket: "jarvis-attachments",
+      object_path: objectPath,
+      file_name: `trade-${day}.jpg`,
+      mime_type: "image/jpeg",
+      size_bytes: blob.size,
+      metadata: { clientEntryKey: dayKey, clientId: targetAccount.id, tradeDate: day },
+    });
+    if (attachmentError) throw attachmentError;
+  }
+
   async function onImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -431,12 +935,25 @@ export default function TradingAccountManager({
       const compressed = await compressImage(file);
       const saved = await putImage(imageKey(account, selectedDay), compressed);
       if (!saved) return;
+
       const key = entryKey(account, selectedDay);
       const previous = journal[key] ?? { pnl: null, notes: "", hasImage: false };
-      setJournal((current) => ({
-        ...current,
+      const nextJournal = {
+        ...journal,
         [key]: { ...previous, hasImage: true },
-      }));
+      };
+      setJournal(nextJournal);
+
+      if (cloudReady && workspaceId && user) {
+        setCloudStatus("SYNCING");
+        setCloudMessage("Uploading trade image…");
+        await uploadImageToCloud(account, selectedDay, compressed, nextJournal);
+        setCloudStatus("SYNCED");
+        setCloudMessage("Permanent memory synced");
+      }
+    } catch (error) {
+      setCloudStatus("ERROR");
+      setCloudMessage(error instanceof Error ? error.message : "Image upload failed");
     } finally {
       setImageBusy(false);
     }
@@ -447,11 +964,78 @@ export default function TradingAccountManager({
     await removeImage(imageKey(account, selectedDay));
     const key = entryKey(account, selectedDay);
     const previous = journal[key] ?? { pnl: null, notes: "", hasImage: false };
-    setJournal((current) => ({
-      ...current,
+    const nextJournal = {
+      ...journal,
       [key]: { ...previous, hasImage: false },
-    }));
+    };
+    setJournal(nextJournal);
     setImageUrl(null);
+
+    if (!cloudReady || !workspaceId || !user) return;
+
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
+      if (!tradingDayId) return;
+
+      const { data: attachments, error: readError } = await supabase
+        .from("jarvis_attachments")
+        .select("id,object_path")
+        .eq("workspace_id", workspaceId)
+        .eq("entity_type", "trading_day")
+        .eq("entity_id", tradingDayId);
+      if (readError) throw readError;
+
+      const paths = (attachments ?? []).map((item) => String(item.object_path));
+      if (paths.length) {
+        const { error: removeError } = await supabase.storage.from("jarvis-attachments").remove(paths);
+        if (removeError) throw removeError;
+      }
+
+      if (attachments?.length) {
+        const ids = attachments.map((item) => String(item.id));
+        const { error: deleteError } = await supabase
+          .from("jarvis_attachments")
+          .delete()
+          .in("id", ids);
+        if (deleteError) throw deleteError;
+      }
+    } catch (error) {
+      setCloudStatus("ERROR");
+      setCloudMessage(error instanceof Error ? error.message : "Cloud image removal failed");
+    }
+  }
+
+  async function sendSignInLink(event: FormEvent) {
+    event.preventDefault();
+    const email = authEmail.trim();
+    if (!email) return;
+
+    const supabase = getSupabaseBrowserClient();
+    setCloudStatus("CONNECTING");
+    setCloudMessage("Sending secure sign-in link…");
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/work` },
+    });
+
+    if (error) {
+      setCloudStatus("ERROR");
+      setCloudMessage(error.message);
+      return;
+    }
+
+    setCloudStatus("LOCAL");
+    setCloudMessage("Check your email for the JARVIS sign-in link.");
+  }
+
+  async function signOut() {
+    await getSupabaseBrowserClient().auth.signOut();
+    setCloudReady(false);
+    setWorkspaceId(null);
+    setCloudStatus("LOCAL");
+    setCloudMessage("Local cache active");
   }
 
   if (!account) return null;
@@ -460,10 +1044,45 @@ export default function TradingAccountManager({
   const monthLabel = monthCursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const selectedEntry = journal[entryKey(account, selectedDay)];
   const accountGoal = account.stage === "EVAL" ? "MLL → PASS TARGET" : "LOSS LIMIT → BUFFER TARGET";
+  const cloudLabel =
+    cloudStatus === "SYNCED" ? "CLOUD SYNCED" :
+    cloudStatus === "SYNCING" ? "SYNCING" :
+    cloudStatus === "CONNECTING" ? "CONNECTING" :
+    cloudStatus === "ERROR" ? "SYNC ERROR" :
+    "LOCAL ONLY";
 
   return (
     <section className="trading-account-system">
       <article className="trading-card trading-account-overview">
+        <div className="trading-cloud-bar">
+          <div className={`trading-cloud-state is-${cloudStatus.toLowerCase()}`}>
+            {cloudStatus === "SYNCED" || cloudStatus === "SYNCING" ? <Cloud size={13} /> : <CloudOff size={13} />}
+            <div>
+              <b>{cloudLabel}</b>
+              <small>{cloudMessage}</small>
+            </div>
+          </div>
+
+          {user ? (
+            <div className="trading-cloud-user">
+              <span>{user.email ?? "JARVIS OWNER"}</span>
+              <button type="button" onClick={() => void signOut()}><LogOut size={12} /> SIGN OUT</button>
+            </div>
+          ) : (
+            <form className="trading-cloud-login" onSubmit={(event) => void sendSignInLink(event)}>
+              <Mail size={13} />
+              <input
+                type="email"
+                placeholder="EMAIL FOR JARVIS CLOUD"
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+                autoComplete="email"
+              />
+              <button type="submit">CONNECT PERMANENT MEMORY</button>
+            </form>
+          )}
+        </div>
+
         <div className="trading-account-toolbar">
           <div>
             <span className="trading-account-kicker">ACCOUNT DETAILS</span>
@@ -485,7 +1104,7 @@ export default function TradingAccountManager({
               <button type="button" className="is-pass" onClick={markPassed}><Trophy size={13} /> PASS → FUNDED</button>
             ) : null}
             <button type="button" className="is-danger" onClick={resetBlownAccount}><RotateCcw size={13} /> BLOWN / RESET</button>
-            <button type="button" className="icon-only" onClick={deleteAccount} disabled={accounts.length === 1} aria-label="Delete account">
+            <button type="button" className="icon-only" onClick={deleteAccount} disabled={accounts.length === 1} aria-label="Archive account">
               <Trash2 size={13} />
             </button>
           </div>
@@ -593,7 +1212,7 @@ export default function TradingAccountManager({
           <article className="trading-card account-input-card">
             <div className="trading-card-head">
               <span>ACCOUNT INPUT</span>
-              <b>LIVE SOURCE</b>
+              <b>{cloudReady ? "CLOUD SOURCE" : "LOCAL CACHE"}</b>
             </div>
             <div className="account-input-grid">
               <label><span>PROP FIRM</span><input value={account.firm} onChange={(event) => patchAccount({ firm: event.target.value })} /></label>
@@ -616,7 +1235,11 @@ export default function TradingAccountManager({
                 </>
               )}
             </div>
-            <p className="account-input-note">This is the selected account source of truth. Changes update the progress tracker, account context, funded-day tracker and calendar immediately.</p>
+            <p className="account-input-note">
+              {cloudReady
+                ? "Supabase is now the permanent source of truth. Changes are cached locally for speed and synced to JARVIS memory automatically."
+                : "Local cache is active. Connect JARVIS Cloud above once and this account, calendar, notes and future trade images persist across deployments and devices."}
+            </p>
           </article>
 
           <article className="trading-card day-journal-card">
@@ -652,14 +1275,14 @@ export default function TradingAccountManager({
                 <label className="journal-image-upload">
                   <ImagePlus size={18} />
                   <span>{imageBusy ? "PROCESSING..." : "ADD TRADE PICTURE"}</span>
-                  <small>Stored locally in Jarvis on this device</small>
+                  <small>{cloudReady ? "Saved to JARVIS Cloud + local cache" : "Stored locally until JARVIS Cloud is connected"}</small>
                   <input type="file" accept="image/*" onChange={(event) => void onImageChange(event)} disabled={imageBusy} />
                 </label>
               )}
             </div>
 
             <button type="button" className="journal-save" onClick={saveJournal}>SAVE DAY</button>
-            {selectedEntry?.hasImage && !imageUrl ? <small className="journal-image-state">Image is stored for this day.</small> : null}
+            {selectedEntry?.hasImage && !imageUrl ? <small className="journal-image-state">An image is recorded for this day.</small> : null}
           </article>
         </div>
       </div>
