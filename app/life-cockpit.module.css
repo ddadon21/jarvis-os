@@ -233,3 +233,37 @@
   border-color:rgba(183,31,38,.28)!important;
   color:#d47b80!important;
 }
+
+
+.exploreButtons,
+.exploreAreaButtons{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin-top:10px;
+}
+.life .exploreButtons button,
+.life .exploreAreaButtons button{
+  border-color:rgba(255,255,255,.10);
+  background:var(--jarvis-cell-surface);
+}
+.life .exploreButtons button:hover,
+.life .exploreAreaButtons button:hover{
+  border-color:rgba(183,31,38,.46);
+  background:rgba(183,31,38,.08);
+}
+.life .exploreAreaButtons button[aria-pressed=true]{
+  color:#fff;
+  border-color:rgba(183,31,38,.52);
+  background:rgba(183,31,38,.11);
+}
+.focusForm input[type=number]{
+  font-variant-numeric:tabular-nums;
+}
+@media(max-width:760px){
+  .exploreButtons,
+  .exploreAreaButtons{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+}
