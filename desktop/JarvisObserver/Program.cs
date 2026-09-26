@@ -32,7 +32,7 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly System.Threading.Timer _semanticTimer;
     private readonly System.Threading.Timer _ocrTimer;
     private readonly LocalExecutionOcr _executionOcr = new();
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(45) };
+    private readonly HttpClient _http = CreateHttpClient();
     private readonly UIA3Automation _automation = new();
     private readonly string _root;
     private readonly string _configPath;
@@ -82,7 +82,9 @@ internal sealed class ObserverContext : ApplicationContext
         Directory.CreateDirectory(_root);
         _configPath = Path.Combine(_root, "config.json");
         _config = ObserverConfig.Load(_configPath);
+        ImportLocalSecretsIfPresent();
         NormalizeServerUrl();
+        NormalizeObsidianConfig();
         NormalizePerformanceConfig();
         SaveConfig();
 
@@ -93,6 +95,7 @@ internal sealed class ObserverContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Obsidian: Set / replace API key", null, (_, _) => PromptAndStoreObsidianApiKey(showSuccess: true));
         menu.Items.Add("Obsidian: Test connection", null, async (_, _) => await TestObsidianConnectionAsync(showSuccess: true));
+        menu.Items.Add("Obsidian: Write Local Agent test note", null, async (_, _) => await WriteObsidianAgentTestNoteAsync(showSuccess: true));
         menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
@@ -107,7 +110,15 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.5.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.6.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(1200);
+            if (!string.IsNullOrWhiteSpace(GetObsidianApiKey()))
+            {
+                await TestObsidianConnectionAsync(showSuccess: false);
+            }
+        });
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
@@ -484,7 +495,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.5.0",
+            observerVersion = "0.6.0",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -782,6 +793,84 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
+    private static HttpClient CreateHttpClient()
+    {
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (request, _, _, errors) =>
+            {
+                if (errors == System.Net.Security.SslPolicyErrors.None) return true;
+                var uri = request?.RequestUri;
+                return uri is not null && uri.IsLoopback;
+            },
+        };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(45) };
+    }
+
+    private void ImportLocalSecretsIfPresent()
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".jarvis",
+            "secrets.env");
+        if (!File.Exists(path)) return;
+
+        try
+        {
+            var values = File.ReadAllLines(path)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0 && !line.StartsWith("#", StringComparison.Ordinal))
+                .Select(line => line.Split('=', 2))
+                .Where(parts => parts.Length == 2)
+                .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+
+            if (values.TryGetValue("OBSIDIAN_BASE_URL", out var baseUrl) && !string.IsNullOrWhiteSpace(baseUrl))
+                _config.ObsidianApiUrl = baseUrl.TrimEnd('/');
+
+            if (values.TryGetValue("OBSIDIAN_VAULT", out var vault) && !string.IsNullOrWhiteSpace(vault))
+                _config.ObsidianVaultName = vault.Trim();
+
+            if (values.TryGetValue("OBSIDIAN_API_KEY", out var apiKey) && !string.IsNullOrWhiteSpace(apiKey))
+            {
+                var clearBytes = Encoding.UTF8.GetBytes(apiKey.Trim());
+                var protectedBytes = ProtectedData.Protect(clearBytes, null, DataProtectionScope.CurrentUser);
+                _config.ObsidianApiKeyProtected = Convert.ToBase64String(protectedBytes);
+
+                var safeLines = new[]
+                {
+                    "# JARVIS Local Agent imported the API key into Windows DPAPI.",
+                    $"OBSIDIAN_BASE_URL={_config.ObsidianApiUrl}",
+                    $"OBSIDIAN_VAULT={_config.ObsidianVaultName}",
+                };
+                File.WriteAllLines(path, safeLines, Encoding.UTF8);
+                Log(new { type = "obsidian.secret.imported", at = DateTime.UtcNow, storage = "windows-dpapi", source = path });
+            }
+        }
+        catch (Exception ex)
+        {
+            Log(new { type = "obsidian.secret.import_failed", at = DateTime.UtcNow, error = ex.Message });
+        }
+    }
+
+    private void NormalizeObsidianConfig()
+    {
+        if (string.IsNullOrWhiteSpace(_config.ObsidianApiUrl) ||
+            string.Equals(_config.ObsidianApiUrl, "http://127.0.0.1:27123", StringComparison.OrdinalIgnoreCase))
+        {
+            _config.ObsidianApiUrl = "https://127.0.0.1:27124";
+        }
+
+        if (string.IsNullOrWhiteSpace(_config.ObsidianVaultName))
+            _config.ObsidianVaultName = "Jarvis Knowledge Vault";
+    }
+
+    private string ObsidianBaseUrl()
+    {
+        return string.IsNullOrWhiteSpace(_config.ObsidianApiUrl)
+            ? "https://127.0.0.1:27124"
+            : _config.ObsidianApiUrl.TrimEnd('/');
+    }
+
     private bool PromptAndStoreObsidianApiKey(bool showSuccess)
     {
         var value = PromptSecret(
@@ -812,7 +901,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (showSuccess)
         {
             MessageBox.Show(
-                "Obsidian API key saved locally and encrypted with Windows DPAPI.\n\nNext, enable the HTTP server in Obsidian → Settings → Local REST API, then choose “Obsidian: Test connection” from the JARVIS tray menu.",
+                "Obsidian API key saved locally and encrypted with Windows DPAPI.\n\nNext, choose “Obsidian: Test connection” from the JARVIS tray menu.",
                 "JARVIS Local Agent",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -832,9 +921,7 @@ internal sealed class ObserverContext : ApplicationContext
 
         if (string.IsNullOrWhiteSpace(apiKey)) return false;
 
-        var baseUrl = string.IsNullOrWhiteSpace(_config.ObsidianApiUrl)
-            ? "http://127.0.0.1:27123"
-            : _config.ObsidianApiUrl.TrimEnd('/');
+        var baseUrl = ObsidianBaseUrl();
 
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) ||
             !(baseUri.IsLoopback || string.Equals(baseUri.Host, "localhost", StringComparison.OrdinalIgnoreCase)))
@@ -867,7 +954,7 @@ internal sealed class ObserverContext : ApplicationContext
             if (!res.IsSuccessStatusCode)
             {
                 MessageBox.Show(
-                    $"Obsidian responded with HTTP {(int)res.StatusCode}.\n\nMake sure Local REST API is enabled, its HTTP server is enabled, and the saved API key is current.",
+                    $"Obsidian responded with HTTP {(int)res.StatusCode}.\n\nMake sure Local REST API is enabled and the saved API key is current.",
                     "JARVIS Local Agent — Obsidian",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -889,10 +976,91 @@ internal sealed class ObserverContext : ApplicationContext
         {
             Log(new { type = "obsidian.connection.error", at = DateTime.UtcNow, error = ex.Message });
             MessageBox.Show(
-                "JARVIS could not reach Obsidian.\n\nIn Obsidian → Settings → Local REST API, enable the plugin and enable its HTTP server (127.0.0.1:27123), then try again.\n\n" + ex.Message,
+                "JARVIS could not reach Obsidian.\n\nIn Obsidian → Settings → Local REST API, confirm the plugin is enabled and HTTPS is listening on 127.0.0.1:27124, then try again.\n\n" + ex.Message,
                 "JARVIS Local Agent — Obsidian",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
+            return false;
+        }
+    }
+
+    private async Task<bool> WriteObsidianAgentTestNoteAsync(bool showSuccess)
+    {
+        var apiKey = GetObsidianApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            if (!PromptAndStoreObsidianApiKey(showSuccess: false)) return false;
+            apiKey = GetObsidianApiKey();
+        }
+        if (string.IsNullOrWhiteSpace(apiKey)) return false;
+
+        var baseUrl = ObsidianBaseUrl();
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) || !baseUri.IsLoopback)
+        {
+            MessageBox.Show(
+                "For safety, the JARVIS Obsidian bridge only connects to localhost / 127.0.0.1.",
+                "JARVIS Local Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
+        }
+
+        var path = "00%20Inbox/JARVIS%20Local%20Agent.md";
+        var markdown = string.Join(Environment.NewLine, new[]
+        {
+            "# JARVIS Local Agent",
+            "",
+            $"Connected: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+            "",
+            "Obsidian bridge: ONLINE",
+            "",
+            "This note was written directly by the JARVIS Windows Local Agent.",
+        });
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Put, baseUrl + "/vault/" + path);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            req.Content = new StringContent(markdown, Encoding.UTF8, "text/markdown");
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var res = await _http.SendAsync(req, cts.Token);
+            if (!res.IsSuccessStatusCode)
+            {
+                Log(new { type = "obsidian.write_test.failed", at = DateTime.UtcNow, status = (int)res.StatusCode });
+                if (showSuccess)
+                {
+                    MessageBox.Show(
+                        $"Obsidian write test failed with HTTP {(int)res.StatusCode}.",
+                        "JARVIS Local Agent — Obsidian",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+                return false;
+            }
+
+            Log(new { type = "obsidian.write_test.ok", at = DateTime.UtcNow, path = "00 Inbox/JARVIS Local Agent.md" });
+            if (showSuccess)
+            {
+                MessageBox.Show(
+                    "JARVIS Local Agent wrote 00 Inbox/JARVIS Local Agent.md successfully.",
+                    "JARVIS Local Agent — Obsidian connected",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log(new { type = "obsidian.write_test.error", at = DateTime.UtcNow, error = ex.Message });
+            if (showSuccess)
+            {
+                MessageBox.Show(
+                    "JARVIS could not write the Obsidian test note.\n\n" + ex.Message,
+                    "JARVIS Local Agent — Obsidian",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
             return false;
         }
     }
@@ -1414,7 +1582,10 @@ internal sealed class ObserverConfig
     public string? VercelBypassSecretProtected { get; set; }
 
     [JsonPropertyName("obsidianApiUrl")]
-    public string? ObsidianApiUrl { get; set; } = "http://127.0.0.1:27123";
+    public string? ObsidianApiUrl { get; set; } = "https://127.0.0.1:27124";
+
+    [JsonPropertyName("obsidianVaultName")]
+    public string? ObsidianVaultName { get; set; } = "Jarvis Knowledge Vault";
 
     [JsonPropertyName("obsidianApiKeyProtected")]
     public string? ObsidianApiKeyProtected { get; set; }
