@@ -139,7 +139,7 @@ export type TradingObservationInput = {
 };
 
 const STATE_KEY = "jarvis:runtime:trading:v1";
-const TTL = 60 * 60 * 24 * 30;
+const TTL = 60 * 60 * 24 * 365;
 
 const fallback = globalThis as typeof globalThis & { __jarvisTradingRuntime?: Map<string, unknown> };
 const fallbackStore = fallback.__jarvisTradingRuntime ?? new Map<string, unknown>();
