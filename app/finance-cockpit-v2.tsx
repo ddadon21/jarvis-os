@@ -70,7 +70,7 @@ export default function FinanceCockpitV2() {
   const updatePlan = (key: keyof PayoutPlan, value: string) => { setPlan(p => ({ ...p, [key]: value })); setSaved(""); };
   function savePlan() {
     if (projection.error) return;
-    try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); setSaved("Saved on this browser. No money moved."); }
+    try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); setSaved("Saved to local cache; JARVIS Cloud sync follows automatically. No money moved."); }
     catch { setSaved("Storage unavailable. Your draft remains open but is not saved."); }
   }
 
@@ -152,7 +152,7 @@ export default function FinanceCockpitV2() {
           <p className={s.muted}>Projection excludes future interest, charges, and any minimum payment assigned under bills. Actual account balances stay unchanged.</p>
           {projection.error && <p className={s.review}>{projection.error}</p>}
           <button disabled={Boolean(projection.error)} onClick={savePlan}>SAVE PLAN ON THIS BROWSER</button>
-          <button onClick={() => { setPlan(EMPTY_PAYOUT_PLAN); try { localStorage.removeItem(PLAN_KEY); setSaved("Draft cleared on this browser."); } catch { setSaved("Draft cleared; stored copy could not be removed."); } }}>CLEAR DRAFT</button>
+          <button onClick={() => { setPlan(EMPTY_PAYOUT_PLAN); try { localStorage.removeItem(PLAN_KEY); setSaved("Draft cleared locally and will be removed from JARVIS Cloud."); } catch { setSaved("Draft cleared; stored copy could not be removed."); } }}>CLEAR DRAFT</button>
           {saved && <p role="status">{saved}</p>}
         </aside>
       </div>
