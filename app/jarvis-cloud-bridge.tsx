@@ -1069,6 +1069,80 @@ export default function JarvisCloudBridge() {
   }, []);
 
   useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    async function runPersistenceAudit() {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId) return;
+
+      try {
+        const [
+          tradingAccounts,
+          tradingDays,
+          payouts,
+          tradeAttachments,
+          financeHistory,
+          financePlans,
+          lifeDays,
+          lifeMissions,
+          lifeHabits,
+          sentryHistory,
+          snapshots,
+          revisions,
+        ] = await Promise.all([
+          supabase.from("trading_accounts").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("trading_days").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("trading_payouts").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("jarvis_attachments").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("domain", "TRADING"),
+          supabase.from("finance_state_history").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("finance_plans").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("life_days").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("life_missions").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("life_habit_days").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("sentryops_state_history").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("jarvis_state_snapshots").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+          supabase.from("jarvis_state_revisions").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+        ]);
+
+        await Promise.all([
+          markPersistence(supabase, workspaceId, "TRADING", "structured-audit", {
+            accounts: tradingAccounts.count ?? 0,
+            days: tradingDays.count ?? 0,
+            payouts: payouts.count ?? 0,
+            attachments: tradeAttachments.count ?? 0,
+          }),
+          markPersistence(supabase, workspaceId, "FINANCE", "structured-audit", {
+            history: financeHistory.count ?? 0,
+            plans: financePlans.count ?? 0,
+          }),
+          markPersistence(supabase, workspaceId, "LIFE", "structured-audit", {
+            days: lifeDays.count ?? 0,
+            missions: lifeMissions.count ?? 0,
+            habitDays: lifeHabits.count ?? 0,
+          }),
+          markPersistence(supabase, workspaceId, "SENTRYOPS", "structured-audit", {
+            history: sentryHistory.count ?? 0,
+          }),
+          markPersistence(supabase, workspaceId, "CORE", "revision-audit", {
+            snapshots: snapshots.count ?? 0,
+            revisions: revisions.count ?? 0,
+          }),
+        ]);
+      } catch {
+        // The next audit run retries without interrupting Jarvis.
+      }
+    }
+
+    void runPersistenceAudit();
+    const timer = window.setInterval(() => void runPersistenceAudit(), 60_000);
+    window.addEventListener("focus", runPersistenceAudit);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", runPersistenceAudit);
+    };
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.jarvisCloud = status.toLowerCase();
     return () => {
       delete document.documentElement.dataset.jarvisCloud;
