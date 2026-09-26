@@ -1690,3 +1690,30 @@
   font-weight:700;
   letter-spacing:.08em;
 }
+
+
+/* Rules header spacing fix */
+.trading-rules-panel .dwight-rules-header{
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  column-gap:12px;
+  padding:2px 1px 8px;
+}
+.trading-rules-panel .dwight-rules-header span{
+  min-width:0;
+  font-size:9px;
+  line-height:1;
+  white-space:nowrap;
+}
+.trading-rules-panel .dwight-rules-header b{
+  justify-self:end;
+  flex-shrink:0;
+  min-width:24px;
+  text-align:right;
+  line-height:1;
+  white-space:nowrap;
+}
