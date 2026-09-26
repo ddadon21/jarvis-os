@@ -496,6 +496,11 @@ export default function JarvisCloudBridge() {
             .from("jarvis_memories")
             .upsert(memories, { onConflict: "workspace_id,client_id" });
         }
+
+        await markPersistence(supabase, workspaceId, "CORE", "chat-memory", {
+          messages: messages.length,
+          memories: memories.length,
+        });
       } catch {
         // History remains in the state snapshot and retries later.
       }
@@ -591,6 +596,11 @@ export default function JarvisCloudBridge() {
         let deleteQuery = supabase.from("life_missions").delete().eq("workspace_id", workspaceId);
         if (clientIds.length) deleteQuery = deleteQuery.not("client_id", "in", `(${clientIds.map((id) => `"${id.replace(/"/g, "")}"`).join(",")})`);
         await deleteQuery;
+
+        await markPersistence(supabase, workspaceId, "LIFE", "plan", {
+          days: dayRows.length,
+          missions: missions.length,
+        });
       } catch {
         // Raw Life state and its revisions remain the recovery source if structured sync needs to retry.
       }
@@ -604,6 +614,54 @@ export default function JarvisCloudBridge() {
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("jarvis-life-updated", listener);
+      window.removeEventListener("focus", listener);
+    };
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    async function syncLifeHabits() {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId) return;
+      const raw = window.localStorage.getItem("jarvis-habit-history-v1");
+      if (!raw) return;
+
+      try {
+        const store = JSON.parse(raw) as {
+          days?: Record<string, Record<string, boolean>>;
+          tradingDays?: Record<string, true>;
+        };
+        const dates = new Set([
+          ...Object.keys(store.days ?? {}),
+          ...Object.keys(store.tradingDays ?? {}),
+        ]);
+        const rows = [...dates]
+          .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day))
+          .map((day) => ({
+            workspace_id: workspaceId,
+            day,
+            habits: store.days?.[day] ?? {},
+            trading_day: Boolean(store.tradingDays?.[day]),
+          }));
+
+        if (rows.length) {
+          await supabase.from("life_habit_days").upsert(rows, { onConflict: "workspace_id,day" });
+        }
+        await markPersistence(supabase, workspaceId, "LIFE", "habits", { days: rows.length });
+      } catch {
+        // Raw habit snapshot remains available and this retries later.
+      }
+    }
+
+    void syncLifeHabits();
+    const timer = window.setInterval(() => void syncLifeHabits(), 5000);
+    const listener = () => { void syncLifeHabits(); };
+    window.addEventListener("jarvis-habits-updated", listener);
+    window.addEventListener("focus", listener);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("jarvis-habits-updated", listener);
       window.removeEventListener("focus", listener);
     };
   }, []);
@@ -671,10 +729,61 @@ export default function JarvisCloudBridge() {
             occurred_at: event.occurredAt || new Date().toISOString(),
           }));
 
-        if (!rows.length) return;
-        await supabase
-          .from("jarvis_events")
-          .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+        if (rows.length) {
+          await supabase
+            .from("jarvis_events")
+            .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+        }
+
+        await markPersistence(supabase, workspaceId, "CORE", "runtime-events", { events: rows.length });
+
+        const coreRaw = window.localStorage.getItem("jarvis-os-state-v1");
+        let sentryCore: Record<string, unknown> = {};
+        if (coreRaw) {
+          try {
+            const core = JSON.parse(coreRaw) as {
+              activeDomain?: string;
+              memories?: Array<{ id?: string; domain?: string; fact?: string; createdAt?: string }>;
+              goals?: unknown[];
+              nextMove?: { domain?: string; title?: string; reason?: string };
+            };
+            sentryCore = {
+              activeDomain: core.activeDomain ?? null,
+              memories: (core.memories ?? []).filter((memory) => memory.domain === "SENTRYOPS"),
+              goals: core.goals ?? [],
+              nextMove: core.nextMove?.domain === "SENTRYOPS" ? core.nextMove : null,
+            };
+          } catch {
+            sentryCore = {};
+          }
+        }
+
+        const workforce = body.workforce && typeof body.workforce === "object"
+          ? body.workforce as { status?: string; lastCycleAt?: string | null; executiveSummary?: string }
+          : {};
+        const pulse = body.backgroundResearch?.latestPulse && typeof body.backgroundResearch.latestPulse === "object"
+          ? body.backgroundResearch.latestPulse as { ranAt?: string; status?: string; summary?: string }
+          : null;
+        const sentryRuntime = { workforce, latestPulse: pulse };
+        const sentryFingerprint = stableHash(JSON.stringify({ sentryCore, sentryRuntime }));
+
+        await supabase.from("sentryops_state_history").upsert({
+          workspace_id: workspaceId,
+          fingerprint: sentryFingerprint,
+          observed_at: new Date().toISOString(),
+          workforce_status: workforce.status ?? null,
+          executive_summary: workforce.executiveSummary ?? null,
+          pulse_ran_at: pulse?.ranAt && Number.isFinite(Date.parse(pulse.ranAt)) ? pulse.ranAt : null,
+          pulse_status: pulse?.status ?? null,
+          pulse_summary: pulse?.summary ?? null,
+          core_payload: sentryCore,
+          runtime_payload: sentryRuntime,
+        }, { onConflict: "workspace_id,fingerprint", ignoreDuplicates: true });
+
+        await markPersistence(supabase, workspaceId, "SENTRYOPS", "workspace-state", {
+          workforceStatus: workforce.status ?? null,
+          hasPulse: Boolean(pulse),
+        });
       } catch {
         // Runtime history persistence is best-effort and retries on the next interval.
       }
@@ -739,6 +848,11 @@ export default function JarvisCloudBridge() {
           account_count: financeState.accountCount ?? null,
           payload: body.state,
         }, { onConflict: "workspace_id,fingerprint", ignoreDuplicates: true });
+
+        await markPersistence(supabase, workspaceId, "FINANCE", "runtime", {
+          asOf: financeState.asOf ?? null,
+          accountCount: financeState.accountCount ?? null,
+        });
       } catch {
         // Retry on the next interval.
       }
@@ -747,6 +861,43 @@ export default function JarvisCloudBridge() {
     void syncFinanceRuntime();
     const timer = window.setInterval(() => void syncFinanceRuntime(), 30000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    async function syncFinancePlan() {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId) return;
+      const raw = window.localStorage.getItem("jarvis-finance-payout-plan-v1");
+      if (!raw) return;
+
+      try {
+        const plan = JSON.parse(raw) as Record<string, unknown>;
+        await supabase.from("finance_plans").upsert({
+          workspace_id: workspaceId,
+          plan_key: "payout-plan",
+          payload: plan,
+        }, { onConflict: "workspace_id,plan_key" });
+
+        await markPersistence(supabase, workspaceId, "FINANCE", "payout-plan", {
+          fields: Object.keys(plan).length,
+        });
+      } catch {
+        // Raw finance-plan snapshot remains available and this retries later.
+      }
+    }
+
+    void syncFinancePlan();
+    const timer = window.setInterval(() => void syncFinancePlan(), 5000);
+    const listener = () => { void syncFinancePlan(); };
+    window.addEventListener("focus", listener);
+    window.addEventListener("storage", listener);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", listener);
+      window.removeEventListener("storage", listener);
+    };
   }, []);
 
   useEffect(() => {
@@ -829,6 +980,12 @@ export default function JarvisCloudBridge() {
           }
         }
 
+        await markPersistence(supabase, workspaceId, "TRADING", "runtime", {
+          connection: state.account?.connection ?? null,
+          openTrades: state.openTrades?.length ?? 0,
+          recentTrades: state.recentTrades?.length ?? 0,
+        });
+
         const observer = state.observer;
         const observedAt = observer?.observedAt || state.account?.lastObservedAt || null;
         if (!observer || !observedAt || observedAt === observerSeenRef.current) return;
@@ -894,6 +1051,16 @@ export default function JarvisCloudBridge() {
       await supabase
         .from("jarvis_goals")
         .upsert(rows, { onConflict: "workspace_id,domain,client_key" });
+
+      if (["CORE", "TRADING", "FINANCE", "LIFE", "SENTRYOPS"].includes(domain)) {
+        await markPersistence(
+          supabase,
+          workspaceId,
+          domain as "CORE" | "TRADING" | "FINANCE" | "LIFE" | "SENTRYOPS",
+          "goals",
+          { goals: rows.length },
+        );
+      }
     }
 
     const listener = (event: Event) => { void onGoals(event); };
