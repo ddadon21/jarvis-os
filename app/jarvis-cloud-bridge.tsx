@@ -424,6 +424,104 @@ export default function JarvisCloudBridge() {
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
 
+    async function syncLifeStructured() {
+      const workspaceId = workspaceRef.current;
+      if (!readyRef.current || !workspaceId) return;
+      const raw = window.localStorage.getItem("jarvis-life-command-v2") ?? window.localStorage.getItem("jarvis-life-plan-v1");
+      if (!raw) return;
+
+      try {
+        const plan = JSON.parse(raw) as {
+          days?: Record<string, {
+            priorities?: unknown[];
+            blocks?: Record<string, boolean>;
+            win?: string;
+            lesson?: string;
+            tomorrow?: string;
+            focusMinutes?: number;
+            intelligenceIndex?: number;
+          }>;
+          missions?: Array<{
+            id?: string;
+            sourceId?: string;
+            pillar?: string;
+            title?: string;
+            detail?: string;
+            minutes?: number;
+            date?: string;
+            time?: string;
+            done?: boolean;
+            evidence?: string;
+            completedOn?: string;
+          }>;
+        };
+
+        const dayRows = Object.entries(plan.days ?? {})
+          .filter(([day]) => /^\d{4}-\d{2}-\d{2}$/.test(day))
+          .map(([day, value]) => ({
+            workspace_id: workspaceId,
+            day,
+            priorities: Array.isArray(value.priorities) ? value.priorities : [],
+            blocks: value.blocks && typeof value.blocks === "object" ? value.blocks : {},
+            win: typeof value.win === "string" ? value.win : "",
+            lesson: typeof value.lesson === "string" ? value.lesson : "",
+            tomorrow: typeof value.tomorrow === "string" ? value.tomorrow : "",
+            focus_minutes: Math.max(0, Math.round(Number(value.focusMinutes) || 0)),
+            intelligence_index: Number.isInteger(value.intelligenceIndex) ? value.intelligenceIndex : null,
+          }));
+
+        if (dayRows.length) {
+          await supabase.from("life_days").upsert(dayRows, { onConflict: "workspace_id,day" });
+        }
+
+        const missions = (plan.missions ?? []).filter((mission) =>
+          typeof mission.id === "string" &&
+          typeof mission.title === "string" &&
+          typeof mission.date === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(mission.date)
+        );
+
+        if (missions.length) {
+          await supabase.from("life_missions").upsert(missions.map((mission) => ({
+            workspace_id: workspaceId,
+            client_id: String(mission.id),
+            source_id: typeof mission.sourceId === "string" ? mission.sourceId : null,
+            pillar: typeof mission.pillar === "string" ? mission.pillar : "experiences",
+            title: String(mission.title),
+            detail: typeof mission.detail === "string" ? mission.detail : "",
+            minutes: Math.max(0, Math.round(Number(mission.minutes) || 0)),
+            mission_date: String(mission.date),
+            mission_time: typeof mission.time === "string" ? mission.time : "",
+            done: Boolean(mission.done),
+            evidence: typeof mission.evidence === "string" ? mission.evidence : "",
+            completed_on: typeof mission.completedOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(mission.completedOn) ? mission.completedOn : null,
+          })), { onConflict: "workspace_id,client_id" });
+        }
+
+        const clientIds = missions.map((mission) => String(mission.id));
+        let deleteQuery = supabase.from("life_missions").delete().eq("workspace_id", workspaceId);
+        if (clientIds.length) deleteQuery = deleteQuery.not("client_id", "in", `(${clientIds.map((id) => `"${id.replace(/"/g, "")}"`).join(",")})`);
+        await deleteQuery;
+      } catch {
+        // Raw Life state and its revisions remain the recovery source if structured sync needs to retry.
+      }
+    }
+
+    void syncLifeStructured();
+    const timer = window.setInterval(() => void syncLifeStructured(), 5000);
+    const listener = () => { void syncLifeStructured(); };
+    window.addEventListener("jarvis-life-updated", listener);
+    window.addEventListener("focus", listener);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("jarvis-life-updated", listener);
+      window.removeEventListener("focus", listener);
+    };
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
     async function saveRuntimeSnapshot(stateKey: string, data: unknown) {
       const workspaceId = workspaceRef.current;
       if (!readyRef.current || !workspaceId || data == null) return;
@@ -524,6 +622,34 @@ export default function JarvisCloudBridge() {
             source: "JARVIS FINANCE RUNTIME",
             client_updated_at: new Date().toISOString(),
           }, { onConflict: "workspace_id,state_key" });
+
+        const financeState = body.state as {
+          asOf?: string;
+          source?: string;
+          mode?: string;
+          accountCount?: number;
+          metrics?: {
+            personalNetWorth?: number;
+            providerNetWorth?: number;
+            liquidity?: number;
+            investmentValue?: number;
+            personalDebt?: number;
+          };
+        };
+        await supabase.from("finance_state_history").upsert({
+          workspace_id: workspaceId,
+          fingerprint: stableHash(fingerprint),
+          as_of: financeState.asOf && Number.isFinite(Date.parse(financeState.asOf)) ? financeState.asOf : null,
+          source: financeState.source ?? null,
+          mode: financeState.mode ?? null,
+          personal_net_worth: financeState.metrics?.personalNetWorth ?? null,
+          provider_net_worth: financeState.metrics?.providerNetWorth ?? null,
+          liquidity: financeState.metrics?.liquidity ?? null,
+          investment_value: financeState.metrics?.investmentValue ?? null,
+          personal_debt: financeState.metrics?.personalDebt ?? null,
+          account_count: financeState.accountCount ?? null,
+          payload: body.state,
+        }, { onConflict: "workspace_id,fingerprint", ignoreDuplicates: true });
       } catch {
         // Retry on the next interval.
       }
