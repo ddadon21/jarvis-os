@@ -38,6 +38,8 @@ type TradingAccount = {
   profitTarget: number;
   fundedBuffer: number;
   requiredTradingDays: number;
+  minimumQualifyingPnl: number;
+  fundedPayoutCount: number;
   cycle: number;
 };
 
@@ -46,6 +48,10 @@ type JournalEntry = {
   notes: string;
   hasImage: boolean;
   imageCount?: number;
+  feeling?: string;
+  tradeManagement?: string;
+  errors?: string;
+  sessionRating?: number | null;
 };
 
 type TradeImageItem = {
@@ -76,6 +82,7 @@ type ParsedEntryKey = {
 
 export type TradingAccountView = TradingAccount & {
   tradingDays: number;
+  qualifyingDays: number;
   totalPnl: number;
   remaining: number;
   targetBalance: number;
@@ -97,7 +104,9 @@ const defaultAccount: TradingAccount = {
   lossLimit: 48000,
   profitTarget: 3000,
   fundedBuffer: 2000,
-  requiredTradingDays: 150,
+  requiredTradingDays: 5,
+  minimumQualifyingPnl: 150,
+  fundedPayoutCount: 0,
   cycle: 1,
 };
 
@@ -352,7 +361,7 @@ async function loadCloudSnapshot(supabase: SupabaseClient, workspaceId: string):
   const [{ data: accountRows, error: accountError }, { data: cycleRows, error: cycleError }, { data: dayRows, error: dayError }, { data: settingRow, error: settingError }] = await Promise.all([
     supabase
       .from("trading_accounts")
-      .select("id,client_id,firm,label,stage,start_balance,current_balance,loss_limit,profit_target,funded_buffer,required_trading_days,cycle_number,status")
+      .select("id,client_id,firm,label,stage,start_balance,current_balance,loss_limit,profit_target,funded_buffer,required_trading_days,minimum_qualifying_pnl,funded_payout_count,cycle_number,status")
       .eq("workspace_id", workspaceId)
       .neq("status", "ARCHIVED")
       .order("created_at", { ascending: true }),
@@ -362,7 +371,7 @@ async function loadCloudSnapshot(supabase: SupabaseClient, workspaceId: string):
       .eq("workspace_id", workspaceId),
     supabase
       .from("trading_days")
-      .select("id,account_id,cycle_id,trade_date,realized_pnl,notes,screenshot_count,client_entry_key")
+      .select("id,account_id,cycle_id,trade_date,realized_pnl,notes,screenshot_count,feeling,trade_management,errors,session_rating,client_entry_key")
       .eq("workspace_id", workspaceId)
       .order("trade_date", { ascending: true }),
     supabase
@@ -391,7 +400,9 @@ async function loadCloudSnapshot(supabase: SupabaseClient, workspaceId: string):
     lossLimit: asNumber(row.loss_limit),
     profitTarget: asNumber(row.profit_target),
     fundedBuffer: asNumber(row.funded_buffer),
-    requiredTradingDays: Math.max(0, Math.round(asNumber(row.required_trading_days))),
+    requiredTradingDays: Math.max(1, Math.round(asNumber(row.required_trading_days, 5))),
+    minimumQualifyingPnl: Math.max(0, asNumber(row.minimum_qualifying_pnl, 150)),
+    fundedPayoutCount: Math.max(0, Math.round(asNumber(row.funded_payout_count, 0))),
     cycle: Math.max(1, Math.round(asNumber(row.cycle_number, 1))),
   }));
 
@@ -414,6 +425,10 @@ async function loadCloudSnapshot(supabase: SupabaseClient, workspaceId: string):
       notes: String(row.notes ?? ""),
       hasImage: asNumber(row.screenshot_count) > 0,
       imageCount: Math.max(0, Math.round(asNumber(row.screenshot_count))),
+      feeling: String(row.feeling ?? ""),
+      tradeManagement: String(row.trade_management ?? ""),
+      errors: String(row.errors ?? ""),
+      sessionRating: row.session_rating == null ? null : Math.max(1, Math.min(5, Math.round(asNumber(row.session_rating)))),
     };
   }
 
@@ -447,6 +462,8 @@ async function pushCloudSnapshot(
     profit_target: account.profitTarget,
     funded_buffer: account.fundedBuffer,
     required_trading_days: account.requiredTradingDays,
+    minimum_qualifying_pnl: account.minimumQualifyingPnl,
+    funded_payout_count: account.fundedPayoutCount,
     cycle_number: account.cycle,
     source: "JARVIS CLOUD",
     metadata: { syncedFrom: "trading-account-manager" },
@@ -533,6 +550,10 @@ async function pushCloudSnapshot(
       realized_pnl: entry.pnl,
       notes: entry.notes,
       screenshot_count: Math.max(0, Math.round(entry.imageCount ?? (entry.hasImage ? 1 : 0))),
+      feeling: entry.feeling ?? "",
+      trade_management: entry.tradeManagement ?? "",
+      errors: entry.errors ?? "",
+      session_rating: entry.sessionRating ?? null,
       metadata: { syncedFrom: "trading-account-manager" },
     }];
   });
