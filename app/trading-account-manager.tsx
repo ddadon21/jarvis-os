@@ -608,8 +608,8 @@ async function migrateLocalImagesToCloud(
     const account = snapshot.accounts.find((item) => item.id === parsed.clientId);
     if (!account) continue;
 
-    const localBlob = await getImage(`${key}:image`);
-    if (!localBlob) continue;
+    const localImages = await listLocalImages(`${key}:image`);
+    if (!localImages.length) continue;
 
     const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
     if (!tradingDayId) continue;
@@ -621,34 +621,49 @@ async function migrateLocalImagesToCloud(
       .eq("entity_type", "trading_day")
       .eq("entity_id", tradingDayId);
     if (countError) throw countError;
-    if ((count ?? 0) > 0) continue;
 
+    const alreadyStored = Math.max(0, count ?? 0);
     const safePhase = parsed.phaseKey.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const objectPath = `${workspaceId}/trading/${account.id}/${safePhase}/${parsed.day}/migrated-${Date.now()}.jpg`;
+    const pending = localImages.slice(alreadyStored);
 
-    const { error: uploadError } = await supabase.storage
-      .from("jarvis-attachments")
-      .upload(objectPath, localBlob, { contentType: "image/jpeg", upsert: false });
-    if (uploadError) throw uploadError;
+    for (const [index, localImage] of pending.entries()) {
+      const suffix = crypto.randomUUID();
+      const objectPath = `${workspaceId}/trading/${account.id}/${safePhase}/${parsed.day}/migrated-${index + alreadyStored + 1}-${suffix}.jpg`;
 
-    const { error: attachmentError } = await supabase.from("jarvis_attachments").insert({
-      workspace_id: workspaceId,
-      domain: "TRADING",
-      entity_type: "trading_day",
-      entity_id: tradingDayId,
-      bucket: "jarvis-attachments",
-      object_path: objectPath,
-      file_name: `trade-${parsed.day}.jpg`,
-      mime_type: "image/jpeg",
-      size_bytes: localBlob.size,
-      metadata: {
-        clientEntryKey: key,
-        clientId: parsed.clientId,
-        tradeDate: parsed.day,
-        migratedFrom: "indexeddb",
-      },
-    });
-    if (attachmentError) throw attachmentError;
+      const { error: uploadError } = await supabase.storage
+        .from("jarvis-attachments")
+        .upload(objectPath, localImage.blob, { contentType: "image/jpeg", upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { error: attachmentError } = await supabase.from("jarvis_attachments").insert({
+        workspace_id: workspaceId,
+        domain: "TRADING",
+        entity_type: "trading_day",
+        entity_id: tradingDayId,
+        bucket: "jarvis-attachments",
+        object_path: objectPath,
+        file_name: `trade-${parsed.day}-${index + alreadyStored + 1}.jpg`,
+        mime_type: "image/jpeg",
+        size_bytes: localImage.blob.size,
+        metadata: {
+          clientEntryKey: key,
+          clientId: parsed.clientId,
+          tradeDate: parsed.day,
+          migratedFrom: "indexeddb",
+          localKey: localImage.key,
+        },
+      });
+      if (attachmentError) throw attachmentError;
+    }
+
+    const finalCount = alreadyStored + pending.length;
+    if (finalCount > 0) {
+      await supabase
+        .from("trading_days")
+        .update({ screenshot_count: finalCount })
+        .eq("workspace_id", workspaceId)
+        .eq("id", tradingDayId);
+    }
   }
 }
 
@@ -665,7 +680,9 @@ export default function TradingAccountManager({
   const [selectedDay, setSelectedDay] = useState(() => dateKey(new Date()));
   const [draftPnl, setDraftPnl] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageItems, setImageItems] = useState<TradeImageItem[]>([]);
+  const [activeImage, setActiveImage] = useState<TradeImageItem | null>(null);
+  const [imageRevision, setImageRevision] = useState(0);
   const [imageBusy, setImageBusy] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
