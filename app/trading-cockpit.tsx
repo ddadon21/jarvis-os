@@ -105,10 +105,12 @@ type PayoutSummary = {
   lifetimeCount?: number;
   nextPayoutNumber?: number;
   unitemizedCount?: number;
+  totalAmount?: number;
   totalNet: number;
   totalGross: number;
+  averageAmount?: number | null;
   averageNet: number | null;
-  latest: { approvedAt: string; traderNetAmount: number } | null;
+  latest: { approvedAt: string | null; payoutAmount?: number; traderNetAmount: number; firm?: string } | null;
 };
 
 type ObserverLink = {
@@ -581,8 +583,8 @@ export default function TradingCockpit() {
             </div>
           </div>
           <div className="payout-total">
-            <span>{payoutRange === "ALL" ? "RECORDED NET PAYOUTS" : `${payoutRange} NET PAYOUTS`}</span>
-            <strong>{payoutSummary?.connected ? money(payoutSummary.totalNet) : "—"}</strong>
+            <span>{payoutRange === "ALL" ? "RECORDED PAYOUT AMOUNTS" : `${payoutRange} PAYOUT AMOUNTS`}</span>
+            <strong>{payoutSummary?.connected ? money(payoutSummary.totalAmount ?? payoutSummary.totalGross ?? payoutSummary.totalNet) : "—"}</strong>
             <small>
               {payoutSummary?.connected
                 ? `${payoutSummary.lifetimeCount ?? payoutSummary.count} payouts complete · #${payoutSummary.nextPayoutNumber ?? (payoutSummary.count + 1)} next`
@@ -594,8 +596,8 @@ export default function TradingCockpit() {
           </div>
           <div className="trading-lines">
             <Line label="Source" value={payoutSummary?.source ?? "PENDING"} />
-            <Line label="Latest payout" value={payoutSummary?.latest ? money(payoutSummary.latest.traderNetAmount) : "—"} />
-            <Line label="Latest approved" value={payoutSummary?.latest ? new Date(payoutSummary.latest.approvedAt).toLocaleDateString() : "—"} />
+            <Line label="Latest payout" value={payoutSummary?.latest ? money(payoutSummary.latest.payoutAmount ?? payoutSummary.latest.traderNetAmount) : "—"} />
+            <Line label="Latest approved" value={payoutSummary?.latest?.approvedAt ? new Date(payoutSummary.latest.approvedAt).toLocaleDateString() : "DATE NOT RECORDED"} />
           </div>
         </article>
 
