@@ -43,15 +43,19 @@ export default function ObsidianBridgePanel() {
   const [searchPreview, setSearchPreview] = useState("");
 
   useEffect(() => {
-    const token = controllerToken();
-    if (!token) {
-      setState("UNPAIRED");
-      setMessage("PAIR LOCAL AGENT");
-      return;
-    }
-
     let cancelled = false;
+
     async function checkLink() {
+      const token = controllerToken();
+      if (!token) {
+        if (!cancelled) {
+          setState("UNPAIRED");
+          setMessage("PAIR LOCAL AGENT");
+          setDetail("Pair the Windows Local Agent in Trading.");
+        }
+        return;
+      }
+
       try {
         const response = await fetch("/api/trading/link/status", {
           cache: "no-store",
@@ -67,7 +71,7 @@ export default function ObsidianBridgePanel() {
         } else {
           setState("ERROR");
           setMessage("LOCAL AGENT OFFLINE");
-          setDetail("Start the Windows Local Agent, then test the vault.");
+          setDetail("Local Agent is paired but JARVIS is waiting for its heartbeat.");
         }
       } catch {
         if (!cancelled) {
@@ -79,10 +83,15 @@ export default function ObsidianBridgePanel() {
     }
 
     void checkLink();
-    const timer = window.setInterval(checkLink, 4000);
+    const timer = window.setInterval(checkLink, 1500);
+    const refresh = () => void checkLink();
+    window.addEventListener("storage", refresh);
+    window.addEventListener("jarvis-observer-link-updated", refresh);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.removeEventListener("storage", refresh);
+      window.removeEventListener("jarvis-observer-link-updated", refresh);
     };
   }, []);
 
