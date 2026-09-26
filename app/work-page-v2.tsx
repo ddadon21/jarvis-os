@@ -5,6 +5,7 @@ import {
   Bot,
   BrainCircuit,
   BriefcaseBusiness,
+  Check,
   LifeBuoy,
   Mic,
   Radar,
@@ -190,8 +191,9 @@ export default function WorkV2() {
       </header>
 
       <section className="workspace">
-        <div style={{ position: "absolute", top: 13, left: 300, right: 300, zIndex: 8, textAlign: "center", background: "rgba(2,8,13,.96)", padding: "5px 14px", color: "#f1f1f1", fontSize: ".68rem", letterSpacing: ".08em" }}>
-          BUILD DURABLE CASH FLOW, STRONGER CAPITAL, SCALABLE SOFTWARE, AND BETTER DECISIONS WITHOUT LOSING CONTROL.
+        <div className="workspace-memo">
+          <strong>WAIT FOR SOMEONE TO LOSE</strong>
+          <span>BUILD DURABLE CASH FLOW, STRONGER CAPITAL, SCALABLE SOFTWARE, AND BETTER DECISIONS WITHOUT LOSING CONTROL.</span>
         </div>
 
         <aside className="left-column">
@@ -205,6 +207,18 @@ export default function WorkV2() {
                 <Event key={event.id} text={event.summary} time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)} />
               )) : <><Event text="Jarvis core online" time="NOW" /><Event text="Autonomous workforce ready" time="AI" /><Event text="Finance accounts connected" time="FIN" /></>}
             </div>
+            {domain === "TRADING" ? (
+              <div className="dwight-rules">
+                <div className="dwight-rules-head">DWIGHT&apos;S RULES</div>
+                {[
+                  "Find the trend",
+                  "Look on the 1HR for support and resistance",
+                  "Wait for someone to lose",
+                  "Mark your zone on the 5 MIN",
+                  "Enter when price taps zone and target a 1:2 or 1:3",
+                ].map((rule) => <div key={rule}><Check size={11} /><span>{rule}</span></div>)}
+              </div>
+            ) : null}
           </Panel>
         </aside>
 
