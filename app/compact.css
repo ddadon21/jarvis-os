@@ -1097,3 +1097,99 @@
   .account-input-grid{grid-template-columns:1fr}
   .progress-labels strong{display:none}
 }
+
+
+.trading-cloud-bar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:9px 10px;
+  margin:-2px 0 12px;
+  border:1px solid rgba(255,255,255,.075);
+  background:rgba(255,255,255,.012);
+}
+.trading-cloud-state{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+}
+.trading-cloud-state>div{
+  display:grid;
+  gap:2px;
+  min-width:0;
+}
+.trading-cloud-state b{
+  font-size:8px;
+  letter-spacing:.13em;
+}
+.trading-cloud-state small{
+  font-size:7px;
+  letter-spacing:.05em;
+  opacity:.46;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:340px;
+}
+.trading-cloud-state.is-synced{color:#62d99d}
+.trading-cloud-state.is-syncing,
+.trading-cloud-state.is-connecting{color:#d7dcdf}
+.trading-cloud-state.is-error{color:#de7479}
+.trading-cloud-state.is-local{color:#989fa4}
+.trading-cloud-login,
+.trading-cloud-user{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.trading-cloud-login input{
+  width:210px;
+  height:29px;
+  padding:0 8px;
+  border:1px solid rgba(255,255,255,.09);
+  background:rgba(0,0,0,.25);
+  color:#edf0f2;
+  outline:none;
+  font:600 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.05em;
+}
+.trading-cloud-login input:focus{border-color:rgba(183,31,38,.46)}
+.trading-cloud-login button,
+.trading-cloud-user button{
+  height:29px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:0 9px;
+  border:1px solid rgba(183,31,38,.38);
+  background:rgba(183,31,38,.055);
+  color:#e8ebed;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.09em;
+  cursor:pointer;
+}
+.trading-cloud-login button:hover,
+.trading-cloud-user button:hover{border-color:rgba(215,70,76,.62)}
+.trading-cloud-user span{
+  max-width:220px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:8px;
+  letter-spacing:.05em;
+  opacity:.55;
+}
+@media(max-width:900px){
+  .trading-cloud-bar{align-items:flex-start;flex-direction:column}
+  .trading-cloud-login{width:100%}
+  .trading-cloud-login input{flex:1;width:auto}
+}
+@media(max-width:600px){
+  .trading-cloud-login{display:grid;grid-template-columns:auto 1fr}
+  .trading-cloud-login button{grid-column:1/-1}
+  .trading-cloud-user{width:100%;justify-content:space-between}
+}
