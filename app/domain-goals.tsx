@@ -46,6 +46,8 @@ type TradingGoalSnapshot = {
   remaining: number;
   progress: number;
   dayProgress: number;
+  todayImageCount: number;
+  reviewedDays: string[];
 };
 
 type TradingGoalRuntime = {
@@ -120,7 +122,7 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
     const selectedId = window.localStorage.getItem(TRADING_SELECTED_KEY);
     const account = accounts.find((item) => item.id === selectedId) ?? accounts[0];
     const journalRaw = window.localStorage.getItem(TRADING_JOURNAL_KEY);
-    const journal = journalRaw ? JSON.parse(journalRaw) as Record<string, { pnl?: number | null; notes?: string; hasImage?: boolean }> : {};
+    const journal = journalRaw ? JSON.parse(journalRaw) as Record<string, { pnl?: number | null; notes?: string; hasImage?: boolean; imageCount?: number }> : {};
     const prefix = `${account.id}:cycle-${account.cycle}:${account.stage}:`;
     const entries = Object.entries(journal).filter(([key]) => key.startsWith(prefix));
     const tradingDays = entries.filter(([, entry]) => entry.pnl != null || Boolean(entry.notes?.trim()) || entry.hasImage === true).length;
@@ -136,8 +138,14 @@ function loadTradingGoalSnapshot(): TradingGoalSnapshot | null {
     const dayProgress = account.requiredTradingDays > 0
       ? Math.max(0, Math.min(100, (tradingDays / account.requiredTradingDays) * 100))
       : 0;
+    const reviewedDays = entries
+      .filter(([, entry]) => Math.max(0, entry.imageCount ?? (entry.hasImage ? 1 : 0)) > 0)
+      .map(([key]) => key.slice(-10))
+      .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day));
+    const todayEntry = journal[`${prefix}${dateKey()}`];
+    const todayImageCount = Math.max(0, todayEntry?.imageCount ?? (todayEntry?.hasImage ? 1 : 0));
 
-    return { account, tradingDays, totalPnl, targetBalance, remaining, progress, dayProgress };
+    return { account, tradingDays, totalPnl, targetBalance, remaining, progress, dayProgress, todayImageCount, reviewedDays };
   } catch {
     return null;
   }
@@ -364,11 +372,36 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     });
   }, [events]);
 
+  useEffect(() => {
+    if (domain !== "TRADING" || !tradingAccount?.reviewedDays.length) return;
+    setHabits((current) => {
+      let changed = false;
+      const days = { ...current.days };
+      const tradingDays = { ...current.tradingDays };
+
+      for (const day of tradingAccount.reviewedDays) {
+        if (days[day]?.["trading.review"] !== true) {
+          days[day] = { ...days[day], "trading.review": true };
+          changed = true;
+        }
+        if (!tradingDays[day]) {
+          tradingDays[day] = true;
+          changed = true;
+        }
+      }
+
+      if (!changed) return current;
+      const next = { ...current, days, tradingDays };
+      saveHabitStore(next);
+      return next;
+    });
+  }, [domain, tradingAccount?.reviewedDays]);
+
   const summary = useMemo(() => buildHabitSummary(habits), [habits, todayKey]);
 
   const goals = useMemo<GoalItem[]>(() => {
     if (domain === "TRADING") {
-      const reviewDone = habits.days[dateKey()]?.["trading.review"] === true;
+      const reviewDone = (tradingAccount?.todayImageCount ?? 0) > 0 || habits.days[dateKey()]?.["trading.review"] === true;
       const reviewRate = habitRate(habits, "trading.review", 7);
       const payoutCount = Math.max(0, tradingPayouts?.lifetimeCount ?? (hasEvent(events, "trading.payout_received") ? 1 : 0));
       const nextPayoutNumber = tradingPayouts?.nextPayoutNumber ?? (payoutCount + 1);
@@ -428,9 +461,11 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
         {
           name: "REVIEW TRADE",
           status: reviewDone ? "DONE" : "ACTIVE",
-          detail: reviewRate == null
-            ? "Check off the review after trading. Observer trade days feed this automatically."
-            : `${Math.round(reviewRate)}% of the last observed trading days reviewed · streak ${habitStreak(habits, "trading.review")}.`,
+          detail: (tradingAccount?.todayImageCount ?? 0) > 0
+            ? `${tradingAccount?.todayImageCount ?? 0} trade picture${(tradingAccount?.todayImageCount ?? 0) === 1 ? "" : "s"} saved for today · review complete.`
+            : reviewRate == null
+              ? "Add at least one trade picture to today’s calendar entry to complete the review."
+              : `${Math.round(reviewRate)}% of the last observed trading days reviewed · streak ${habitStreak(habits, "trading.review")}.`,
           progress: reviewDone ? 100 : 0,
           active: !reviewDone,
           habitId: "trading.review",
