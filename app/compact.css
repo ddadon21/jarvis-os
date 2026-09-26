@@ -1373,3 +1373,37 @@
   .trading-image-lightbox{padding:8px}
   .trading-image-lightbox-head{align-items:flex-start}
 }
+
+.trading-image-lightbox{
+  pointer-events:auto;
+}
+.trading-image-lightbox-inner{
+  position:relative;
+  z-index:1;
+  pointer-events:auto;
+}
+.trading-image-lightbox-head{
+  position:relative;
+  z-index:3;
+  pointer-events:auto;
+  background:#050607;
+}
+.trading-image-lightbox-actions{
+  position:relative;
+  z-index:4;
+  pointer-events:auto;
+}
+.trading-image-lightbox-actions button{
+  position:relative;
+  z-index:5;
+  pointer-events:auto;
+}
+.trading-image-lightbox-inner>img{
+  position:relative;
+  z-index:1;
+  pointer-events:auto;
+}
+.trading-image-close{
+  width:31px;
+  padding:0!important;
+}
