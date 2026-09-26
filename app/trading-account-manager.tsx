@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { getSupabaseBrowserClient } from "../lib/supabase-browser";
 
 type AccountStage = "EVAL" | "FUNDED";
@@ -1208,21 +1209,50 @@ export default function TradingAccountManager({
 
   async function downloadTradeImage(item: TradeImageItem) {
     try {
-      const response = await fetch(item.url);
-      if (!response.ok) throw new Error("Could not fetch image");
+      let response: Response;
+
+      if (item.source === "CLOUD" && item.attachmentId) {
+        const { data: sessionData } = await getSupabaseBrowserClient().auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) throw new Error("JARVIS Cloud session expired.");
+
+        response = await fetch(`/api/trading/image/download?id=${encodeURIComponent(item.attachmentId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+      } else {
+        response = await fetch(item.url);
+      }
+
+      if (!response.ok) throw new Error("Could not download image.");
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
-      anchor.href = url;
+      anchor.href = objectUrl;
       anchor.download = item.fileName || `trade-${selectedDay}.jpg`;
+      anchor.style.display = "none";
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 500);
-    } catch {
-      window.open(item.url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+    } catch (error) {
+      setCloudStatus("ERROR");
+      setCloudMessage(error instanceof Error ? error.message : "Image download failed");
     }
   }
+
+  function closeImageViewer() {
+    setActiveImage(null);
+  }
+
+  useEffect(() => {
+    if (!activeImage) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeImageViewer();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeImage]);
 
   async function signInToCloud(event: FormEvent) {
     event.preventDefault();
@@ -1559,22 +1589,51 @@ export default function TradingAccountManager({
         </div>
       </div>
 
-      {activeImage ? (
-        <div className="trading-image-lightbox" role="dialog" aria-modal="true" aria-label="Trade image viewer" onClick={() => setActiveImage(null)}>
-          <div className="trading-image-lightbox-inner" onClick={(event) => event.stopPropagation()}>
+      {activeImage && typeof document !== "undefined" ? createPortal(
+        <div
+          className="trading-image-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Trade image viewer"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeImageViewer();
+          }}
+        >
+          <div className="trading-image-lightbox-inner">
             <div className="trading-image-lightbox-head">
               <div>
                 <span>TRADE IMAGE</span>
                 <b>{selectedDay}</b>
               </div>
-              <div>
-                <button type="button" onClick={() => void downloadTradeImage(activeImage)}><Download size={13} /> SAVE IMAGE</button>
-                <button type="button" onClick={() => setActiveImage(null)} aria-label="Close image viewer"><X size={15} /></button>
+              <div className="trading-image-lightbox-actions">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void downloadTradeImage(activeImage);
+                  }}
+                >
+                  <Download size={13} /> SAVE IMAGE
+                </button>
+                <button
+                  type="button"
+                  className="trading-image-close"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeImageViewer();
+                  }}
+                  aria-label="Close image viewer"
+                >
+                  <X size={15} />
+                </button>
               </div>
             </div>
             <img src={activeImage.url} alt={`Expanded trade screenshot for ${selectedDay}`} />
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </section>
   );
