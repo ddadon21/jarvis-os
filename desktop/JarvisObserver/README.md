@@ -1,4 +1,4 @@
-# JARVIS Local Agent 0.6.0
+# JARVIS Local Agent 0.7.0
 
 Windows x64 companion for JARVIS. It keeps the existing read-only TradingView Observer and now adds the local Obsidian bridge.
 
@@ -6,7 +6,7 @@ Windows x64 companion for JARVIS. It keeps the existing read-only TradingView Ob
 1. Right-click the existing JARVIS / Observer tray icon and choose Exit.
 2. Extract this ZIP to a new folder and run JarvisObserver.exe.
 3. Keep the existing configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
-4. Refresh JARVIS. Trading Observer Link should show 0.6.0 after the new agent reconnects.
+4. Refresh JARVIS. Trading Observer Link should show 0.7.0 after the new agent reconnects.
 
 ## Obsidian bridge
 JARVIS keeps Supabase as the authoritative structured database. Obsidian is the long-form knowledge vault.
@@ -21,6 +21,8 @@ JARVIS keeps Supabase as the authoritative structured database. Obsidian is the 
 8. Choose **Obsidian: Write Local Agent test note** to prove the Windows agent itself can write into 00 Inbox.
 
 The Obsidian API key is encrypted with Windows DPAPI for the current Windows user and is never uploaded to JARVIS Cloud. The bridge rejects non-loopback Obsidian URLs. Self-signed TLS is accepted only for loopback connections.
+
+Version 0.7.0 also lets paired JARVIS send authenticated LIST, READ, WRITE/update, and SEARCH commands through the Local Agent. Obsidian remains local; JARVIS Cloud only queues the command and receives the result.
 
 ## Trading Observer
 - Waiting: no visible order setup or position.
