@@ -712,6 +712,7 @@ export default function TradingAccountManager({
   const [draftTradeManagement, setDraftTradeManagement] = useState("");
   const [draftErrors, setDraftErrors] = useState("");
   const [draftRating, setDraftRating] = useState<number | null>(null);
+  const [requiredDaysDraft, setRequiredDaysDraft] = useState("5");
   const [imageItems, setImageItems] = useState<TradeImageItem[]>([]);
   const [activeImage, setActiveImage] = useState<TradeImageItem | null>(null);
   const [imageRevision, setImageRevision] = useState(0);
@@ -861,6 +862,11 @@ export default function TradingAccountManager({
   useEffect(() => {
     if (!account && accounts.length) setSelectedId(accounts[0].id);
   }, [account, accounts]);
+
+  useEffect(() => {
+    if (!account) return;
+    setRequiredDaysDraft(String(account.requiredTradingDays || 5));
+  }, [account?.id, account?.stage, account?.requiredTradingDays]);
 
   const phasePrefix = account ? `${phaseKey(account)}:` : "";
   const phaseEntries = useMemo(() => {
@@ -1573,7 +1579,7 @@ export default function TradingAccountManager({
               ) : (
                 <>
                   <label><span>BUFFER REQUIRED</span><input inputMode="decimal" value={account.fundedBuffer} onChange={(event) => patchAccount({ fundedBuffer: parseNumber(event.target.value, account.fundedBuffer) })} /></label>
-                  <label><span>REQUIRED DAYS</span><input type="number" min={1} max={99} step={1} value={account.requiredTradingDays} onFocus={(event) => event.currentTarget.select()} onChange={(event) => patchAccount({ requiredTradingDays: Math.max(1, Math.min(99, Math.round(parseNumber(event.target.value, account.requiredTradingDays)))) })} /></label>
+                  <label><span>REQUIRED DAYS</span><input type="text" inputMode="numeric" maxLength={2} value={requiredDaysDraft} onFocus={(event) => event.currentTarget.select()} onChange={(event) => {const next=event.target.value.replace(/\D/g,"").slice(0,2);setRequiredDaysDraft(next);if(next){patchAccount({requiredTradingDays:Math.max(1,Math.min(99,Number(next)))})}}} onBlur={()=>{if(!requiredDaysDraft){setRequiredDaysDraft(String(account.requiredTradingDays||5));}}} /></label>
                   <label><span>MIN P&L / QUALIFYING DAY</span><input type="number" min={0} step={25} value={account.minimumQualifyingPnl} onFocus={(event) => event.currentTarget.select()} onChange={(event) => patchAccount({ minimumQualifyingPnl: Math.max(0, parseNumber(event.target.value, account.minimumQualifyingPnl)) })} /></label>
                   <label><span>CURRENT CYCLE PAYOUTS</span><input type="number" min={0} max={99} step={1} value={account.fundedPayoutCount} onFocus={(event) => event.currentTarget.select()} onChange={(event) => patchAccount({ fundedPayoutCount: Math.max(0, Math.min(99, Math.round(parseNumber(event.target.value, account.fundedPayoutCount)))) })} /></label>
                 </>
