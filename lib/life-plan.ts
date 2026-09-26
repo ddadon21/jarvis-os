@@ -9,6 +9,7 @@ export type LifeDay = {
   lesson: string;
   tomorrow: string;
   focusMinutes: number;
+  intelligenceIndex?: number;
 };
 export type FocusSession = { title: string; endsAt: number; minutes: number; day: string };
 export type LifePlan = { version: 2; days: Record<string, LifeDay>; session: FocusSession | null; missions: Mission[]; area: string };
@@ -24,6 +25,7 @@ export function newLifeDay(): LifeDay {
       { title: "Complete my workout or planned recovery walk", done: false },
     ],
     blocks: {}, win: "", lesson: "", tomorrow: "", focusMinutes: 0,
+    intelligenceIndex: undefined,
   };
 }
 export function emptyLifePlan(): LifePlan { return { version: 2, days: {}, session: null, missions: [], area: "All areas" }; }
@@ -33,7 +35,7 @@ export function loadLifePlan(): LifePlan {
   const parsed = JSON.parse(raw);
   if (![1, 2].includes(parsed.version) || !parsed.days || typeof parsed.days !== "object" || Array.isArray(parsed.days)) throw new Error("Unsupported Life history");
   for (const day of Object.values(parsed.days) as LifeDay[]) {
-    if (!day || !Array.isArray(day.priorities) || day.priorities.length !== 3 || day.priorities.some(p => !p || typeof p.title !== "string" || typeof p.done !== "boolean") || !day.blocks || typeof day.blocks !== "object" || [day.win, day.lesson, day.tomorrow].some(x => typeof x !== "string") || !Number.isFinite(day.focusMinutes)) throw new Error("Invalid Life history");
+    if (!day || !Array.isArray(day.priorities) || day.priorities.length < 1 || day.priorities.length > 20 || day.priorities.some(p => !p || typeof p.title !== "string" || typeof p.done !== "boolean") || !day.blocks || typeof day.blocks !== "object" || [day.win, day.lesson, day.tomorrow].some(x => typeof x !== "string") || !Number.isFinite(day.focusMinutes) || (day.intelligenceIndex !== undefined && !Number.isInteger(day.intelligenceIndex))) throw new Error("Invalid Life history");
   }
   const s = parsed.session;
   if (s && (typeof s.title !== "string" || !Number.isFinite(s.endsAt) || !Number.isFinite(s.minutes) || typeof s.day !== "string")) throw new Error("Invalid focus session");
