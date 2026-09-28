@@ -1,4 +1,5 @@
 import { getCache } from "@vercel/functions";
+import { createClient } from "@supabase/supabase-js";
 
 export type RuntimeDomain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE" | "CORE";
 
@@ -176,6 +177,8 @@ const LATEST_PULSE_KEY = "jarvis:runtime:latest-pulse:v1";
 const RECENT_EVENTS_KEY = "jarvis:runtime:recent-events:v1";
 const LAST_PULSE_AT_KEY = "jarvis:runtime:last-pulse-at:v1";
 const WORKFORCE_STATE_KEY = "jarvis:runtime:workforce:v1";
+const WORKFORCE_SNAPSHOT_KEY = "runtime.workforce.v2";
+const SUPABASE_FALLBACK_URL = "https://cubkgxdhkehmzczbvczy.supabase.co";
 const FINANCE_STATE_KEY = "jarvis:runtime:finance:v2";
 const DURABLE_RUNTIME_TTL = 60 * 60 * 24 * 365;
 
@@ -236,11 +239,85 @@ export async function appendRuntimeEvent(event: RuntimeEvent): Promise<void> {
 }
 
 export async function getWorkforceState(): Promise<WorkforceState | null> {
-  return readValue<WorkforceState>(WORKFORCE_STATE_KEY);
+  const cached = await readValue<WorkforceState>(WORKFORCE_STATE_KEY);
+  if (cached) return cached;
+
+  const durable = await readDurableWorkforceState();
+  if (durable) {
+    await writeValue(WORKFORCE_STATE_KEY, durable);
+    return durable;
+  }
+
+  return null;
 }
 
 export async function setWorkforceState(state: WorkforceState): Promise<void> {
   await writeValue(WORKFORCE_STATE_KEY, state);
+  await writeDurableWorkforceState(state);
+}
+
+async function workforceServiceClient() {
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRole) return null;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_FALLBACK_URL;
+  return createClient(url, serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+async function readDurableWorkforceState(): Promise<WorkforceState | null> {
+  const supabase = await workforceServiceClient();
+  if (!supabase) return null;
+
+  try {
+    const { data: workspace } = await supabase
+      .from("jarvis_workspaces")
+      .select("id")
+      .eq("slug", "primary")
+      .maybeSingle();
+    if (!workspace?.id) return null;
+
+    const { data } = await supabase
+      .from("jarvis_state_snapshots")
+      .select("payload")
+      .eq("workspace_id", workspace.id)
+      .eq("state_key", WORKFORCE_SNAPSHOT_KEY)
+      .maybeSingle();
+
+    const payload = data?.payload as { format?: unknown; data?: unknown } | null | undefined;
+    if (payload?.format !== "runtime-json" || !payload.data || typeof payload.data !== "object") return null;
+    return payload.data as WorkforceState;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDurableWorkforceState(state: WorkforceState): Promise<void> {
+  const supabase = await workforceServiceClient();
+  if (!supabase) return;
+
+  try {
+    const { data: workspace } = await supabase
+      .from("jarvis_workspaces")
+      .select("id")
+      .eq("slug", "primary")
+      .maybeSingle();
+    if (!workspace?.id) return;
+
+    await supabase
+      .from("jarvis_state_snapshots")
+      .upsert({
+        workspace_id: workspace.id,
+        state_key: WORKFORCE_SNAPSHOT_KEY,
+        version: 1,
+        payload: { format: "runtime-json", data: state },
+        source: "JARVIS WORKFORCE",
+        client_updated_at: state.lastCycleAt ?? new Date().toISOString(),
+      }, { onConflict: "workspace_id,state_key" });
+  } catch {
+    // Runtime Cache remains available if durable persistence temporarily fails.
+  }
 }
 
 export async function getFinanceState(): Promise<FinanceRuntimeState | null> {
