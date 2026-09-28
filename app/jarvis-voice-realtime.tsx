@@ -397,8 +397,9 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     if (!fallbackStreamDoneRef.current || fallbackPendingSpeechRef.current > 0) return;
     fallbackSpeakingRef.current = false;
     if (!voiceEnabledRef.current) return;
+    fallbackArmedRef.current = true;
     setVoice("LISTENING");
-    setCaption("NEURAL VOICE STANDBY · Say “Jarvis”");
+    setCaption("FALLBACK CONVERSATION READY · TALK NORMALLY");
     restartWakeSoon(120);
   }
 
@@ -601,15 +602,13 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
     void startRealtime("").catch(() => {
       if (!voiceEnabledRef.current) return;
-      setVoice("LISTENING");
 
       if (recognitionRef.current) {
-        setCaption("REALTIME UNAVAILABLE · SAY “JARVIS” FOR FALLBACK");
-        try {
-          recognitionRef.current.start();
-        } catch {
-          restartWakeSoon(180);
-        }
+        fallbackArmedRef.current = true;
+        fallbackStreamDoneRef.current = true;
+        setVoice("LISTENING");
+        setCaption("FALLBACK CONVERSATION READY · TALK NORMALLY");
+        queueFallbackSpeech("Yes, Dwight?");
       } else {
         setVoice("ERROR");
         setCaption("REALTIME VOICE UNAVAILABLE · CLICK VOICE TO RETRY");
