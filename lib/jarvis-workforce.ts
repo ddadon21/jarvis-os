@@ -4,7 +4,10 @@ import { runJarvisPulse } from "./jarvis-pulse";
 import { getTradingState } from "./trading-runtime";
 import {
   AgentId,
+  AgentPermission,
   AgentState,
+  AgentTask,
+  AgentTaskPriority,
   WorkforceObjective,
   WorkforceState,
   appendRuntimeEvent,
@@ -21,7 +24,7 @@ const DEFAULT_AGENTS: AgentState[] = [
     permissionCeiling: "WRITE_INTERNAL",
     lastRanAt: null,
     lastResult: "Executive orchestration has not completed its first cycle yet.",
-    currentWork: "Coordinate the specialist agents around Dwight's highest-leverage objectives.",
+    currentWork: "Coordinate specialist agents around Dwight's highest-leverage objectives.",
   },
   {
     id: "FINANCE_CFO",
@@ -47,8 +50,8 @@ const DEFAULT_AGENTS: AgentState[] = [
     status: "BLOCKED",
     permissionCeiling: "READ",
     lastRanAt: null,
-    lastResult: "Blocked until the trading recorder/data feed exists.",
-    currentWork: "Wait for structured trade observations rather than inventing trading evidence.",
+    lastResult: "Waiting for structured trading observations.",
+    currentWork: "Study actual observed trading behavior without placing trades.",
   },
   {
     id: "BUILDER",
@@ -58,6 +61,15 @@ const DEFAULT_AGENTS: AgentState[] = [
     lastRanAt: null,
     lastResult: "Builder is available for approved software and business objectives.",
     currentWork: "Turn validated objectives into internal plans and build tasks without taking unapproved external actions.",
+  },
+  {
+    id: "JARVIS_QA",
+    domain: "CORE",
+    status: "IDLE",
+    permissionCeiling: "ANALYZE",
+    lastRanAt: null,
+    lastResult: "QA watchdog is waiting for its first workforce cycle.",
+    currentWork: "Check agent failures, blockers, stale evidence, and reliability risks before JARVIS reports success.",
   },
 ];
 
@@ -86,9 +98,33 @@ const DEFAULT_OBJECTIVES: WorkforceObjective[] = [
   },
 ];
 
+type TaskSeed = {
+  title: string;
+  domain: AgentTask["domain"];
+  assignedTo: AgentId;
+  priority: AgentTaskPriority;
+  permissionRequired: AgentPermission;
+  objectiveId: string | null;
+  source: string;
+};
+
 export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
   const existing = await getWorkforceState();
-  if (existing) return existing;
+  if (existing) {
+    const agents = mergeMissingAgents(existing.agents);
+    const objectives = mergeMissingObjectives(existing.objectives);
+    const tasks = Array.isArray(existing.tasks) ? existing.tasks : [];
+    const changed =
+      agents.length !== existing.agents.length ||
+      objectives.length !== existing.objectives.length ||
+      !Array.isArray(existing.tasks);
+
+    if (!changed) return existing;
+
+    const migrated: WorkforceState = { ...existing, agents, objectives, tasks };
+    await setWorkforceState(migrated);
+    return migrated;
+  }
 
   const initial: WorkforceState = {
     version: 1,
@@ -97,7 +133,8 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
     status: "STARTING",
     agents: DEFAULT_AGENTS,
     objectives: DEFAULT_OBJECTIVES,
-    executiveSummary: "Jarvis workforce is initialized and waiting for its first autonomous cycle.",
+    tasks: [],
+    executiveSummary: "JARVIS workforce is initialized and waiting for its first autonomous cycle.",
   };
   await setWorkforceState(initial);
   return initial;
@@ -108,7 +145,8 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
   const now = new Date().toISOString();
   const cycleId = crypto.randomUUID();
 
-  let agents = previous.agents.map((agent) => ({ ...agent }));
+  let agents = mergeMissingAgents(previous.agents);
+  let tasks = pruneTasks(previous.tasks ?? []);
 
   await appendRuntimeEvent(
     createRuntimeEvent({
@@ -116,74 +154,204 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
       domain: "CORE",
       source: "jarvis.workforce",
       importance: "BACKGROUND",
-      summary: "Autonomous Jarvis cycle started. Finance, SentryOps, and executive lanes are checking for useful work.",
+      summary: "JARVIS workforce cycle started. Specialist agents are checking for useful work.",
     }),
   );
 
-  agents = setAgent(agents, "FINANCE_CFO", { status: "RUNNING", currentWork: "Refresh finance state when a direct provider is available, then evaluate the active financial stage." });
+  const financeObjective = previous.objectives.find((objective) => objective.status === "ACTIVE" && objective.domain === "FINANCE") ?? null;
+  const sentryObjective = previous.objectives.find((objective) => objective.status === "ACTIVE" && objective.domain === "SENTRYOPS") ?? null;
+
+  const financeTaskResult = ensureTask(tasks, {
+    title: "Review the active financial stage and next capital move",
+    domain: "FINANCE",
+    assignedTo: "FINANCE_CFO",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: financeObjective?.id ?? null,
+    source: "workforce.cycle",
+  });
+  tasks = financeTaskResult.tasks;
+
+  const sentryTaskResult = ensureTask(tasks, {
+    title: "Refresh SentryOps market evidence and identify the strongest next move",
+    domain: "SENTRYOPS",
+    assignedTo: "SENTRYOPS_RESEARCH",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: sentryObjective?.id ?? null,
+    source: "workforce.cycle",
+  });
+  tasks = sentryTaskResult.tasks;
+
+  const tradingTaskResult = ensureTask(tasks, {
+    title: "Inspect the latest Trading Observer state and preserve evidence quality",
+    domain: "TRADING",
+    assignedTo: "TRADING_OBSERVER",
+    priority: "MEDIUM",
+    permissionRequired: "READ",
+    objectiveId: null,
+    source: "workforce.cycle",
+  });
+  tasks = tradingTaskResult.tasks;
+
+  const qaTaskResult = ensureTask(tasks, {
+    title: "Audit the workforce cycle for failures, blockers, stale evidence, and false-success risk",
+    domain: "CORE",
+    assignedTo: "JARVIS_QA",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: null,
+    source: "workforce.cycle",
+  });
+  tasks = qaTaskResult.tasks;
+
+  tasks = updateTask(tasks, financeTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  agents = setAgent(agents, "FINANCE_CFO", {
+    status: "RUNNING",
+    currentWork: "Refresh finance state when a direct provider is available, then evaluate the active financial stage.",
+  });
+
   const financeRefresh = plaidFinanceConfigured() ? await refreshFinanceFromPlaid() : null;
   const finance = financeRefresh?.state ?? await getOrSeedFinanceState();
   const financeResult = financeRefresh?.refreshed
     ? `Direct finance refreshed. ${financeDirective(finance)}`
     : `${finance.mode === "DIRECT" ? "Direct finance state retained." : "Using the latest synchronized finance snapshot."} ${financeDirective(finance)}`;
+  const financeFailed = Boolean(financeRefresh?.configured && !financeRefresh.refreshed);
+
   agents = setAgent(agents, "FINANCE_CFO", {
-    status: financeRefresh?.configured && !financeRefresh.refreshed ? "ERROR" : "DONE",
+    status: financeFailed ? "ERROR" : "DONE",
     lastRanAt: now,
     lastResult: financeResult,
     currentWork: financeDirective(finance),
   });
+  tasks = updateTask(tasks, financeTaskResult.task.id, {
+    status: financeFailed ? "FAILED" : "DONE",
+    result: financeResult,
+    evidence: [`mode=${finance.mode}`, `asOf=${finance.asOf}`],
+    blockedReason: financeFailed ? "The configured direct finance refresh did not complete successfully." : null,
+  });
   await emitIfChanged(previous, agents, "FINANCE_CFO", "finance.cfo_cycle", financeResult);
 
-  agents = setAgent(agents, "SENTRYOPS_RESEARCH", { status: "RUNNING", currentWork: "Research new evidence and compare it with the previous market pulse." });
+  tasks = updateTask(tasks, sentryTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
+    status: "RUNNING",
+    currentWork: "Research new evidence and compare it with the previous market pulse.",
+  });
+
   const sentryPulse = await runJarvisPulse();
-  const sentryStatus = sentryPulse.status === "ERROR" ? "ERROR" : "DONE";
+  const sentryFailed = sentryPulse.status === "ERROR";
   const sentryResult = sentryPulse.summary;
   agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
-    status: sentryStatus,
+    status: sentryFailed ? "ERROR" : "DONE",
     lastRanAt: now,
     lastResult: sentryResult,
     currentWork: sentryPulse.nextMove.title,
   });
+  tasks = updateTask(tasks, sentryTaskResult.task.id, {
+    status: sentryFailed ? "FAILED" : "DONE",
+    result: sentryResult,
+    evidence: [`sources=${sentryPulse.sourceCount}`, `pulse=${sentryPulse.ranAt}`],
+    blockedReason: sentryFailed ? "The SentryOps research pulse failed and will need a later retry." : null,
+  });
 
+  tasks = updateTask(tasks, tradingTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   const tradingRuntime = await getTradingState();
-  const trading = agents.find((agent) => agent.id === "TRADING_OBSERVER");
-  if (trading) {
-    const observerOnline =
-      tradingRuntime.account.connection === "OBSERVING" ||
-      tradingRuntime.account.connection === "DEGRADED" ||
-      Boolean(tradingRuntime.observer?.observedAt);
+  const observerOnline =
+    tradingRuntime.account.connection === "OBSERVING" ||
+    tradingRuntime.account.connection === "DEGRADED" ||
+    Boolean(tradingRuntime.observer?.observedAt);
+  const tradingResult = observerOnline
+    ? `Observer active. ${tradingRuntime.observer?.symbol ?? "No active symbol"} · ${tradingRuntime.observer?.status ?? "UNKNOWN"} · ${tradingRuntime.today.trades} trade${tradingRuntime.today.trades === 1 ? "" : "s"} today.`
+    : "Trading Observer is waiting for live observations from the Windows Local Agent.";
 
-    Object.assign(trading, {
-      status: observerOnline ? "DONE" as const : "BLOCKED" as const,
+  agents = setAgent(agents, "TRADING_OBSERVER", {
+    status: observerOnline ? "DONE" : "BLOCKED",
+    lastRanAt: now,
+    lastResult: tradingResult,
+    currentWork: observerOnline
+      ? "Study observed setup state, management changes, rule compliance, and journal outcomes without placing trades."
+      : "Wait for the Local Agent to resume observation; do not invent trading evidence.",
+  });
+  tasks = updateTask(tasks, tradingTaskResult.task.id, {
+    status: observerOnline ? "DONE" : "BLOCKED",
+    result: tradingResult,
+    evidence: [
+      `connection=${tradingRuntime.account.connection}`,
+      `observedAt=${tradingRuntime.observer?.observedAt ?? tradingRuntime.account.lastObservedAt ?? "none"}`,
+    ],
+    blockedReason: observerOnline ? null : "No current Local Agent observation is available.",
+  });
+
+  const activeBuildObjective = previous.objectives.find(
+    (objective) =>
+      objective.status === "ACTIVE" &&
+      objective.domain !== "FINANCE" &&
+      objective.domain !== "SENTRYOPS" &&
+      !objective.id.startsWith("finance-") &&
+      !objective.id.startsWith("sentryops-"),
+  ) ?? null;
+
+  if (activeBuildObjective) {
+    const buildTaskResult = ensureTask(tasks, {
+      title: `Turn objective into internal build plan: ${activeBuildObjective.title}`,
+      domain: activeBuildObjective.domain,
+      assignedTo: "BUILDER",
+      priority: "HIGH",
+      permissionRequired: "WRITE_INTERNAL",
+      objectiveId: activeBuildObjective.id,
+      source: "workforce.objective",
+    });
+    tasks = buildTaskResult.tasks;
+    const buildPlan = buildPlanForObjective(activeBuildObjective);
+    agents = setAgent(agents, "BUILDER", {
+      status: "DONE",
       lastRanAt: now,
-      lastResult: observerOnline
-        ? `Observer active. ${tradingRuntime.observer?.symbol ?? "No active symbol"} · ${tradingRuntime.observer?.status ?? "UNKNOWN"} · ${tradingRuntime.today.trades} trade${tradingRuntime.today.trades === 1 ? "" : "s"} today.`
-        : "Trading observer is waiting for live observations from the Windows Local Agent.",
-      currentWork: observerOnline
-        ? "Study observed setup state, management changes, rule compliance, and journal outcomes without placing trades."
-        : "Wait for the Local Agent to resume observation; do not invent trading evidence.",
+      lastResult: buildPlan,
+      currentWork: activeBuildObjective.currentFocus,
+    });
+    tasks = updateTask(tasks, buildTaskResult.task.id, {
+      status: "DONE",
+      result: buildPlan,
+      evidence: [`objective=${activeBuildObjective.id}`],
+      blockedReason: null,
+    });
+  } else {
+    agents = setAgent(agents, "BUILDER", {
+      status: "IDLE",
+      lastRanAt: now,
+      lastResult: "No separate build objective needs work this cycle. Builder remains available.",
+      currentWork: "Stand by for a concrete software or business objective from Dwight.",
     });
   }
 
-  const activeBuildObjective = previous.objectives.find(
-    (objective) => objective.status === "ACTIVE" && objective.domain !== "FINANCE" && objective.domain !== "SENTRYOPS",
-  );
-  agents = setAgent(agents, "BUILDER", {
-    status: activeBuildObjective ? "DONE" : "IDLE",
+  tasks = updateTask(tasks, qaTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  const qa = auditCycle(agents, tasks);
+  agents = setAgent(agents, "JARVIS_QA", {
+    status: qa.hasErrors ? "ERROR" : qa.hasBlockers ? "BLOCKED" : "DONE",
     lastRanAt: now,
-    lastResult: activeBuildObjective
-      ? `Converted the active objective "${activeBuildObjective.title}" into internal build work. External publishing, spending, outreach, or production mutations still require the relevant authorized connector and permission.`
-      : "No separate build objective needs work this cycle. Builder remains available.",
-    currentWork: activeBuildObjective?.currentFocus ?? "Stand by for a concrete software, commerce, or business objective from Dwight.",
+    lastResult: qa.summary,
+    currentWork: qa.nextCheck,
+  });
+  tasks = updateTask(tasks, qaTaskResult.task.id, {
+    status: qa.hasErrors ? "FAILED" : qa.hasBlockers ? "BLOCKED" : "DONE",
+    result: qa.summary,
+    evidence: qa.evidence,
+    blockedReason: qa.hasBlockers && !qa.hasErrors ? qa.blockedReason : qa.hasErrors ? "At least one workforce agent reported an error." : null,
   });
 
-  const executiveSummary = synthesizeExecutiveSummary(financeResult, sentryPulse.summary, sentryPulse.status);
+  const executiveSummary = synthesizeExecutiveSummary({
+    financeResult,
+    sentryResult,
+    tradingResult,
+    qaSummary: qa.summary,
+  });
   const degraded = agents.some((agent) => agent.status === "ERROR");
+
   agents = setAgent(agents, "EXECUTIVE", {
     status: degraded ? "ERROR" : "DONE",
     lastRanAt: now,
     lastResult: executiveSummary,
-    currentWork: chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title),
+    currentWork: chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title, tasks),
   });
 
   const next: WorkforceState = {
@@ -193,6 +361,7 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
     status: degraded ? "DEGRADED" : "ACTIVE",
     agents,
     objectives: previous.objectives,
+    tasks: pruneTasks(tasks),
     executiveSummary,
   };
 
@@ -226,11 +395,14 @@ export async function addWorkforceObjective(input: {
     updatedAt: now,
     status: "ACTIVE",
     successDefinition: input.successDefinition?.trim().slice(0, 500) || "Objective is achieved when Dwight's requested outcome is measurably complete.",
-    currentFocus: input.currentFocus?.trim().slice(0, 500) || "Jarvis will decompose the objective into the highest-leverage low-risk work it can perform with connected tools.",
+    currentFocus: input.currentFocus?.trim().slice(0, 500) || "JARVIS will decompose the objective into the highest-leverage low-risk work it can perform with connected tools.",
     requiresApprovalForExternalActions: true,
   };
 
-  const next = { ...state, objectives: [objective, ...state.objectives].slice(0, 30) };
+  const next: WorkforceState = {
+    ...state,
+    objectives: [objective, ...state.objectives].slice(0, 30),
+  };
   await setWorkforceState(next);
   await appendRuntimeEvent(
     createRuntimeEvent({
@@ -244,8 +416,180 @@ export async function addWorkforceObjective(input: {
   return objective;
 }
 
+export async function addWorkforceTask(input: {
+  title: string;
+  domain?: AgentTask["domain"];
+  assignedTo?: AgentId;
+  priority?: AgentTaskPriority;
+  permissionRequired?: AgentPermission;
+  objectiveId?: string | null;
+  source?: string;
+}): Promise<AgentTask> {
+  const state = await getOrSeedWorkforceState();
+  const now = new Date().toISOString();
+  const assignedTo = input.assignedTo ?? defaultAgentForDomain(input.domain ?? "CORE");
+  const agent = state.agents.find((candidate) => candidate.id === assignedTo);
+  const permissionRequired = input.permissionRequired ?? "ANALYZE";
+  const allowed = permissionWithinCeiling(permissionRequired, agent?.permissionCeiling ?? "READ");
+
+  const task: AgentTask = {
+    id: crypto.randomUUID(),
+    title: input.title.trim().slice(0, 220),
+    domain: input.domain ?? agent?.domain ?? "CORE",
+    assignedTo,
+    status: allowed ? "QUEUED" : "WAITING_APPROVAL",
+    priority: input.priority ?? "MEDIUM",
+    permissionRequired,
+    createdAt: now,
+    updatedAt: now,
+    objectiveId: input.objectiveId ?? null,
+    source: input.source?.trim().slice(0, 120) || "jarvis.executive",
+    result: null,
+    evidence: [],
+    blockedReason: allowed ? null : `Task requires ${permissionRequired}, above ${assignedTo}'s ${agent?.permissionCeiling ?? "READ"} permission ceiling.`,
+  };
+
+  const next: WorkforceState = {
+    ...state,
+    tasks: pruneTasks([task, ...(state.tasks ?? [])]),
+  };
+  await setWorkforceState(next);
+
+  await appendRuntimeEvent(
+    createRuntimeEvent({
+      type: "workforce.task_created",
+      domain: task.domain,
+      source: task.source,
+      importance: task.priority === "CRITICAL" ? "CRITICAL" : task.priority === "HIGH" ? "IMPORTANT" : "NORMAL",
+      summary: `${task.assignedTo} assigned: ${task.title}${task.status === "WAITING_APPROVAL" ? " · approval required" : ""}`,
+    }),
+  );
+
+  return task;
+}
+
+function mergeMissingAgents(existing: AgentState[]) {
+  return DEFAULT_AGENTS.map((fallback) => existing.find((agent) => agent.id === fallback.id) ?? fallback);
+}
+
+function mergeMissingObjectives(existing: WorkforceObjective[]) {
+  const current = [...existing];
+  for (const fallback of DEFAULT_OBJECTIVES) {
+    if (!current.some((objective) => objective.id === fallback.id)) current.push(fallback);
+  }
+  return current;
+}
+
 function setAgent(agents: AgentState[], id: AgentId, patch: Partial<AgentState>) {
   return agents.map((agent) => (agent.id === id ? { ...agent, ...patch } : agent));
+}
+
+function ensureTask(tasks: AgentTask[], seed: TaskSeed) {
+  const existing = tasks.find((task) =>
+    task.title === seed.title &&
+    task.assignedTo === seed.assignedTo &&
+    ["QUEUED", "RUNNING"].includes(task.status),
+  );
+  if (existing) return { tasks, task: existing };
+
+  const now = new Date().toISOString();
+  const task: AgentTask = {
+    id: crypto.randomUUID(),
+    ...seed,
+    status: "QUEUED",
+    createdAt: now,
+    updatedAt: now,
+    result: null,
+    evidence: [],
+    blockedReason: null,
+  };
+  return { tasks: [task, ...tasks], task };
+}
+
+function updateTask(tasks: AgentTask[], id: string, patch: Partial<AgentTask>) {
+  const updatedAt = new Date().toISOString();
+  return tasks.map((task) => task.id === id ? { ...task, ...patch, updatedAt } : task);
+}
+
+function pruneTasks(tasks: AgentTask[]) {
+  const open = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
+  const closed = tasks
+    .filter((task) => !["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 70);
+  return [...open, ...closed].slice(0, 100);
+}
+
+function defaultAgentForDomain(domain: AgentTask["domain"]): AgentId {
+  if (domain === "FINANCE") return "FINANCE_CFO";
+  if (domain === "SENTRYOPS") return "SENTRYOPS_RESEARCH";
+  if (domain === "TRADING") return "TRADING_OBSERVER";
+  return "BUILDER";
+}
+
+function permissionWithinCeiling(required: AgentPermission, ceiling: AgentPermission) {
+  const rank: Record<AgentPermission, number> = {
+    READ: 0,
+    ANALYZE: 1,
+    WRITE_INTERNAL: 2,
+    EXTERNAL_LOW_RISK: 3,
+    REQUIRES_APPROVAL: 4,
+  };
+  return rank[required] <= rank[ceiling] && required !== "REQUIRES_APPROVAL";
+}
+
+function buildPlanForObjective(objective: WorkforceObjective) {
+  return [
+    `Objective: ${objective.title}.`,
+    `Success: ${objective.successDefinition}`,
+    `Current focus: ${objective.currentFocus}`,
+    "Builder prepared internal work only. Publishing, spending, outreach, account changes, and other consequential external actions remain approval-gated.",
+  ].join(" ");
+}
+
+function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
+  const failures = agents.filter((agent) => agent.status === "ERROR");
+  const blockers = agents.filter((agent) => agent.status === "BLOCKED");
+  const waitingApproval = tasks.filter((task) => task.status === "WAITING_APPROVAL");
+  const running = tasks.filter((task) => task.status === "RUNNING");
+
+  const evidence = [
+    `errors=${failures.length}`,
+    `blockedAgents=${blockers.length}`,
+    `waitingApproval=${waitingApproval.length}`,
+    `stillRunning=${running.length}`,
+  ];
+
+  if (failures.length) {
+    return {
+      hasErrors: true,
+      hasBlockers: blockers.length > 0,
+      summary: `QA found ${failures.length} agent error${failures.length === 1 ? "" : "s"}: ${failures.map((agent) => agent.id).join(", ")}. JARVIS must not report a clean cycle.`,
+      nextCheck: "Re-check failed agents after their provider or data dependency recovers.",
+      evidence,
+      blockedReason: failures.map((agent) => `${agent.id}: ${agent.lastResult}`).join(" | "),
+    };
+  }
+
+  if (blockers.length || waitingApproval.length) {
+    return {
+      hasErrors: false,
+      hasBlockers: true,
+      summary: `QA found no agent errors, but ${blockers.length} agent${blockers.length === 1 ? "" : "s"} are blocked and ${waitingApproval.length} task${waitingApproval.length === 1 ? "" : "s"} await approval.`,
+      nextCheck: "Watch blocked dependencies and surface approval requests without bypassing them.",
+      evidence,
+      blockedReason: blockers.map((agent) => `${agent.id}: ${agent.lastResult}`).join(" | ") || "Approval-gated work is waiting.",
+    };
+  }
+
+  return {
+    hasErrors: false,
+    hasBlockers: false,
+    summary: "QA verified the cycle: no agent errors, no blocked agents, and no approval-gated tasks were hidden.",
+    nextCheck: "Continue checking evidence freshness and task outcomes on the next cycle.",
+    evidence,
+    blockedReason: null,
+  };
 }
 
 async function emitIfChanged(previous: WorkforceState, nextAgents: AgentState[], id: AgentId, type: string, summary: string) {
@@ -258,14 +602,30 @@ async function emitIfChanged(previous: WorkforceState, nextAgents: AgentState[],
   );
 }
 
-function synthesizeExecutiveSummary(financeResult: string, sentrySummary: string, sentryStatus: string) {
-  const sentry = sentryStatus === "ERROR"
-    ? "SentryOps research could not complete this cycle and will retry."
-    : `SentryOps research completed: ${sentrySummary}`;
-  return `Finance: ${financeResult} ${sentry}`.slice(0, 500);
+function synthesizeExecutiveSummary(input: {
+  financeResult: string;
+  sentryResult: string;
+  tradingResult: string;
+  qaSummary: string;
+}) {
+  return [
+    `Finance: ${input.financeResult}`,
+    `SentryOps: ${input.sentryResult}`,
+    `Trading: ${input.tradingResult}`,
+    `QA: ${input.qaSummary}`,
+  ].join(" ").slice(0, 900);
 }
 
-function chooseExecutiveFocus(finance: Awaited<ReturnType<typeof getOrSeedFinanceState>>, sentryStatus: string, sentryNext: string) {
+function chooseExecutiveFocus(
+  finance: Awaited<ReturnType<typeof getOrSeedFinanceState>>,
+  sentryStatus: string,
+  sentryNext: string,
+  tasks: AgentTask[],
+) {
+  const approvalTask = tasks.find((task) => task.status === "WAITING_APPROVAL");
+  if (approvalTask) return `Review approval request: ${approvalTask.title}`;
+  const highPriorityOpen = tasks.find((task) => ["QUEUED", "BLOCKED"].includes(task.status) && (task.priority === "CRITICAL" || task.priority === "HIGH"));
+  if (highPriorityOpen) return `${highPriorityOpen.assignedTo}: ${highPriorityOpen.title}`;
   if (finance.metrics.personalDebt > 0) return financeDirective(finance);
   if (sentryStatus !== "ERROR" && sentryNext) return sentryNext;
   return "Keep the financial path moving while waiting for the next evidence-backed specialist action.";
