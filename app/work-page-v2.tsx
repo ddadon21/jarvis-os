@@ -109,6 +109,16 @@ type AssistantPulse = {
   };
 };
 
+type IntegrationRegistryResponse = {
+  integrations?: Array<{
+    id: string;
+    label: string;
+    state: string;
+    capabilities: string[];
+    note: string;
+  }>;
+};
+
 type StreamMeta = {
   route?: "FAST" | "STANDARD" | "DEEP";
   provider?: string;
@@ -144,6 +154,7 @@ export default function WorkV2() {
   const [nextMove, setNextMove] = useState<JarvisNextMove>(defaultState.nextMove);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [assistantPulse, setAssistantPulse] = useState<AssistantPulse | null>(null);
+  const [integrationRegistry, setIntegrationRegistry] = useState<IntegrationRegistryResponse["integrations"]>([]);
   const spokenAssistantAlertsRef = useRef<Set<string>>(new Set());
   const [activeProvider, setActiveProvider] = useState("AUTO");
   const [activeModel, setActiveModel] = useState("JARVIS CORE");
@@ -213,6 +224,21 @@ export default function WorkV2() {
     }
     void refreshAssistant();
     const timer = window.setInterval(refreshAssistant, 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshIntegrations() {
+      try {
+        const response = await fetch("/api/integrations", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as IntegrationRegistryResponse;
+        if (!cancelled) setIntegrationRegistry(data.integrations ?? []);
+      } catch {}
+    }
+    void refreshIntegrations();
+    const timer = window.setInterval(refreshIntegrations, 30_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
 
@@ -393,6 +419,16 @@ export default function WorkV2() {
                 <AssistantSource label="MAIL" state={assistantState?.sources?.email ?? "STARTING"} />
                 <AssistantSource label="MEET" state={assistantState?.sources?.meetings ?? "STARTING"} />
                 <AssistantSource label="WEB" state={assistantState?.sources?.webSearch ?? "STARTING"} />
+              </div>
+              <div className="assistant-connection-list">
+                {(integrationRegistry ?? []).filter((item) =>
+                  ["GOOGLE_WORKSPACE","MICROSOFT_365","ZOOM","DISCORD","ICLOUD_CALENDAR"].includes(item.id)
+                ).map((item) => (
+                  <div className="assistant-connection-row" key={item.id}>
+                    <span>{item.label}</span>
+                    <strong>{item.state === "NEEDS_APP_SETUP" ? "SETUP" : item.state === "READY_TO_AUTHORIZE" ? "AUTHORIZE" : item.state}</strong>
+                  </div>
+                ))}
               </div>
             </div>
           </Panel>
