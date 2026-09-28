@@ -42,7 +42,10 @@ export type AgentId =
   | "SENTRYOPS_RESEARCH"
   | "TRADING_OBSERVER"
   | "BUILDER"
-  | "JARVIS_QA";
+  | "JARVIS_QA"
+  | "IT_INFRA"
+  | "IT_SECURITY"
+  | "IT_INTEGRATIONS";
 
 export type AgentRunStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
 
