@@ -399,7 +399,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     if (!voiceEnabledRef.current) return;
     fallbackArmedRef.current = true;
     setVoice("LISTENING");
-    setCaption("FALLBACK CONVERSATION READY · TALK NORMALLY");
+    setCaption("VOICE ONLINE · TALK NORMALLY");
     restartWakeSoon(120);
   }
 
@@ -408,7 +408,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     if (!spoken || !("speechSynthesis" in window)) return;
     fallbackSpeakingRef.current = true;
     setVoice("SPEAKING");
-    setCaption("FALLBACK VOICE · REALTIME UNAVAILABLE");
+    setCaption("JARVIS RESPONDING");
 
     const utterance = new SpeechSynthesisUtterance(spoken);
     const preferred = preferredVoiceRef.current;
@@ -462,7 +462,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     fallbackSpeechBufferRef.current = "";
     window.speechSynthesis?.cancel();
     setVoice("THINKING");
-    setCaption("NEURAL VOICE UNAVAILABLE · USING CORE FALLBACK");
+    setCaption("JARVIS THINKING");
 
     try {
       const state = loadJarvisState();
@@ -516,18 +516,15 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     const wakeMatch = transcript.match(/(?:^|\b)(?:(?:hey|okay|ok|yo)\s+)?jarvis\b[\s,:-]*(.*)$/i);
     if (wakeMatch) {
       const command = wakeMatch[1]?.trim() ?? "";
-      fallbackArmedRef.current = !command;
-      try {
-        await startRealtime(command);
-      } catch {
-        if (command) {
-          fallbackArmedRef.current = false;
-          await askFallback(command);
-        } else {
-          setVoice("LISTENING");
-          setCaption("Yes, Dwight? · realtime unavailable");
-          restartWakeSoon(120);
-        }
+      if (command) {
+        fallbackArmedRef.current = false;
+        await askFallback(command);
+      } else {
+        fallbackArmedRef.current = true;
+        setVoice("SPEAKING");
+        setCaption("VOICE ONLINE · LISTENING FOR YOUR REQUEST");
+        fallbackStreamDoneRef.current = true;
+        queueFallbackSpeech("Yes, Dwight?");
       }
       return;
     }
@@ -597,23 +594,17 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       return;
     }
 
-    setVoice("THINKING");
-    setCaption("CONNECTING REALTIME VOICE");
+    if (recognitionRef.current) {
+      fallbackArmedRef.current = true;
+      fallbackStreamDoneRef.current = true;
+      setVoice("SPEAKING");
+      setCaption("VOICE ONLINE · TALK NORMALLY");
+      queueFallbackSpeech("Yes, Dwight?");
+      return;
+    }
 
-    void startRealtime("").catch(() => {
-      if (!voiceEnabledRef.current) return;
-
-      if (recognitionRef.current) {
-        fallbackArmedRef.current = true;
-        fallbackStreamDoneRef.current = true;
-        setVoice("LISTENING");
-        setCaption("FALLBACK CONVERSATION READY · TALK NORMALLY");
-        queueFallbackSpeech("Yes, Dwight?");
-      } else {
-        setVoice("ERROR");
-        setCaption("REALTIME VOICE UNAVAILABLE · CLICK VOICE TO RETRY");
-      }
-    });
+    setVoice("ERROR");
+    setCaption("VOICE INPUT REQUIRES CHROME OR EDGE SPEECH SUPPORT");
   }
 
   function stopVoice() {
