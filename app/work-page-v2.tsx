@@ -53,13 +53,18 @@ type SystemStatus = {
   workforce?: { status?: string; lastCycleAt?: string | null; executiveSummary?: string };
 };
 
-type ApiResponse = {
-  reply?: string;
+type StreamMeta = {
+  route?: "FAST" | "STANDARD" | "DEEP";
+  provider?: string;
+  brain?: string;
+  model?: string;
+  fallback?: boolean;
+  text?: string;
   memoryUpdates?: Array<{ domain?: string; fact?: string }>;
   nextMove?: JarvisNextMove;
-  brain?: "CLAUDE" | "GPT" | "DUAL";
-  model?: string | null;
-  provider?: string | null;
+  firstTokenMs?: number | null;
+  totalMs?: number | null;
+  message?: string;
 };
 
 const sectors = [
@@ -83,6 +88,10 @@ export default function WorkV2() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [activeProvider, setActiveProvider] = useState("AUTO");
   const [activeModel, setActiveModel] = useState("JARVIS CORE");
+  const [activeRoute, setActiveRoute] = useState<"IDLE" | "FAST" | "STANDARD" | "DEEP">("IDLE");
+  const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null);
+  const [responseMs, setResponseMs] = useState<number | null>(null);
+  const [streamStarted, setStreamStarted] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   function hydrateFromState() {
@@ -145,14 +154,63 @@ export default function WorkV2() {
     event?.preventDefault();
     const text = input.trim();
     if (!text || busy) return;
+
     const userMessage: ChatMessage = { role: "user", content: text, createdAt: new Date().toISOString() };
     const nextMessages = [...messages, userMessage];
+    const assistantStamp = new Date(Date.now() + 1).toISOString();
+    let assistantStarted = false;
+
     setMessages(nextMessages);
     setInput("");
     setBusy(true);
+    setStreamStarted(false);
+    setFirstTokenMs(null);
+    setResponseMs(null);
+
+    const applyEvent = (eventName: string, payload: StreamMeta) => {
+      if (eventName === "meta") {
+        if (payload.provider) setActiveProvider(payload.provider);
+        if (payload.model) setActiveModel(payload.model);
+        if (payload.route === "FAST" || payload.route === "STANDARD" || payload.route === "DEEP") setActiveRoute(payload.route);
+        return;
+      }
+
+      if (eventName === "delta" && typeof payload.text === "string" && payload.text) {
+        const piece = payload.text;
+        if (!assistantStarted) {
+          assistantStarted = true;
+          setStreamStarted(true);
+          setMessages((previous) => [...previous, { role: "assistant", content: piece, createdAt: assistantStamp }]);
+        } else {
+          setMessages((previous) => previous.map((message) =>
+            message.createdAt === assistantStamp ? { ...message, content: message.content + piece } : message
+          ));
+        }
+        return;
+      }
+
+      if (eventName === "final") {
+        if (payload.provider) setActiveProvider(payload.provider);
+        if (payload.model) setActiveModel(payload.model);
+        if (payload.route === "FAST" || payload.route === "STANDARD" || payload.route === "DEEP") setActiveRoute(payload.route);
+        if (typeof payload.firstTokenMs === "number") setFirstTokenMs(payload.firstTokenMs);
+        if (typeof payload.totalMs === "number") setResponseMs(payload.totalMs);
+        if (Array.isArray(payload.memoryUpdates) && payload.memoryUpdates.length > 0) {
+          setMemories((current) => mergeMemories(current, payload.memoryUpdates ?? []));
+        }
+        if (payload.nextMove?.title) setNextMove(payload.nextMove);
+        return;
+      }
+
+      if (eventName === "error" && !assistantStarted) {
+        assistantStarted = true;
+        const message = payload.message?.trim() || "Core link unavailable. Jarvis will retain state and retry when the reasoning link is healthy.";
+        setMessages((previous) => [...previous, { role: "assistant", content: message, createdAt: assistantStamp }]);
+      }
+    };
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -160,20 +218,49 @@ export default function WorkV2() {
           activeDomain: domain,
           goals,
           memories: memories.map(({ domain: memoryDomain, fact }) => ({ domain: memoryDomain, fact })),
-          brain: "auto",
         }),
       });
-      const data = (await response.json()) as ApiResponse;
-      const reply = data.reply?.trim() || "No response returned from core.";
-      if (data.provider) setActiveProvider(data.provider);
-      if (data.model) setActiveModel(data.model);
-      setMessages((previous) => [...previous, { role: "assistant", content: reply, createdAt: new Date().toISOString() }]);
-      if (Array.isArray(data.memoryUpdates) && data.memoryUpdates.length > 0) setMemories((current) => mergeMemories(current, data.memoryUpdates ?? []));
-      if (data.nextMove?.title) setNextMove(data.nextMove);
+
+      if (!response.ok || !response.body) throw new Error("Streaming core unavailable.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary >= 0) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+
+          let eventName = "message";
+          let data = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            if (line.startsWith("data:")) data += line.slice(5).trim();
+          }
+
+          if (data) {
+            try { applyEvent(eventName, JSON.parse(data) as StreamMeta); } catch {}
+          }
+          boundary = buffer.indexOf("\n\n");
+        }
+      }
+
+      if (!assistantStarted) {
+        setMessages((previous) => [...previous, { role: "assistant", content: "JARVIS completed the request but no response text was returned.", createdAt: assistantStamp }]);
+      }
     } catch {
-      setMessages((previous) => [...previous, { role: "assistant", content: "Core link unavailable. Jarvis will retain state and retry when the reasoning link is healthy.", createdAt: new Date().toISOString() }]);
+      if (!assistantStarted) {
+        setMessages((previous) => [...previous, { role: "assistant", content: "Core link unavailable. Jarvis will retain state and retry when the reasoning link is healthy.", createdAt: assistantStamp }]);
+      }
     } finally {
       setBusy(false);
+      setStreamStarted(false);
     }
   }
 
@@ -255,16 +342,16 @@ export default function WorkV2() {
               <div className="jarvis-presence-copy">
                 <strong>{busy ? "THINKING" : "ONLINE"}</strong>
                 <span>{domain} MODE</span>
-                <small>{activeProvider} · {activeModel}</small>
+                <small>{activeProvider} · {activeModel} · {activeRoute}</small>
               </div>
             </div>
           </Panel>
 
           <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
-            <div className="brain-runtime"><span>CORE</span><strong>{activeProvider}</strong><small>{activeModel}</small></div>
+            <div className="brain-runtime"><span>{activeRoute}</span><strong>{activeProvider}</strong><small>{activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small></div>
             <div className="chat-log" style={{ height: 210 }}>
               {messages.slice(-6).map((message, index) => <div key={`${message.role}-${message.createdAt ?? index}`} className={`message ${message.role}`}><div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div><p>{message.content}</p></div>)}
-              {busy && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Working<span>...</span></p></div>}
+              {busy && !streamStarted && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Routing intelligence<span>...</span></p></div>}
               <div ref={endRef} />
             </div>
           </Panel>
