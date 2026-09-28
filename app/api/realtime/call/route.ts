@@ -2,8 +2,8 @@ import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const REALTIME_MODEL = "gpt-realtime-1.5";
-const REALTIME_VOICE = "cedar";
+const REALTIME_MODEL = "gpt-realtime-2.1";
+const REALTIME_VOICE = "marin";
 
 type Goal = { name?: string; value?: number; state?: string };
 type Memory = { domain?: string; fact?: string };
@@ -66,40 +66,17 @@ Use connected runtime state before older memory when they conflict. Respect time
   const session = {
     type: "realtime",
     model: REALTIME_MODEL,
-    output_modalities: ["audio"],
     instructions,
-    max_output_tokens: 240,
     audio: {
-      input: {
-        noise_reduction: { type: "far_field" },
-        transcription: {
-          model: "gpt-4o-mini-transcribe",
-          language: "en",
-          prompt: "Jarvis, Dwight, Himie Johnson Ventures, Trading, Finance, SentryOps",
-        },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.52,
-          prefix_padding_ms: 250,
-          silence_duration_ms: 320,
-          create_response: true,
-          interrupt_response: true,
-        },
-      },
       output: {
         voice: REALTIME_VOICE,
-        speed: 0.93,
       },
-    },
-    truncation: {
-      type: "retention_ratio",
-      retention_ratio: 0.8,
     },
   };
 
   const form = new FormData();
-  form.append("sdp", new Blob([sdp], { type: "application/sdp" }), "offer.sdp");
-  form.append("session", new Blob([JSON.stringify(session)], { type: "application/json" }), "session.json");
+  form.set("sdp", sdp);
+  form.set("session", JSON.stringify(session));
 
   const upstream = await fetch("https://api.openai.com/v1/realtime/calls", {
     method: "POST",
@@ -109,7 +86,11 @@ Use connected runtime state before older memory when they conflict. Respect time
 
   const payload = await upstream.text();
   if (!upstream.ok) {
-    console.error("Jarvis realtime call failed", { status: upstream.status, model: REALTIME_MODEL });
+    console.error("Jarvis realtime call failed", {
+      status: upstream.status,
+      model: REALTIME_MODEL,
+      response: payload.slice(0, 1000),
+    });
     return new Response(payload || `Realtime call failed with status ${upstream.status}.`, {
       status: upstream.status,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
