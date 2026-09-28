@@ -1,3 +1,4 @@
+import Link from "next/link";
 "use client";
 
 import { Bot, Play, ShieldCheck } from "lucide-react";
@@ -116,9 +117,12 @@ export default function WorkforcePanel() {
           <strong>{agents.length || 6} ONLINE ROSTER</strong>
           <small>{detail}</small>
         </div>
-        <button type="button" onClick={runCycle} disabled={running}>
-          <Play size={11} /> {running ? "WORKING" : "RUN CYCLE"}
-        </button>
+        <div className="workforce-toolbar-actions">
+          <Link href="/workforce">OPEN FLOOR</Link>
+          <button type="button" onClick={runCycle} disabled={running}>
+            <Play size={11} /> {running ? "WORKING" : "RUN CYCLE"}
+          </button>
+        </div>
       </div>
 
       <div className="workforce-agent-grid">
