@@ -114,7 +114,6 @@ export default function WorkV2() {
   useEffect(() => {
     if (!hydrated) return;
     saveJarvisState({ version: 1, activeDomain: domain, messages, memories, goals, nextMove });
-    window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
   }, [domain, goals, hydrated, memories, messages, nextMove]);
 
   useEffect(() => {
@@ -199,6 +198,7 @@ export default function WorkV2() {
           setMemories((current) => mergeMemories(current, payload.memoryUpdates ?? []));
         }
         if (payload.nextMove?.title) setNextMove(payload.nextMove);
+        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
         return;
       }
 
