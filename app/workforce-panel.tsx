@@ -52,6 +52,9 @@ const agentLabels: Record<string, string> = {
   TRADING_OBSERVER: "TRADING OBSERVER",
   BUILDER: "BUILDER",
   JARVIS_QA: "QA WATCHDOG",
+  IT_INFRA: "IT INFRA",
+  IT_SECURITY: "IT SECURITY",
+  IT_INTEGRATIONS: "IT INTEGRATIONS",
 };
 
 export default function WorkforcePanel() {
