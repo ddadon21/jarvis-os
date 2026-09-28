@@ -3,7 +3,7 @@
 import { getFinanceState, getLatestPulse, getRecentEvents, getWorkforceState } from "./jarvis-runtime";
 import { getTradingState } from "./trading-runtime";
 import { getTradingPayoutSummary } from "./trading-payouts";
-import { getAssistantRuntimeState } from "./jarvis-assistant-runtime";
+import { getAssistantRuntimeState, getAssistantAlerts } from "./jarvis-assistant-runtime";
 
 type SafeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -73,6 +73,7 @@ export async function getJarvisRuntimeContext() {
     trading: trading.ok ? compactTrading(trading.value) : { unavailable: true, error: trading.error },
     tradingPayouts: payouts.ok ? payouts.value : { unavailable: true, error: payouts.error },
     assistant: assistant.ok ? assistant.value : { unavailable: true, error: assistant.error },
+    assistantAlerts: assistant.ok ? getAssistantAlerts(assistant.value) : [],
     workforce: workforce.ok ? workforce.value : { unavailable: true, error: workforce.error },
     researchPulse: pulse.ok ? pulse.value : { unavailable: true, error: pulse.error },
     recentEvents: events.ok ? events.value.slice(0, 16) : [],
