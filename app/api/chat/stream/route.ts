@@ -2,9 +2,11 @@ import { generateText, streamText } from "ai";
 import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
 import { lookupLiveWorldFallback, lookupWorldKnowledgeFallback, needsLiveWorldSearch, resolveDirectAnswer } from "../../../../lib/jarvis-assistant-tools";
+import { addWorkforceTask, getOrSeedWorkforceState, runWorkforceCycle } from "../../../../lib/jarvis-workforce";
+import type { AgentId, AgentPermission, RuntimeDomain } from "../../../../lib/jarvis-runtime";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const FAST_MODEL = "openai/gpt-6-luna";
 const STANDARD_MODEL = "openai/gpt-5.6-sol";
@@ -92,6 +94,98 @@ function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, enco
   controller.enqueue(encoder.encode("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n"));
 }
 
+type WorkforceCommand =
+  | { type: "RUN" }
+  | { type: "STATUS" }
+  | { type: "ASSIGN"; assignedTo: AgentId; domain: RuntimeDomain; permissionRequired: AgentPermission; title: string };
+
+function workforceAgent(value: string): { id: AgentId; domain: RuntimeDomain; permission: AgentPermission } | null {
+  const text = value.toLowerCase();
+  if (/\b(builder|engineer|developer agent)\b/.test(text)) return { id: "BUILDER", domain: "CORE", permission: "WRITE_INTERNAL" };
+  if (/\b(cfo|finance agent|finance cfo)\b/.test(text)) return { id: "FINANCE_CFO", domain: "FINANCE", permission: "ANALYZE" };
+  if (/\b(sentryops research|research agent|researcher)\b/.test(text)) return { id: "SENTRYOPS_RESEARCH", domain: "SENTRYOPS", permission: "ANALYZE" };
+  if (/\b(trading observer|observer agent)\b/.test(text)) return { id: "TRADING_OBSERVER", domain: "TRADING", permission: "READ" };
+  if (/\b(qa watchdog|qa agent|qa)\b/.test(text)) return { id: "JARVIS_QA", domain: "CORE", permission: "ANALYZE" };
+  if (/\b(executive agent|executive)\b/.test(text)) return { id: "EXECUTIVE", domain: "CORE", permission: "WRITE_INTERNAL" };
+  return null;
+}
+
+function parseWorkforceCommand(input: string): WorkforceCommand | null {
+  const text = input.trim();
+  const lower = text.toLowerCase();
+
+  if (/\b(run|start)\b.*\b(workforce|agent cycle|agents)\b/.test(lower) || /\bhave (the )?agents work\b/.test(lower)) {
+    return { type: "RUN" };
+  }
+
+  if (/\b(workforce|agents?)\b/.test(lower) && /\b(status|doing|working|queue|employees|roster)\b/.test(lower)) {
+    return { type: "STATUS" };
+  }
+
+  const direct = text.match(/^(?:jarvis[,\s]*)?(?:have|tell|ask|give)\s+(?:the\s+)?(.+?)\s+(?:to\s+)(.+)$/i);
+  if (direct) {
+    const agent = workforceAgent(direct[1]);
+    const title = direct[2]?.trim();
+    if (agent && title) return { type: "ASSIGN", assignedTo: agent.id, domain: agent.domain, permissionRequired: agent.permission, title };
+  }
+
+  const assign = text.match(/^(?:jarvis[,\s]*)?assign\s+(.+?)\s+to\s+(?:the\s+)?(.+)$/i);
+  if (assign) {
+    const agent = workforceAgent(assign[2]);
+    const title = assign[1]?.trim();
+    if (agent && title) return { type: "ASSIGN", assignedTo: agent.id, domain: agent.domain, permissionRequired: agent.permission, title };
+  }
+
+  return null;
+}
+
+function directSseResponse(input: {
+  answer: string;
+  activeDomain: string;
+  startedAt: number;
+  provider: string;
+  model: string;
+}) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const elapsed = Date.now() - input.startedAt;
+      sendEvent(controller, encoder, "meta", {
+        route: "FAST",
+        provider: input.provider,
+        brain: "TOOLS",
+        model: input.model,
+        fallback: false,
+      });
+      sendEvent(controller, encoder, "delta", { text: input.answer });
+      sendEvent(controller, encoder, "final", {
+        memoryUpdates: [],
+        nextMove: {
+          title: "Continue current objective",
+          reason: "JARVIS handled the request through the workforce control layer.",
+          domain: input.activeDomain,
+        },
+        route: "FAST",
+        provider: input.provider,
+        brain: "TOOLS",
+        model: input.model,
+        firstTokenMs: elapsed,
+        totalMs: Date.now() - input.startedAt,
+      });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      Connection: "keep-alive",
+      "X-Jarvis-Route": "FAST",
+    },
+  });
+}
+
 async function extractMetadata(choice: Choice, user: string, reply: string, activeDomain: string, memories: Memory[]) {
   try {
     const result = await generateText({
@@ -131,6 +225,52 @@ export async function POST(request: Request) {
   const activeDomain = domainFor(body.activeDomain);
   const goals = Array.isArray(body.goals) ? body.goals.slice(0, 20) : [];
   const memories = Array.isArray(body.memories) ? body.memories.slice(-60) : [];
+  const workforceCommand = parseWorkforceCommand(latestUser);
+  if (workforceCommand?.type === "RUN") {
+    const workforce = await runWorkforceCycle();
+    const done = workforce.agents.filter((agent) => agent.status === "DONE").length;
+    const blocked = workforce.agents.filter((agent) => agent.status === "BLOCKED").length;
+    const errors = workforce.agents.filter((agent) => agent.status === "ERROR").length;
+    return directSseResponse({
+      answer: `Workforce cycle complete. ${done} agents completed work, ${blocked} are blocked, and ${errors} reported errors. Executive summary: ${workforce.executiveSummary}`,
+      activeDomain,
+      startedAt,
+      provider: "JARVIS Workforce",
+      model: "EXECUTIVE",
+    });
+  }
+
+  if (workforceCommand?.type === "STATUS") {
+    const workforce = await getOrSeedWorkforceState();
+    const open = (workforce.tasks ?? []).filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
+    const roster = workforce.agents.map((agent) => `${agent.id}: ${agent.status}`).join(" · ");
+    return directSseResponse({
+      answer: `AI workforce is ${workforce.status.toLowerCase()}. ${workforce.agents.length} employees are on the roster. ${open.length} tasks are open. ${roster}. Current executive focus: ${workforce.agents.find((agent) => agent.id === "EXECUTIVE")?.currentWork ?? workforce.executiveSummary}`,
+      activeDomain,
+      startedAt,
+      provider: "JARVIS Workforce",
+      model: "ROSTER",
+    });
+  }
+
+  if (workforceCommand?.type === "ASSIGN") {
+    const task = await addWorkforceTask({
+      title: workforceCommand.title,
+      domain: workforceCommand.domain,
+      assignedTo: workforceCommand.assignedTo,
+      priority: "HIGH",
+      permissionRequired: workforceCommand.permissionRequired,
+      source: "jarvis.chat",
+    });
+    return directSseResponse({
+      answer: `Assigned to ${task.assignedTo}: ${task.title}. Status: ${task.status}.${task.status === "WAITING_APPROVAL" ? " I will not bypass the approval boundary." : " It is now in the workforce queue."}`,
+      activeDomain,
+      startedAt,
+      provider: "JARVIS Workforce",
+      model: task.assignedTo,
+    });
+  }
+
   const route = routeFor(latestUser, activeDomain);
   const candidates = choices(route);
   if (!candidates.length) return new Response("No reasoning provider is connected.", { status: 503 });
