@@ -122,7 +122,7 @@ function parseWorkforceCommand(input: string): WorkforceCommand | null {
     return { type: "STATUS" };
   }
 
-  const direct = text.match(/^(?:jarvis[,\s]*)?(?:have|tell|ask|give)\s+(?:the\s+)?(.+?)\s+(?:to\s+)(.+)$/i);
+  const direct = text.match(/^(?:jarvis[,\s]*)?(?:have|tell|ask|give)\s+(?:the\s+)?(builder|engineer|developer agent|cfo|finance agent|finance cfo|sentryops research|research agent|researcher|trading observer|observer agent|qa watchdog|qa agent|qa|executive agent|executive)\s+(?:to\s+)?(.+)$/i);
   if (direct) {
     const agent = workforceAgent(direct[1]);
     const title = direct[2]?.trim();
