@@ -452,10 +452,55 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     fallbackSpeechBufferRef.current = buffer;
   }
 
+  async function answerLocalVoiceCommand(command: string) {
+    const lower = command.toLowerCase();
+    if (!/payout|pay out/.test(lower)) return null;
+
+    try {
+      const response = await fetch("/api/trading/payouts?range=ALL", { cache: "no-store" });
+      if (!response.ok) return null;
+      const body = await response.json() as {
+        summary?: {
+          lifetimeCount?: number;
+          totalAmount?: number;
+          averageAmount?: number | null;
+          nextPayoutNumber?: number;
+          latest?: { payoutAmount?: number; firm?: string } | null;
+        };
+      };
+      const summary = body.summary;
+      if (!summary || typeof summary.totalAmount !== "number") return null;
+
+      const count = summary.lifetimeCount ?? 0;
+      const average = summary.averageAmount ?? (count > 0 ? summary.totalAmount / count : null);
+      const latest = summary.latest;
+      const parts = [
+        `You have ${count} all-time payout${count === 1 ? "" : "s"} totaling ${summary.totalAmount.toLocaleString("en-US", { style: "currency", currency: "USD" })}.`,
+        average == null ? "" : `Your average payout is ${average.toLocaleString("en-US", { style: "currency", currency: "USD" })}.`,
+        latest?.payoutAmount == null ? "" : `Your latest recorded payout is ${latest.payoutAmount.toLocaleString("en-US", { style: "currency", currency: "USD" })}${latest.firm ? ` from ${latest.firm}` : ""}.`,
+        summary.nextPayoutNumber ? `Your next one is payout number ${summary.nextPayoutNumber}.` : "",
+      ].filter(Boolean);
+      return parts.join(" ");
+    } catch {
+      return null;
+    }
+  }
+
   async function askFallback(command: string) {
     const clean = command.trim();
     if (!clean) return;
     appendMessage("user", clean);
+
+    const localAnswer = await answerLocalVoiceCommand(clean);
+    if (localAnswer) {
+      fallbackPendingSpeechRef.current = 0;
+      fallbackStreamDoneRef.current = true;
+      fallbackSpeechBufferRef.current = "";
+      window.speechSynthesis?.cancel();
+      appendMessage("assistant", localAnswer);
+      queueFallbackSpeech(localAnswer);
+      return;
+    }
     stopWakeRecognition();
     fallbackPendingSpeechRef.current = 0;
     fallbackStreamDoneRef.current = false;
