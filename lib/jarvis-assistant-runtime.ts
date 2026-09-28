@@ -67,6 +67,69 @@ export type JarvisAssistantRuntime = {
   };
 };
 
+
+export type AssistantAlert = {
+  id: string;
+  kind: "MEETING_SOON" | "PERSON_WAITING" | "MEETING_STARTED" | "COMMUNICATION";
+  priority: "NORMAL" | "TIME_SENSITIVE" | "CRITICAL";
+  message: string;
+  occurredAt: string;
+  relatedEventId: string | null;
+};
+
+export function getAssistantAlerts(state: JarvisAssistantRuntime, nowMs = Date.now()): AssistantAlert[] {
+  const alerts: AssistantAlert[] = [];
+
+  for (const event of state.calendar.events) {
+    if (event.status === "CANCELLED" || !Number.isFinite(Date.parse(event.startAt))) continue;
+    const start = Date.parse(event.startAt);
+    const diffMinutes = Math.ceil((start - nowMs) / 60_000);
+
+    if (diffMinutes >= 0 && diffMinutes <= 15) {
+      alerts.push({
+        id: "meeting-soon:" + event.id,
+        kind: "MEETING_SOON",
+        priority: diffMinutes <= 5 ? "CRITICAL" : "TIME_SENSITIVE",
+        message: event.title + " starts " + (diffMinutes === 0 ? "now" : "in " + diffMinutes + " minute" + (diffMinutes === 1 ? "" : "s")) + ".",
+        occurredAt: new Date(nowMs).toISOString(),
+        relatedEventId: event.id,
+      });
+    } else if (diffMinutes < 0 && diffMinutes >= -10) {
+      alerts.push({
+        id: "meeting-started:" + event.id,
+        kind: "MEETING_STARTED",
+        priority: "TIME_SENSITIVE",
+        message: event.title + " started about " + Math.abs(diffMinutes) + " minute" + (Math.abs(diffMinutes) === 1 ? "" : "s") + " ago.",
+        occurredAt: new Date(nowMs).toISOString(),
+        relatedEventId: event.id,
+      });
+    }
+  }
+
+  for (const person of state.meetingPresence.people) {
+    if (person.state !== "WAITING") continue;
+    const since = person.waitingSince && Number.isFinite(Date.parse(person.waitingSince))
+      ? Date.parse(person.waitingSince)
+      : Date.parse(person.updatedAt);
+    const minutes = Number.isFinite(since) ? Math.max(0, Math.floor((nowMs - since) / 60_000)) : null;
+    alerts.push({
+      id: "person-waiting:" + (person.eventId ?? person.person ?? person.updatedAt),
+      kind: "PERSON_WAITING",
+      priority: minutes !== null && minutes >= 5 ? "CRITICAL" : "TIME_SENSITIVE",
+      message: (person.person || "A guest") + " is waiting" + (minutes === null ? "." : " and has been waiting for about " + minutes + " minute" + (minutes === 1 ? "" : "s") + "."),
+      occurredAt: person.waitingSince ?? person.updatedAt,
+      relatedEventId: person.eventId,
+    });
+  }
+
+  return alerts
+    .sort((a, b) => {
+      const rank = { CRITICAL: 0, TIME_SENSITIVE: 1, NORMAL: 2 } as const;
+      return rank[a.priority] - rank[b.priority] || Date.parse(b.occurredAt) - Date.parse(a.occurredAt);
+    })
+    .slice(0, 12);
+}
+
 const KEY = "jarvis:assistant:runtime:v1";
 const TTL = 60 * 60 * 24 * 365;
 
