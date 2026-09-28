@@ -3,6 +3,7 @@
 import { getFinanceState, getLatestPulse, getRecentEvents, getWorkforceState } from "./jarvis-runtime";
 import { getTradingState } from "./trading-runtime";
 import { getTradingPayoutSummary } from "./trading-payouts";
+import { getAssistantRuntimeState } from "./jarvis-assistant-runtime";
 
 type SafeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -56,10 +57,11 @@ function compactTrading(value: Awaited<ReturnType<typeof getTradingState>>) {
 }
 
 export async function getJarvisRuntimeContext() {
-  const [finance, trading, payouts, workforce, pulse, events] = await Promise.all([
+  const [finance, trading, payouts, assistant, workforce, pulse, events] = await Promise.all([
     safe(() => getFinanceState()),
     safe(() => getTradingState()),
     safe(() => getTradingPayoutSummary("ALL")),
+    safe(() => getAssistantRuntimeState()),
     safe(() => getWorkforceState()),
     safe(() => getLatestPulse()),
     safe(() => getRecentEvents()),
@@ -70,6 +72,7 @@ export async function getJarvisRuntimeContext() {
     finance: finance.ok ? compactFinance(finance.value) : { unavailable: true, error: finance.error },
     trading: trading.ok ? compactTrading(trading.value) : { unavailable: true, error: trading.error },
     tradingPayouts: payouts.ok ? payouts.value : { unavailable: true, error: payouts.error },
+    assistant: assistant.ok ? assistant.value : { unavailable: true, error: assistant.error },
     workforce: workforce.ok ? workforce.value : { unavailable: true, error: workforce.error },
     researchPulse: pulse.ok ? pulse.value : { unavailable: true, error: pulse.error },
     recentEvents: events.ok ? events.value.slice(0, 16) : [],
@@ -77,6 +80,7 @@ export async function getJarvisRuntimeContext() {
       finance: finance.ok,
       trading: trading.ok,
       payouts: payouts.ok,
+      assistant: assistant.ok,
       workforce: workforce.ok,
       research: pulse.ok,
       events: events.ok,
