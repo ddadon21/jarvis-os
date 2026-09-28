@@ -1,5 +1,7 @@
 import { generateText, streamText } from "ai";
 import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
+import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
+import { lookupWorldKnowledgeFallback, resolveDirectAnswer } from "../../../../lib/jarvis-assistant-tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -30,6 +32,8 @@ const SYSTEM = [
   "If a connected source is unavailable, say so specifically instead of guessing.",
   "Trading remains observation and analysis only unless an explicitly authorized execution tool exists.",
   "Do not mention routing, provider fallback, latency, or internal orchestration unless Dwight asks.",
+  "Treat domains as views, not limits. Automatically use whatever connected context is relevant to the question.",
+  "If the assistant context says Calendar, Email, Meeting Presence, Contacts, or Web Search are not connected, never pretend you can see them.",
   "Style: natural, composed, direct, compact. No filler or fake cinematic roleplay."
 ].join("\n");
 
@@ -132,6 +136,50 @@ export async function POST(request: Request) {
   if (!candidates.length) return new Response("No reasoning provider is connected.", { status: 503 });
 
   const runtimeContext = await getJarvisRuntimeContext();
+  const assistantContext = await getAssistantRuntimeState();
+  const directAnswer = resolveDirectAnswer(latestUser, runtimeContext, assistantContext);
+
+  if (directAnswer) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sendEvent(controller, encoder, "meta", {
+          route: "FAST",
+          provider: "JARVIS Tools",
+          brain: "TOOLS",
+          model: directAnswer.capability,
+          source: directAnswer.source,
+          fallback: false,
+        });
+        sendEvent(controller, encoder, "delta", { text: directAnswer.answer });
+        sendEvent(controller, encoder, "final", {
+          memoryUpdates: [],
+          nextMove: {
+            title: "Continue current objective",
+            reason: "The request was answered directly from connected JARVIS data.",
+            domain: activeDomain,
+          },
+          route: "FAST",
+          provider: "JARVIS Tools",
+          brain: "TOOLS",
+          model: directAnswer.capability,
+          firstTokenMs: Date.now() - startedAt,
+          totalMs: Date.now() - startedAt,
+        });
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store, no-transform",
+        Connection: "keep-alive",
+        "X-Jarvis-Route": "FAST",
+      },
+    });
+  }
+
   const context = [
     "ROUTE DEPTH: " + route,
     "ACTIVE DOMAIN: " + activeDomain,
@@ -189,10 +237,45 @@ export async function POST(request: Request) {
           totalMs: Date.now() - startedAt,
         });
       } catch (error) {
-        sendEvent(controller, encoder, "error", {
-          message: reply ? "The reasoning stream ended early. JARVIS kept the partial response." : "Reasoning provider unavailable. JARVIS interface remains online.",
-          detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
-        });
+        if (!reply) {
+          const worldFallback = await lookupWorldKnowledgeFallback(latestUser);
+          if (worldFallback) {
+            reply = worldFallback.answer;
+            if (firstTokenAt === null) firstTokenAt = Date.now();
+            sendEvent(controller, encoder, "meta", {
+              route: "FAST",
+              provider: "JARVIS Knowledge",
+              brain: "KNOWLEDGE",
+              model: worldFallback.source,
+              fallback: true,
+            });
+            sendEvent(controller, encoder, "delta", { text: worldFallback.answer });
+            sendEvent(controller, encoder, "final", {
+              memoryUpdates: [],
+              nextMove: {
+                title: "Continue current objective",
+                reason: "General knowledge was answered from JARVIS's encyclopedic fallback.",
+                domain: activeDomain,
+              },
+              route: "FAST",
+              provider: "JARVIS Knowledge",
+              brain: "KNOWLEDGE",
+              model: worldFallback.source,
+              firstTokenMs: firstTokenAt - startedAt,
+              totalMs: Date.now() - startedAt,
+            });
+          } else {
+            sendEvent(controller, encoder, "error", {
+              message: "JARVIS can hear you, but the general intelligence provider is unavailable for this request.",
+              detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+            });
+          }
+        } else {
+          sendEvent(controller, encoder, "error", {
+            message: "The reasoning stream ended early. JARVIS kept the partial response.",
+            detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+          });
+        }
       } finally {
         controller.close();
       }
