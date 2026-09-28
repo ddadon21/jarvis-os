@@ -1,23 +1,16 @@
-import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
 import { streamText } from "ai";
 import { getJarvisRuntimeContext } from "../../../lib/jarvis-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const CLAUDE_VOICE_MODEL = "claude-sonnet-4-6";
-const OPENAI_VOICE_MODEL = "gpt-5.6-luna";
+const VOICE_MODEL = "openai/gpt-6-luna";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
 
 export async function POST(request: Request) {
-  if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-    return new Response("No fallback voice reasoning provider is connected to this deployment.", { status: 503 });
-  }
-
   const body = (await request.json()) as {
     messages?: ChatMessage[];
     activeDomain?: string;
@@ -53,12 +46,10 @@ Connected runtime state: ${JSON.stringify(runtimeContext)}
 
 Use connected runtime state before older memory when they conflict. Respect timestamps and source-health flags. If a runtime source is unavailable, do not guess it.`;
 
-  const provider = process.env.OPENAI_API_KEY ? "OpenAI" : "Anthropic";
-  const model = provider === "OpenAI" ? OPENAI_VOICE_MODEL : CLAUDE_VOICE_MODEL;
-  console.info("Jarvis voice request", { provider, model });
+  console.info("Jarvis voice request", { provider: "Vercel AI Gateway", model: VOICE_MODEL });
 
   const result = streamText({
-    model: provider === "OpenAI" ? openai(OPENAI_VOICE_MODEL) : anthropic(CLAUDE_VOICE_MODEL),
+    model: VOICE_MODEL,
     system,
     messages,
     maxOutputTokens: 180,
@@ -67,8 +58,8 @@ Use connected runtime state before older memory when they conflict. Respect time
   return result.toTextStreamResponse({
     headers: {
       "Cache-Control": "no-store",
-      "X-Jarvis-Provider": provider,
-      "X-Jarvis-Model": model,
+      "X-Jarvis-Provider": "Vercel AI Gateway",
+      "X-Jarvis-Model": VOICE_MODEL,
     },
   });
 }
