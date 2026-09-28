@@ -1,20 +1,18 @@
-import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
 import { generateText, streamText } from "ai";
 import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const CLAUDE_OPUS = "claude-opus-5";
-const CLAUDE_FAST = "claude-sonnet-4-6";
-const GPT_SOL = "gpt-5.6-sol";
+const FAST_MODEL = "openai/gpt-6-luna";
+const STANDARD_MODEL = "openai/gpt-5.6-sol";
+const DEEP_MODEL = "anthropic/claude-opus-5.5";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
 type Route = "FAST" | "STANDARD" | "DEEP";
-type Choice = { provider: "Anthropic" | "OpenAI"; brain: "CLAUDE" | "GPT"; model: string };
+type Choice = { provider: "Vercel AI Gateway"; brain: "GATEWAY"; model: string };
 type Metadata = {
   memoryUpdates: Array<{ domain: string; fact: string }>;
   nextMove: { title: string; reason: string; domain: string };
@@ -48,27 +46,15 @@ function routeFor(text: string, domain: string): Route {
 }
 
 function choices(route: Route): Choice[] {
-  const anthropicOn = Boolean(process.env.ANTHROPIC_API_KEY);
-  const openaiOn = Boolean(process.env.OPENAI_API_KEY);
-  const list: Choice[] = [];
-
-  // OpenAI is the primary healthy lane right now. Anthropic remains automatic fallback
-  // when its account has usable credits again.
-  if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
-
-  if (anthropicOn) {
-    list.push({
-      provider: "Anthropic",
-      brain: "CLAUDE",
-      model: route === "FAST" ? CLAUDE_FAST : CLAUDE_OPUS,
-    });
-  }
-
-  return list;
+  return [{
+    provider: "Vercel AI Gateway",
+    brain: "GATEWAY",
+    model: route === "FAST" ? FAST_MODEL : route === "DEEP" ? DEEP_MODEL : STANDARD_MODEL,
+  }];
 }
 
 function modelFor(choice: Choice) {
-  return choice.provider === "Anthropic" ? anthropic(choice.model) : openai(choice.model);
+  return choice.model;
 }
 
 function domainFor(value: unknown, fallback = "CORE") {
@@ -191,7 +177,7 @@ export async function POST(request: Request) {
           }
         }
 
-        const metadataChoice = candidates.find(item => item.model === CLAUDE_FAST) || candidates[0] || activeChoice;
+        const metadataChoice = candidates[0] || activeChoice;
         const metadata = await extractMetadata(metadataChoice, latestUser, reply, activeDomain, memories);
         sendEvent(controller, encoder, "final", {
           ...metadata,
