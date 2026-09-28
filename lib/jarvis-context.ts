@@ -42,6 +42,30 @@ function compactFinance(value: Awaited<ReturnType<typeof getFinanceState>>) {
   };
 }
 
+function compactAssistant(value: Awaited<ReturnType<typeof getAssistantRuntimeState>>) {
+  const now = Date.now();
+  const events = [...value.calendar.events]
+    .filter(event => event.status !== "CANCELLED")
+    .sort((a, b) => Math.abs(Date.parse(a.startAt) - now) - Math.abs(Date.parse(b.startAt) - now))
+    .slice(0, 12);
+
+  const presence = [...value.meetingPresence.people]
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 12);
+
+  const communications = [...value.communications.recent]
+    .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))
+    .slice(0, 16);
+
+  return {
+    updatedAt: value.updatedAt,
+    sources: value.sources,
+    calendar: { asOf: value.calendar.asOf, events },
+    meetingPresence: { asOf: value.meetingPresence.asOf, people: presence },
+    communications: { asOf: value.communications.asOf, recent: communications },
+  };
+}
+
 function compactTrading(value: Awaited<ReturnType<typeof getTradingState>>) {
   return {
     account: value.account,
@@ -72,7 +96,7 @@ export async function getJarvisRuntimeContext() {
     finance: finance.ok ? compactFinance(finance.value) : { unavailable: true, error: finance.error },
     trading: trading.ok ? compactTrading(trading.value) : { unavailable: true, error: trading.error },
     tradingPayouts: payouts.ok ? payouts.value : { unavailable: true, error: payouts.error },
-    assistant: assistant.ok ? assistant.value : { unavailable: true, error: assistant.error },
+    assistant: assistant.ok ? compactAssistant(assistant.value) : { unavailable: true, error: assistant.error },
     assistantAlerts: assistant.ok ? getAssistantAlerts(assistant.value) : [],
     workforce: workforce.ok ? workforce.value : { unavailable: true, error: workforce.error },
     researchPulse: pulse.ok ? pulse.value : { unavailable: true, error: pulse.error },
