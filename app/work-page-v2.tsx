@@ -18,6 +18,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import DwightTradingRules from "./dwight-trading-rules";
 import ObsidianBridgePanel from "./obsidian-bridge-panel";
+import ObsidianKnowledgeSync from "./obsidian-knowledge-sync";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
 import LifeCockpit, { LifeProgress } from "./life-cockpit";
@@ -177,6 +178,7 @@ export default function WorkV2() {
 
   return (
     <main className={`shell ${domain === "LIFE" ? lifeStyles.shell : ""}`}>
+      <ObsidianKnowledgeSync />
       <div className="grid-overlay" />
       <header className="topbar">
         <div className="brand-zone">
