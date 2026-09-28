@@ -40,7 +40,8 @@ export type AgentId =
   | "FINANCE_CFO"
   | "SENTRYOPS_RESEARCH"
   | "TRADING_OBSERVER"
-  | "BUILDER";
+  | "BUILDER"
+  | "JARVIS_QA";
 
 export type AgentRunStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
 
@@ -59,6 +60,33 @@ export type AgentState = {
   lastRanAt: string | null;
   lastResult: string;
   currentWork: string;
+};
+
+export type AgentTaskStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "DONE"
+  | "BLOCKED"
+  | "FAILED"
+  | "WAITING_APPROVAL";
+
+export type AgentTaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type AgentTask = {
+  id: string;
+  title: string;
+  domain: RuntimeDomain;
+  assignedTo: AgentId;
+  status: AgentTaskStatus;
+  priority: AgentTaskPriority;
+  permissionRequired: AgentPermission;
+  createdAt: string;
+  updatedAt: string;
+  objectiveId: string | null;
+  source: string;
+  result: string | null;
+  evidence: string[];
+  blockedReason: string | null;
 };
 
 export type WorkforceObjective = {
@@ -80,6 +108,7 @@ export type WorkforceState = {
   status: "STARTING" | "ACTIVE" | "DEGRADED";
   agents: AgentState[];
   objectives: WorkforceObjective[];
+  tasks?: AgentTask[];
   executiveSummary: string;
 };
 
