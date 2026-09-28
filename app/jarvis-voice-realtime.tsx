@@ -61,7 +61,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const pathname = usePathname();
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceState, setVoiceState] = useState<JarvisVoiceState>("STANDBY");
-  const [caption, setCaption] = useState("Say “Jarvis” or “Hey Jarvis”");
+  const [caption, setCaption] = useState("VOICE STANDBY");
   const [fullscreen, setFullscreen] = useState(false);
 
   const recognitionRef = useRef<any>(null);
@@ -200,7 +200,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
     if (resumeWake && voiceEnabledRef.current) {
       setVoice("LISTENING");
-      setCaption("Say “Jarvis” or “Hey Jarvis”");
+      setCaption("VOICE ONLINE · TALK NORMALLY");
       restartWakeSoon(220);
     }
   }
@@ -493,6 +493,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
     const localAnswer = await answerLocalVoiceCommand(clean);
     if (localAnswer) {
+      stopWakeRecognition();
       fallbackPendingSpeechRef.current = 0;
       fallbackStreamDoneRef.current = true;
       fallbackSpeechBufferRef.current = "";
@@ -501,6 +502,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       queueFallbackSpeech(localAnswer);
       return;
     }
+
     stopWakeRecognition();
     fallbackPendingSpeechRef.current = 0;
     fallbackStreamDoneRef.current = false;
@@ -511,73 +513,99 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
     try {
       const state = loadJarvisState();
-      const response = await fetch("/api/voice", {
+      const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: state.messages.slice(-12).map(({ role, content }) => ({ role, content })),
+          messages: state.messages.slice(-18).map(({ role, content }) => ({ role, content })),
           activeDomain: state.activeDomain,
           goals: state.goals,
           memories: state.memories.map(({ domain, fact }) => ({ domain, fact })),
         }),
       });
-      if (!response.ok || !response.body) throw new Error("Fallback voice unavailable.");
+      if (!response.ok || !response.body) throw new Error("Jarvis intelligence unavailable.");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
       let fullReply = "";
+      let streamError = "";
+
+      const consume = (block: string) => {
+        let eventName = "message";
+        let data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) eventName = line.slice(6).trim();
+          if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (!data) return;
+
+        try {
+          const payload = JSON.parse(data) as { text?: string; message?: string };
+          if (eventName === "delta" && payload.text) {
+            fullReply += payload.text;
+            fallbackSpeechBufferRef.current += payload.text;
+            flushFallbackBuffer(false);
+          } else if (eventName === "error") {
+            streamError = payload.message || "Jarvis intelligence unavailable.";
+          }
+        } catch {
+          // Ignore malformed stream metadata and keep listening for usable text.
+        }
+      };
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        if (!chunk) continue;
-        fullReply += chunk;
-        fallbackSpeechBufferRef.current += chunk;
-        flushFallbackBuffer(false);
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary >= 0) {
+          consume(buffer.slice(0, boundary));
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf("\n\n");
+        }
       }
-      fullReply += decoder.decode();
+
+      buffer += decoder.decode();
+      if (buffer.trim()) consume(buffer);
+
       flushFallbackBuffer(true);
       fallbackStreamDoneRef.current = true;
-      if (fullReply.trim()) appendMessage("assistant", fullReply);
-      finishFallbackIfReady();
+
+      if (fullReply.trim()) {
+        appendMessage("assistant", fullReply);
+        finishFallbackIfReady();
+        return;
+      }
+
+      throw new Error(streamError || "Jarvis intelligence returned no answer.");
     } catch {
       fallbackStreamDoneRef.current = true;
       fallbackSpeakingRef.current = false;
-      setVoice("ERROR");
-      setCaption("VOICE CORE UNAVAILABLE");
-      window.setTimeout(() => {
-        if (!voiceEnabledRef.current) return;
-        setVoice("LISTENING");
-        setCaption("Say “Jarvis” or “Hey Jarvis”");
-        restartWakeSoon();
-      }, 1200);
+      const unavailable = "My intelligence provider is unavailable right now. Voice recognition is online, but I cannot answer general questions until the model connection is restored.";
+      appendMessage("assistant", unavailable);
+      queueFallbackSpeech(unavailable);
+      setCaption("INTELLIGENCE PROVIDER UNAVAILABLE");
     }
   }
 
   async function handleWakeTranscript(raw: string) {
     const transcript = raw.trim();
-    if (!transcript || realtimeActiveRef.current) return;
+    if (!transcript || realtimeActiveRef.current || !voiceEnabledRef.current) return;
 
     const wakeMatch = transcript.match(/(?:^|\b)(?:(?:hey|okay|ok|yo)\s+)?jarvis\b[\s,:-]*(.*)$/i);
-    if (wakeMatch) {
-      const command = wakeMatch[1]?.trim() ?? "";
-      if (command) {
-        fallbackArmedRef.current = false;
-        await askFallback(command);
-      } else {
-        fallbackArmedRef.current = true;
-        setVoice("SPEAKING");
-        setCaption("VOICE ONLINE · LISTENING FOR YOUR REQUEST");
-        fallbackStreamDoneRef.current = true;
-        queueFallbackSpeech("Yes, Dwight?");
-      }
+    const command = wakeMatch ? (wakeMatch[1]?.trim() ?? "") : transcript;
+
+    if (!command) {
+      fallbackArmedRef.current = true;
+      setVoice("LISTENING");
+      setCaption("LISTENING");
       return;
     }
 
-    if (fallbackArmedRef.current) {
-      fallbackArmedRef.current = false;
-      await askFallback(transcript);
-    }
+    fallbackArmedRef.current = true;
+    await askFallback(command);
   }
 
   function buildWakeRecognition() {
@@ -624,32 +652,24 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
     voiceEnabledRef.current = true;
     setVoiceEnabled(true);
+    fallbackArmedRef.current = true;
+    fallbackStreamDoneRef.current = true;
     window.localStorage.setItem(VOICE_STORAGE_KEY, "true");
 
-    if (isRestore) {
-      setVoice("LISTENING");
-      setCaption("VOICE READY · CLICK VOICE OR SAY “JARVIS”");
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch {
-          restartWakeSoon(500);
-        }
-      }
+    if (!recognitionRef.current) {
+      setVoice("ERROR");
+      setCaption("VOICE INPUT REQUIRES CHROME OR EDGE SPEECH SUPPORT");
       return;
     }
 
-    if (recognitionRef.current) {
-      fallbackArmedRef.current = true;
-      fallbackStreamDoneRef.current = true;
-      setVoice("SPEAKING");
-      setCaption("VOICE ONLINE · TALK NORMALLY");
-      queueFallbackSpeech("Yes, Dwight?");
-      return;
-    }
+    setVoice("LISTENING");
+    setCaption("VOICE ONLINE · TALK NORMALLY");
 
-    setVoice("ERROR");
-    setCaption("VOICE INPUT REQUIRES CHROME OR EDGE SPEECH SUPPORT");
+    try {
+      recognitionRef.current.start();
+    } catch {
+      restartWakeSoon(isRestore ? 500 : 160);
+    }
   }
 
   function stopVoice() {
