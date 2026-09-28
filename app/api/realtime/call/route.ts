@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const REALTIME_MODEL = "gpt-realtime-2.1";
-const REALTIME_VOICE = "marin";
+const REALTIME_VOICE = "cedar";
 
 type Goal = { name?: string; value?: number; state?: string };
 type Memory = { domain?: string; fact?: string };
