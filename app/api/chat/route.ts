@@ -1,6 +1,7 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 
 export const runtime = "nodejs";
 
@@ -30,16 +31,20 @@ Coordinate goals, commitments, relocation, major purchases, and personal priorit
 
 CORE BEHAVIOR
 - Keep domains separate internally; synthesize only at the executive layer.
+- Answer the user's actual question in the first sentence. Do not waste time restating the request.
 - Always identify the highest-leverage next move when enough context exists.
 - Distinguish evidence from assumptions.
 - Avoid fake certainty.
 - Protect Dwight from distraction and low-value motion.
 - Prefer controlled speed over reckless activity.
+- Use connected runtime state before older memory when they conflict. Respect timestamps and freshness markers.
+- Quietly check whether your conclusion conflicts with Trading, Finance, Life, SentryOps, recent events, or workforce state before answering.
 - When data is missing, say exactly what connection or information would make the answer stronger.
 - Do not invent live account, broker, market, email, calendar, or business data.
 - Do not present mock dashboard numbers as real.
 - Never guess which foundation model is running. Use the runtime model identity injected into each request.
 - If a provisional finance snapshot is present, do not claim Jarvis has no financial context at all. Say the snapshot is available but not live-linked.
+- Keep routine answers compact. Expand only when the task genuinely benefits from deeper reasoning, comparison, planning, or implementation detail.
 
 PERSISTENT MEMORY RULES
 You may suggest short memory updates only for durable, non-secret facts that will improve future reasoning, such as goals, strategy rules, project decisions, preferences, or durable business context.
@@ -168,7 +173,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const context = buildContext(activeDomain, goals, memories, financeSnapshot);
+    const context = await buildContext(activeDomain, goals, memories, financeSnapshot);
 
     if (brainPreference === "dual") {
       activeBrain = "DUAL";
@@ -266,12 +271,21 @@ export async function POST(request: Request) {
   }
 }
 
-function buildContext(activeDomain: string, goals: Goal[], memories: Memory[], financeSnapshot: FinanceSnapshot | null) {
+async function buildContext(activeDomain: string, goals: Goal[], memories: Memory[], financeSnapshot: FinanceSnapshot | null) {
+  const runtimeContext = await getJarvisRuntimeContext();
   const financeContext = financeSnapshot
-    ? `\nPHASE 1 FINANCE SNAPSHOT (PROVISIONAL, NOT LIVE-LINKED): ${JSON.stringify(financeSnapshot)}\nThis snapshot was imported from connected finance data and may change as sync/backfill completes. Never describe it as a live direct bank feed.`
+    ? `\nCLIENT FINANCE SNAPSHOT (PROVISIONAL): ${JSON.stringify(financeSnapshot)}\nUse the server runtime finance state when it is newer or more complete. Never describe a synchronized snapshot as a real-time bank feed.`
     : "";
 
-  return `CURRENT JARVIS CONTEXT\nActive domain: ${activeDomain}\nKnown goals: ${JSON.stringify(goals)}\nDurable memory: ${JSON.stringify(memories)}${financeContext}`;
+  return [
+    "CURRENT JARVIS CONTEXT",
+    `Active domain: ${activeDomain}`,
+    `Known goals: ${JSON.stringify(goals)}`,
+    `Durable memory: ${JSON.stringify(memories)}`,
+    `CONNECTED RUNTIME STATE: ${JSON.stringify(runtimeContext)}`,
+    "Runtime state is the freshest connected operating context available to this request. If a sourceHealth flag is false, treat that source as unavailable rather than guessing.",
+    financeContext,
+  ].filter(Boolean).join("\n");
 }
 
 async function runBrain(brain: ActiveBrain, messages: ChatMessage[], context: string): Promise<BrainResult> {
