@@ -3,16 +3,18 @@ import { getOrSeedWorkforceState } from "../../../../lib/jarvis-workforce";
 import { plaidFinanceConfigured } from "../../../../lib/plaid-finance";
 import { getLatestPulse, getRecentEvents } from "../../../../lib/jarvis-runtime";
 import { getTradingState } from "../../../../lib/trading-runtime";
+import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const [pulse, events, workforce, finance, trading] = await Promise.all([
+  const [pulse, events, workforce, finance, trading, assistant] = await Promise.all([
     getLatestPulse(),
     getRecentEvents(),
     getOrSeedWorkforceState(),
     getOrSeedFinanceState(),
     getTradingState(),
+    getAssistantRuntimeState(),
   ]);
 
   const researchState = pulse?.status === "ERROR" ? "DEGRADED" : pulse ? "ACTIVE" : "STARTING";
@@ -56,6 +58,18 @@ export async function GET() {
       finance: financeState,
       sentryopsResearch: researchState,
       life: "ACTIVE",
+      calendar: assistant.sources.calendar,
+      email: assistant.sources.email,
+      meetings: assistant.sources.meetings,
+      contacts: assistant.sources.contacts,
+      webSearch: assistant.sources.webSearch,
+    },
+    assistant: {
+      updatedAt: assistant.updatedAt,
+      sources: assistant.sources,
+      upcomingEventCount: assistant.calendar.events.length,
+      meetingPresenceCount: assistant.meetingPresence.people.length,
+      recentCommunicationCount: assistant.communications.recent.length,
     },
     providerCapabilities: {
       vercelGatewayCredentialPresent: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
