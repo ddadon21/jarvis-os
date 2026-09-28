@@ -1,0 +1,33 @@
+import { sleep } from "workflow";
+
+export async function jarvisWorkforceLoop(cadenceMinutes = 60) {
+  "use workflow";
+
+  while (true) {
+    const result = await runWorkforceHeartbeat();
+    if (!result.continue) return result;
+    await sleep(cadenceMinutes + "m");
+  }
+}
+
+async function runWorkforceHeartbeat(): Promise<{ continue: boolean; ranAt: string | null; status: string }> {
+  "use step";
+
+  const [{ getWorkforceState }, { runWorkforceCycle }] = await Promise.all([
+    import("../lib/jarvis-runtime"),
+    import("../lib/jarvis-workforce"),
+  ]);
+
+  const state = await getWorkforceState();
+  if (state?.autonomy?.enabled === false) {
+    return { continue: false, ranAt: state.lastCycleAt, status: state.status };
+  }
+
+  try {
+    const workforce = await runWorkforceCycle();
+    return { continue: true, ranAt: workforce.lastCycleAt, status: workforce.status };
+  } catch (error) {
+    console.error("Durable workforce heartbeat failed", error);
+    return { continue: true, ranAt: state?.lastCycleAt ?? null, status: "DEGRADED" };
+  }
+}
