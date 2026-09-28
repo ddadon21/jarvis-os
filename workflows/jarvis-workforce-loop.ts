@@ -6,7 +6,7 @@ export async function jarvisWorkforceLoop(cadenceMinutes = 60) {
   while (true) {
     const result = await runWorkforceHeartbeat();
     if (!result.continue) return result;
-    await sleep(cadenceMinutes + "m");
+    await sleep(cadenceMinutes * 60_000);
   }
 }
 
