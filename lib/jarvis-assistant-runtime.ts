@@ -1,6 +1,7 @@
 "server-only";
 
 import { getCache } from "@vercel/functions";
+import { createClient } from "@supabase/supabase-js";
 
 export type AssistantConnectionState = "CONNECTED" | "NEEDS_CONNECTION" | "DEGRADED";
 
@@ -132,6 +133,72 @@ export function getAssistantAlerts(state: JarvisAssistantRuntime, nowMs = Date.n
     .slice(0, 12);
 }
 
+const SUPABASE_FALLBACK_URL = "https://cubkgxdhkehmzczbvczy.supabase.co";
+const SNAPSHOT_KEY = "runtime.assistant.v1";
+
+function serviceClient() {
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRole) return null;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_FALLBACK_URL;
+  return createClient(url, serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+async function readDurableAssistantState(): Promise<JarvisAssistantRuntime | null> {
+  const supabase = serviceClient();
+  if (!supabase) return null;
+
+  try {
+    const { data: workspace } = await supabase
+      .from("jarvis_workspaces")
+      .select("id")
+      .eq("slug", "primary")
+      .maybeSingle();
+    if (!workspace?.id) return null;
+
+    const { data } = await supabase
+      .from("jarvis_state_snapshots")
+      .select("payload")
+      .eq("workspace_id", workspace.id)
+      .eq("state_key", SNAPSHOT_KEY)
+      .maybeSingle();
+
+    const payload = data?.payload as { format?: unknown; data?: unknown } | null | undefined;
+    if (payload?.format !== "runtime-json" || !payload.data || typeof payload.data !== "object") return null;
+    return payload.data as JarvisAssistantRuntime;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDurableAssistantState(state: JarvisAssistantRuntime): Promise<void> {
+  const supabase = serviceClient();
+  if (!supabase) return;
+
+  try {
+    const { data: workspace } = await supabase
+      .from("jarvis_workspaces")
+      .select("id")
+      .eq("slug", "primary")
+      .maybeSingle();
+    if (!workspace?.id) return;
+
+    await supabase
+      .from("jarvis_state_snapshots")
+      .upsert({
+        workspace_id: workspace.id,
+        state_key: SNAPSHOT_KEY,
+        version: 1,
+        payload: { format: "runtime-json", data: state },
+        source: "JARVIS ASSISTANT RUNTIME",
+        client_updated_at: state.updatedAt,
+      }, { onConflict: "workspace_id,state_key" });
+  } catch {
+    // Runtime cache still keeps the current session available if durable sync temporarily fails.
+  }
+}
+
 const KEY = "jarvis:assistant:runtime:v1";
 const TTL = 60 * 60 * 24 * 365;
 
@@ -153,25 +220,29 @@ const fallbackState: JarvisAssistantRuntime = {
 export async function getAssistantRuntimeState(): Promise<JarvisAssistantRuntime> {
   try {
     const value = await getCache().get(KEY) as JarvisAssistantRuntime | null;
-    if (!value) return {
-      ...fallbackState,
-      updatedAt: new Date().toISOString(),
-      sources: {
-        ...fallbackState.sources,
-        webSearch: process.env.TAVILY_API_KEY ? "CONNECTED" : "NEEDS_CONNECTION",
-      },
-    };
-    return value;
+    if (value) return value;
   } catch {
-    return {
-      ...fallbackState,
-      updatedAt: new Date().toISOString(),
-      sources: {
-        ...fallbackState.sources,
-        webSearch: process.env.TAVILY_API_KEY ? "CONNECTED" : "NEEDS_CONNECTION",
-      },
-    };
+    // Fall through to durable storage.
   }
+
+  const durable = await readDurableAssistantState();
+  if (durable) {
+    try {
+      await getCache().set(KEY, durable, { ttl: TTL, tags: ["jarvis-assistant"] });
+    } catch {
+      // Durable state is still usable even when Runtime Cache is unavailable.
+    }
+    return durable;
+  }
+
+  return {
+    ...fallbackState,
+    updatedAt: new Date().toISOString(),
+    sources: {
+      ...fallbackState.sources,
+      webSearch: process.env.TAVILY_API_KEY ? "CONNECTED" : "NEEDS_CONNECTION",
+    },
+  };
 }
 
 export async function setAssistantRuntimeState(input: Partial<JarvisAssistantRuntime>): Promise<JarvisAssistantRuntime> {
@@ -203,8 +274,9 @@ export async function setAssistantRuntimeState(input: Partial<JarvisAssistantRun
   try {
     await getCache().set(KEY, next, { ttl: TTL, tags: ["jarvis-assistant"] });
   } catch {
-    // Runtime cache can be absent in local development. Callers still receive normalized state.
+    // Runtime cache can be absent in local development. Durable storage remains the fallback.
   }
 
+  await writeDurableAssistantState(next);
   return next;
 }
