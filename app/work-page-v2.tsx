@@ -23,6 +23,7 @@ import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
 import LifeCockpit, { LifeProgress } from "./life-cockpit";
 import lifeStyles from "./life-cockpit.module.css";
+import { useJarvisVoice } from "./jarvis-voice";
 import {
   ChatMessage,
   Domain,
@@ -75,6 +76,7 @@ const sectors = [
 ];
 
 export default function WorkV2() {
+  const { voiceEnabled, voiceState, caption, toggleVoice } = useJarvisVoice();
   const [time, setTime] = useState("--:--:--");
   const [date, setDate] = useState("--- -- ----");
   const [domain, setDomain] = useState<Domain>(defaultState.activeDomain);
@@ -325,8 +327,16 @@ export default function WorkV2() {
 
           <div className="command-label"><Activity size={14} /> {domain} // JARVIS WORKING</div>
           <form className="command-box" onSubmit={sendMessage}>
-            <Mic size={18} />
-            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={`Tell Jarvis what matters in ${domain.toLowerCase()}...`} autoComplete="off" />
+            <button
+              type="button"
+              className={voiceEnabled ? "command-mic active" : "command-mic"}
+              aria-label={voiceEnabled ? "Turn Jarvis voice off" : "Start Jarvis realtime voice"}
+              title={voiceEnabled ? caption : "Start realtime voice"}
+              onClick={toggleVoice}
+            >
+              <Mic size={18} />
+            </button>
+            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={voiceEnabled ? `${voiceState} · ${caption}` : `Tell Jarvis what matters in ${domain.toLowerCase()}...`} autoComplete="off" />
             <button type="submit" aria-label="Send" disabled={busy}><Send size={17} /></button>
           </form>
         </section>
