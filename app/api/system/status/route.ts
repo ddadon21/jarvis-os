@@ -32,6 +32,13 @@ export async function GET() {
       executiveSummary: workforce.executiveSummary,
       agents: workforce.agents,
       objectives: workforce.objectives.filter((objective) => objective.status === "ACTIVE").slice(0, 8),
+      tasks: (workforce.tasks ?? []).slice(0, 16),
+      taskCounts: {
+        queued: (workforce.tasks ?? []).filter((task) => task.status === "QUEUED").length,
+        running: (workforce.tasks ?? []).filter((task) => task.status === "RUNNING").length,
+        blocked: (workforce.tasks ?? []).filter((task) => ["BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status)).length,
+        done: (workforce.tasks ?? []).filter((task) => task.status === "DONE").length,
+      },
     },
     backgroundResearch: {
       enabled: true,
