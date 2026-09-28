@@ -1,18 +1,21 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { streamText } from "ai";
+import { getJarvisRuntimeContext } from "../../../lib/jarvis-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const VOICE_MODEL = "claude-sonnet-4-6";
+const CLAUDE_VOICE_MODEL = "claude-sonnet-4-6";
+const OPENAI_VOICE_MODEL = "gpt-5.6-luna";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
 
 export async function POST(request: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return new Response("Claude voice lane is not connected to this deployment.", { status: 503 });
+  if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+    return new Response("No fallback voice reasoning provider is connected to this deployment.", { status: 503 });
   }
 
   const body = (await request.json()) as {
@@ -26,6 +29,7 @@ export async function POST(request: Request) {
   const activeDomain = typeof body.activeDomain === "string" ? body.activeDomain : "CORE";
   const goals = Array.isArray(body.goals) ? body.goals.slice(0, 12) : [];
   const memories = Array.isArray(body.memories) ? body.memories.slice(-24) : [];
+  const runtimeContext = await getJarvisRuntimeContext();
 
   const system = `You are JARVIS in low-latency voice mode for Dwight Johnson.
 
@@ -41,31 +45,30 @@ VOICE BEHAVIOR
 - Never invent live integrations or data.
 - If the request needs deeper analysis, give the concise answer first, then ask whether Dwight wants the full breakdown.
 
-RUNTIME MODEL IDENTITY
-Provider: Anthropic
-Voice fast-lane model: Claude Sonnet 4.6
-API model id: ${VOICE_MODEL}
-If asked which model is speaking, report this voice-lane identity exactly.
-
 CURRENT CONTEXT
 Active domain: ${activeDomain}
 Goals: ${JSON.stringify(goals)}
-Durable memory: ${JSON.stringify(memories)}`;
+Durable memory: ${JSON.stringify(memories)}
+Connected runtime state: ${JSON.stringify(runtimeContext)}
 
-  console.info("Jarvis voice request", { provider: "Anthropic", model: VOICE_MODEL });
+Use connected runtime state before older memory when they conflict. Respect timestamps and source-health flags. If a runtime source is unavailable, do not guess it.`;
+
+  const provider = process.env.OPENAI_API_KEY ? "OpenAI" : "Anthropic";
+  const model = provider === "OpenAI" ? OPENAI_VOICE_MODEL : CLAUDE_VOICE_MODEL;
+  console.info("Jarvis voice request", { provider, model });
 
   const result = streamText({
-    model: anthropic(VOICE_MODEL),
+    model: provider === "OpenAI" ? openai(OPENAI_VOICE_MODEL) : anthropic(CLAUDE_VOICE_MODEL),
     system,
     messages,
-    maxOutputTokens: 140,
+    maxOutputTokens: 180,
   });
 
   return result.toTextStreamResponse({
     headers: {
       "Cache-Control": "no-store",
-      "X-Jarvis-Provider": "Anthropic",
-      "X-Jarvis-Model": VOICE_MODEL,
+      "X-Jarvis-Provider": provider,
+      "X-Jarvis-Model": model,
     },
   });
 }
