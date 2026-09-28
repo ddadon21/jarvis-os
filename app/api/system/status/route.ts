@@ -3,7 +3,7 @@ import { getOrSeedWorkforceState } from "../../../../lib/jarvis-workforce";
 import { plaidFinanceConfigured } from "../../../../lib/plaid-finance";
 import { getLatestPulse, getRecentEvents } from "../../../../lib/jarvis-runtime";
 import { getTradingState } from "../../../../lib/trading-runtime";
-import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
+import { getAssistantRuntimeState, getAssistantAlerts } from "../../../../lib/jarvis-assistant-runtime";
 
 export const runtime = "nodejs";
 
@@ -67,6 +67,7 @@ export async function GET() {
     assistant: {
       updatedAt: assistant.updatedAt,
       sources: assistant.sources,
+      alerts: getAssistantAlerts(assistant),
       upcomingEventCount: assistant.calendar.events.length,
       meetingPresenceCount: assistant.meetingPresence.people.length,
       recentCommunicationCount: assistant.communications.recent.length,
