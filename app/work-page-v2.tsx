@@ -105,6 +105,7 @@ export default function WorkV2() {
   useEffect(() => {
     if (!hydrated) return;
     saveJarvisState({ version: 1, activeDomain: domain, messages, memories, goals, nextMove });
+    window.dispatchEvent(new Event("jarvis-obsidian-sync-now"));
   }, [domain, goals, hydrated, memories, messages, nextMove]);
 
   useEffect(() => {
