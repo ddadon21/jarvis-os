@@ -229,6 +229,28 @@ function nextMoveNote(core: CoreState) {
   return lines.join("\n");
 }
 
+function knowledgeMap(dayKey: string) {
+  return [
+    "# JARVIS Knowledge Map", "",
+    "## Today",
+    "- [[01 Daily/" + dayKey + "|Daily Command]]",
+    "- [[04 Life/Daily/" + dayKey + "|Life]]",
+    "- [[07 Faith/Daily/" + dayKey + "|Faith]]", "",
+    "## Operating Domains",
+    "- [[02 Trading|Trading]]",
+    "- [[03 Finance/Current Capital Snapshot|Finance]]",
+    "- [[04 Life/Weekly/7D Review - " + dayKey + "|Life 7-Day Review]]",
+    "- [[05 SentryOps/Current Operating State|SentryOps]]",
+    "- [[06 Decisions/Current Next Move|Decisions / Next Move]]",
+    "- [[08 Research/SentryOps Research Pulse|Research]]", "",
+    "## Storage Model",
+    "- **Supabase:** structured source of truth",
+    "- **Obsidian:** readable long-term knowledge and reflection",
+    "- **Local Agent:** secure bridge between JARVIS and this vault", "",
+    "> JARVIS updates this map automatically.", ""
+  ].join("\n");
+}
+
 function dailyNote(dayKey: string, core: CoreState) {
   return [
     "---", "date: " + dayKey, "domain: core", "---", "",
@@ -307,6 +329,7 @@ export default function ObsidianKnowledgeSync() {
         const plan = readJson<PayoutPlan | null>(FINANCE_PLAN_KEY, null);
         const [finance, system] = await Promise.all([financeState(), systemState()]);
         const notes: Array<{ path: string; content: string }> = [
+          { path: "00 Inbox/JARVIS Knowledge Map.md", content: knowledgeMap(dayKey) },
           { path: "01 Daily/" + dayKey + ".md", content: dailyNote(dayKey, core) },
           { path: "04 Life/Daily/" + dayKey + ".md", content: lifeNote(dayKey) },
           { path: "04 Life/Weekly/7D Review - " + dayKey + ".md", content: weeklyLifeNote(dayKey) },
