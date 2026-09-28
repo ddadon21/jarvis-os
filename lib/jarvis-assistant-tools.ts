@@ -46,7 +46,7 @@ function upcomingMeeting(assistant: JarvisAssistantRuntime) {
 
 export async function getJarvisCapabilities(runtime?: JarvisRuntimeContext): Promise<JarvisCapability[]> {
   const assistant = await getAssistantRuntimeState();
-  const sourceHealth = runtime?.sourceHealth ?? {};
+  const sourceHealth: Partial<JarvisRuntimeContext["sourceHealth"]> = runtime?.sourceHealth ?? {};
 
   return [
     {
