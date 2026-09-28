@@ -1,3 +1,4 @@
+import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
   const goals = compact(body.goals, 10);
   const memories = compact(body.memories, 24);
   const recentMessages = compact(body.recentMessages, 8);
+  const runtimeContext = await getJarvisRuntimeContext();
 
   const instructions = `You are JARVIS, Dwight Johnson's private executive operating system, speaking in realtime voice mode.
 
@@ -55,7 +57,10 @@ CURRENT JARVIS CONTEXT
 Active domain: ${activeDomain}
 Goals: ${JSON.stringify(goals)}
 Durable memory: ${JSON.stringify(memories)}
-Recent conversation context: ${JSON.stringify(recentMessages)}`;
+Recent conversation context: ${JSON.stringify(recentMessages)}
+Connected runtime state: ${JSON.stringify(runtimeContext)}
+
+Use connected runtime state before older memory when they conflict. Respect timestamps and source-health flags. If a runtime source is unavailable, do not guess it.`;
 
   const session = {
     type: "realtime",
