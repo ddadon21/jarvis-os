@@ -391,10 +391,10 @@ export default function WorkV2() {
                 <div className="assistant-alert quiet"><span>RADAR</span><p>NO TIME-SENSITIVE ALERTS</p></div>
               )}
               <div className="assistant-source-grid">
-                <AssistantSource label="CAL" state={assistantState?.sources?.calendar ?? "STARTING"} />
-                <AssistantSource label="MAIL" state={assistantState?.sources?.email ?? "STARTING"} />
-                <AssistantSource label="MEET" state={assistantState?.sources?.meetings ?? "STARTING"} />
-                <AssistantSource label="WEB" state={assistantState?.sources?.webSearch ?? "STARTING"} />
+                <AssistantSource label="CORE" state={systemMode} />
+                <AssistantSource label="WORK" state={systemStatus?.workforce?.status ?? "STARTING"} />
+                <AssistantSource label="TRADE" state={systemStatus?.integrations?.trading ?? "STARTING"} />
+                <AssistantSource label="FIN" state={systemStatus?.integrations?.finance ?? "STARTING"} />
               </div>
             </div>
           </Panel>
