@@ -1936,3 +1936,33 @@
 .assistant-source.available strong{color:#66d6c8;}
 .assistant-source.degraded strong{color:#efb66b;}
 .assistant-source.needs-connection strong{color:#9a6a6a;}
+
+
+.assistant-connection-list{
+  display:grid;
+  gap:3px;
+  margin-top:6px;
+}
+.assistant-connection-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  min-width:0;
+  padding:4px 6px;
+  border-top:1px solid rgba(255,255,255,.04);
+}
+.assistant-connection-row span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:6px;
+  color:#7b898e;
+  letter-spacing:.04em;
+}
+.assistant-connection-row strong{
+  font-size:5.7px;
+  color:#8c6c6c;
+  letter-spacing:.08em;
+}
