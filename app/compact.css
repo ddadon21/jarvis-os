@@ -1850,3 +1850,23 @@
   letter-spacing:.035em;
   color:#708087;
 }
+
+
+.command-box .command-mic{
+  display:grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  border:1px solid rgba(0,229,255,.18);
+  border-radius:50%;
+  background:rgba(0,229,255,.025);
+}
+.command-box .command-mic.active{
+  color:var(--cyan);
+  border-color:rgba(0,229,255,.72);
+  background:rgba(0,229,255,.08);
+  box-shadow:0 0 14px rgba(0,229,255,.20), inset 0 0 10px rgba(0,229,255,.06);
+}
+.command-box .command-mic.active svg{
+  filter:drop-shadow(0 0 5px rgba(0,229,255,.7));
+}
