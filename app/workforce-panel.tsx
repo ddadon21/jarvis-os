@@ -1,5 +1,6 @@
-import Link from "next/link";
 "use client";
+
+import Link from "next/link";
 
 import { Bot, Play, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
