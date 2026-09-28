@@ -1,6 +1,7 @@
 import { financeDirective, getOrSeedFinanceState } from "./finance-live";
 import { plaidFinanceConfigured, refreshFinanceFromPlaid } from "./plaid-finance";
 import { runJarvisPulse } from "./jarvis-pulse";
+import { getTradingState } from "./trading-runtime";
 import {
   AgentId,
   AgentState,
@@ -144,13 +145,23 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
     currentWork: sentryPulse.nextMove.title,
   });
 
+  const tradingRuntime = await getTradingState();
   const trading = agents.find((agent) => agent.id === "TRADING_OBSERVER");
   if (trading) {
+    const observerOnline =
+      tradingRuntime.account.connection === "OBSERVING" ||
+      tradingRuntime.account.connection === "DEGRADED" ||
+      Boolean(tradingRuntime.observer?.observedAt);
+
     Object.assign(trading, {
-      status: "BLOCKED" as const,
+      status: observerOnline ? "DONE" as const : "BLOCKED" as const,
       lastRanAt: now,
-      lastResult: "Trading observer remains blocked until a recorder or broker/journal feed supplies actual trade evidence.",
-      currentWork: "Preserve the trading lane without guessing until real observations arrive.",
+      lastResult: observerOnline
+        ? `Observer active. ${tradingRuntime.observer?.symbol ?? "No active symbol"} · ${tradingRuntime.observer?.status ?? "UNKNOWN"} · ${tradingRuntime.today.trades} trade${tradingRuntime.today.trades === 1 ? "" : "s"} today.`
+        : "Trading observer is waiting for live observations from the Windows Local Agent.",
+      currentWork: observerOnline
+        ? "Study observed setup state, management changes, rule compliance, and journal outcomes without placing trades."
+        : "Wait for the Local Agent to resume observation; do not invent trading evidence.",
     });
   }
 
