@@ -1966,3 +1966,44 @@
   color:#8c6c6c;
   letter-spacing:.08em;
 }
+
+
+.workforce-panel{display:grid;gap:7px}
+.workforce-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.workforce-toolbar>div{display:grid;gap:2px;min-width:0}
+.workforce-toolbar span{font-size:6px;letter-spacing:.13em;color:#69787e}
+.workforce-toolbar strong{font-size:8px;letter-spacing:.08em;color:#e8ecee}
+.workforce-toolbar small{font-size:6px;color:#728187;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workforce-toolbar button{
+  display:inline-flex;align-items:center;gap:4px;height:25px;padding:0 7px;
+  border:1px solid rgba(183,31,38,.36);background:rgba(183,31,38,.06);
+  color:#dadddf;font-size:6px;font-weight:800;letter-spacing:.08em;cursor:pointer
+}
+.workforce-toolbar button:disabled{opacity:.45;cursor:not-allowed}
+.workforce-agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.workforce-agent{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:5px;
+  padding:5px 6px;border:1px solid rgba(255,255,255,.055);background:rgba(255,255,255,.012);min-width:0
+}
+.workforce-agent svg{opacity:.52}
+.workforce-agent>div{display:grid;gap:1px;min-width:0}
+.workforce-agent span{font-size:5.9px;font-weight:800;letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workforce-agent small{font-size:5px;color:#65747a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workforce-agent>strong{font-size:5.3px;letter-spacing:.06em;color:#708087}
+.workforce-agent.done>strong{color:#62cdbb}
+.workforce-agent.running>strong{color:#d8c06b}
+.workforce-agent.blocked>strong{color:#cf8a68}
+.workforce-agent.error>strong{color:#dc6268}
+.workforce-queue{display:grid;gap:3px;padding-top:5px;border-top:1px solid rgba(255,255,255,.055)}
+.workforce-queue-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.workforce-queue-head span{font-size:6px;font-weight:800;letter-spacing:.11em;color:#b8c0c3}
+.workforce-queue-head small{font-size:5px;color:#647279}
+.workforce-task{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:5px;
+  padding:4px 5px;border-left:1px solid rgba(183,31,38,.25);background:linear-gradient(90deg,rgba(183,31,38,.025),transparent)
+}
+.workforce-task>div{display:grid;gap:1px;min-width:0}
+.workforce-task span{font-size:5.7px;color:#c8ced1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workforce-task small{font-size:4.9px;color:#647279}
+.workforce-task>strong{font-size:5.1px;color:#9b7a7d;letter-spacing:.05em}
+.workforce-empty{padding:5px 0;font-size:5.4px;color:#59666b;letter-spacing:.09em}
