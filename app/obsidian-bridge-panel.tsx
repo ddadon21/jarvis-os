@@ -105,6 +105,18 @@ export default function ObsidianBridgePanel() {
     return () => window.removeEventListener("jarvis-obsidian-sync-status", onSyncStatus);
   }, []);
 
+  function syncNow() {
+    const token = controllerToken();
+    if (!token) {
+      setState("UNPAIRED");
+      setMessage("PAIR LOCAL AGENT");
+      setDetail("JARVIS does not see the saved desktop pairing in this browser. Re-pair once in Trading.");
+      return;
+    }
+    setSyncDetail("Manual knowledge sync requested…");
+    window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
+  }
+
   async function run(action: "LIST" | "WRITE" | "SEARCH") {
     const token = controllerToken();
     if (!token) {
@@ -193,14 +205,14 @@ export default function ObsidianBridgePanel() {
         </div>
       </div>
       <div className="obsidian-bridge-actions">
-        <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("LIST")}>TEST VAULT</button>
-        <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("WRITE")}>WRITE TEST</button>
-        <button type="button" disabled={state === "UNPAIRED"} onClick={() => window.dispatchEvent(new Event("jarvis-obsidian-sync-now"))}>SYNC NOW</button>
+        <button type="button" disabled={state === "WORKING"} onClick={() => void run("LIST")}>TEST VAULT</button>
+        <button type="button" disabled={state === "WORKING"} onClick={() => void run("WRITE")}>WRITE TEST</button>
+        <button type="button" onClick={syncNow}>SYNC NOW</button>
       </div>
       <small className="obsidian-bridge-sync">{syncDetail}</small>
       <div className="obsidian-bridge-search">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SEARCH KNOWLEDGE" />
-        <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("SEARCH")}>SEARCH</button>
+        <button type="button" disabled={state === "WORKING"} onClick={() => void run("SEARCH")}>SEARCH</button>
       </div>
       {files.length ? <small className="obsidian-bridge-files">{files.slice(0, 4).join(" · ")}</small> : null}
       {searchPreview ? <small className="obsidian-bridge-search-result">{searchPreview}</small> : null}
