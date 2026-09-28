@@ -86,12 +86,13 @@ export function getAssistantAlerts(state: JarvisAssistantRuntime, nowMs = Date.n
     const diffMinutes = Math.ceil((start - nowMs) / 60_000);
 
     if (diffMinutes >= 0 && diffMinutes <= 15) {
+      const milestone = diffMinutes <= 1 ? "NOW" : diffMinutes <= 5 ? "5M" : "15M";
       alerts.push({
-        id: "meeting-soon:" + event.id,
+        id: "meeting-soon:" + event.id + ":" + milestone,
         kind: "MEETING_SOON",
         priority: diffMinutes <= 5 ? "CRITICAL" : "TIME_SENSITIVE",
         message: event.title + " starts " + (diffMinutes === 0 ? "now" : "in " + diffMinutes + " minute" + (diffMinutes === 1 ? "" : "s")) + ".",
-        occurredAt: new Date(nowMs).toISOString(),
+        occurredAt: event.startAt,
         relatedEventId: event.id,
       });
     } else if (diffMinutes < 0 && diffMinutes >= -10) {
@@ -100,7 +101,7 @@ export function getAssistantAlerts(state: JarvisAssistantRuntime, nowMs = Date.n
         kind: "MEETING_STARTED",
         priority: "TIME_SENSITIVE",
         message: event.title + " started about " + Math.abs(diffMinutes) + " minute" + (Math.abs(diffMinutes) === 1 ? "" : "s") + " ago.",
-        occurredAt: new Date(nowMs).toISOString(),
+        occurredAt: event.startAt,
         relatedEventId: event.id,
       });
     }
@@ -112,8 +113,9 @@ export function getAssistantAlerts(state: JarvisAssistantRuntime, nowMs = Date.n
       ? Date.parse(person.waitingSince)
       : Date.parse(person.updatedAt);
     const minutes = Number.isFinite(since) ? Math.max(0, Math.floor((nowMs - since) / 60_000)) : null;
+    const milestone = minutes === null ? "NEW" : minutes < 5 ? "NEW" : Math.min(30, Math.floor(minutes / 5) * 5) + "M";
     alerts.push({
-      id: "person-waiting:" + (person.eventId ?? person.person ?? person.updatedAt),
+      id: "person-waiting:" + (person.eventId ?? person.person ?? person.updatedAt) + ":" + milestone,
       kind: "PERSON_WAITING",
       priority: minutes !== null && minutes >= 5 ? "CRITICAL" : "TIME_SENSITIVE",
       message: (person.person || "A guest") + " is waiting" + (minutes === null ? "." : " and has been waiting for about " + minutes + " minute" + (minutes === 1 ? "" : "s") + "."),
