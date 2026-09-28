@@ -41,6 +41,7 @@ export default function ObsidianBridgePanel() {
   const [files, setFiles] = useState<string[]>([]);
   const [query, setQuery] = useState("JARVIS");
   const [searchPreview, setSearchPreview] = useState("");
+  const [syncDetail, setSyncDetail] = useState("Automatic knowledge sync ready.");
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +94,15 @@ export default function ObsidianBridgePanel() {
       window.removeEventListener("storage", refresh);
       window.removeEventListener("jarvis-observer-link-updated", refresh);
     };
+  }, []);
+
+  useEffect(() => {
+    const onSyncStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      if (detail?.message) setSyncDetail(detail.message);
+    };
+    window.addEventListener("jarvis-obsidian-sync-status", onSyncStatus);
+    return () => window.removeEventListener("jarvis-obsidian-sync-status", onSyncStatus);
   }, []);
 
   async function run(action: "LIST" | "WRITE" | "SEARCH") {
@@ -185,7 +195,9 @@ export default function ObsidianBridgePanel() {
       <div className="obsidian-bridge-actions">
         <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("LIST")}>TEST VAULT</button>
         <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("WRITE")}>WRITE TEST</button>
+        <button type="button" disabled={state === "UNPAIRED"} onClick={() => window.dispatchEvent(new Event("jarvis-obsidian-sync-now"))}>SYNC NOW</button>
       </div>
+      <small className="obsidian-bridge-sync">{syncDetail}</small>
       <div className="obsidian-bridge-search">
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SEARCH KNOWLEDGE" />
         <button type="button" disabled={state === "WORKING" || state === "UNPAIRED"} onClick={() => void run("SEARCH")}>SEARCH</button>
