@@ -113,6 +113,12 @@ export type WorkforceState = {
   agents: AgentState[];
   objectives: WorkforceObjective[];
   tasks?: AgentTask[];
+  autonomy?: {
+    enabled: boolean;
+    runId: string | null;
+    startedAt: string | null;
+    cadenceMinutes: number;
+  };
   executiveSummary: string;
 };
 
