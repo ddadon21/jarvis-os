@@ -51,16 +51,19 @@ function choices(route: Route): Choice[] {
   const anthropicOn = Boolean(process.env.ANTHROPIC_API_KEY);
   const openaiOn = Boolean(process.env.OPENAI_API_KEY);
   const list: Choice[] = [];
-  if (route === "FAST") {
-    if (anthropicOn) list.push({ provider: "Anthropic", brain: "CLAUDE", model: CLAUDE_FAST });
-    if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
-  } else if (route === "DEEP") {
-    if (anthropicOn) list.push({ provider: "Anthropic", brain: "CLAUDE", model: CLAUDE_OPUS });
-    if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
-  } else {
-    if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
-    if (anthropicOn) list.push({ provider: "Anthropic", brain: "CLAUDE", model: CLAUDE_OPUS });
+
+  // OpenAI is the primary healthy lane right now. Anthropic remains automatic fallback
+  // when its account has usable credits again.
+  if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
+
+  if (anthropicOn) {
+    list.push({
+      provider: "Anthropic",
+      brain: "CLAUDE",
+      model: route === "FAST" ? CLAUDE_FAST : CLAUDE_OPUS,
+    });
   }
+
   return list;
 }
 
