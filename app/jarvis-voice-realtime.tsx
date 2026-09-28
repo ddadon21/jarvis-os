@@ -26,7 +26,7 @@ type RealtimeEvent = {
 
 const JarvisVoiceContext = createContext<JarvisVoiceContextValue | null>(null);
 const VOICE_STORAGE_KEY = "jarvis-voice-enabled-v1";
-const REALTIME_IDLE_MS = 60_000;
+const REALTIME_IDLE_MS = 10 * 60_000;
 
 export function useJarvisVoice() {
   const value = useContext(JarvisVoiceContext);
@@ -248,7 +248,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       case "session.created":
       case "session.updated":
         setVoice("LISTENING");
-        setCaption("NEURAL VOICE ONLINE");
+        setCaption("REALTIME VOICE ONLINE · TALK NORMALLY");
         touchRealtime();
         break;
       case "input_audio_buffer.speech_started":
@@ -282,7 +282,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         break;
       case "response.done":
         setVoice("LISTENING");
-        setCaption("NEURAL VOICE ONLINE · CONTINUE SPEAKING");
+        setCaption("REALTIME VOICE ONLINE · CONTINUE SPEAKING");
         touchRealtime();
         break;
       case "error":
@@ -333,7 +333,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       if (peer.connectionState === "connected") {
         realtimeActiveRef.current = true;
         setVoice("LISTENING");
-        setCaption("NEURAL VOICE ONLINE");
+        setCaption("REALTIME VOICE ONLINE · TALK NORMALLY");
         touchRealtime();
       }
       if (peer.connectionState === "failed" || peer.connectionState === "closed") {
@@ -575,24 +575,46 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
   function startVoice(isRestore = false) {
     if (voiceEnabledRef.current) return;
-    const recognition = recognitionRef.current ?? buildWakeRecognition();
-    if (!recognition) {
-      setVoice("ERROR");
-      setCaption("WAKE WORD REQUIRES CHROME OR EDGE SPEECH SUPPORT");
-      return;
-    }
 
-    recognitionRef.current = recognition;
+    const recognition = recognitionRef.current ?? buildWakeRecognition();
+    if (recognition) recognitionRef.current = recognition;
+
     voiceEnabledRef.current = true;
     setVoiceEnabled(true);
     window.localStorage.setItem(VOICE_STORAGE_KEY, "true");
-    setVoice("LISTENING");
-    setCaption("NEURAL VOICE STANDBY · Say “Jarvis”");
-    try {
-      recognition.start();
-    } catch {
-      restartWakeSoon(isRestore ? 500 : 160);
+
+    if (isRestore) {
+      setVoice("LISTENING");
+      setCaption("VOICE READY · CLICK VOICE OR SAY “JARVIS”");
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch {
+          restartWakeSoon(500);
+        }
+      }
+      return;
     }
+
+    setVoice("THINKING");
+    setCaption("CONNECTING REALTIME VOICE");
+
+    void startRealtime("").catch(() => {
+      if (!voiceEnabledRef.current) return;
+      setVoice("LISTENING");
+
+      if (recognitionRef.current) {
+        setCaption("REALTIME UNAVAILABLE · SAY “JARVIS” FOR FALLBACK");
+        try {
+          recognitionRef.current.start();
+        } catch {
+          restartWakeSoon(180);
+        }
+      } else {
+        setVoice("ERROR");
+        setCaption("REALTIME VOICE UNAVAILABLE · CLICK VOICE TO RETRY");
+      }
+    });
   }
 
   function stopVoice() {
