@@ -2007,3 +2007,27 @@
 .workforce-task small{font-size:4.9px;color:#647279}
 .workforce-task>strong{font-size:5.1px;color:#9b7a7d;letter-spacing:.05em}
 .workforce-empty{padding:5px 0;font-size:5.4px;color:#59666b;letter-spacing:.09em}
+
+
+.workforce-toolbar-actions{
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+.workforce-toolbar-actions a{
+  display:inline-flex;
+  align-items:center;
+  height:25px;
+  padding:0 7px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.015);
+  color:#9fa9ad;
+  text-decoration:none;
+  font-size:5.7px;
+  font-weight:800;
+  letter-spacing:.08em;
+}
+.workforce-toolbar-actions a:hover{
+  border-color:rgba(183,31,38,.32);
+  color:#fff;
+}
