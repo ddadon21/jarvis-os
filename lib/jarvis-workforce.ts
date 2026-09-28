@@ -2,6 +2,7 @@ import { financeDirective, getOrSeedFinanceState } from "./finance-live";
 import { plaidFinanceConfigured, refreshFinanceFromPlaid } from "./plaid-finance";
 import { runJarvisPulse } from "./jarvis-pulse";
 import { getTradingState } from "./trading-runtime";
+import { getJarvisIntegrationRegistry } from "./jarvis-integration-registry";
 import {
   AgentId,
   AgentPermission,
@@ -70,6 +71,33 @@ const DEFAULT_AGENTS: AgentState[] = [
     lastRanAt: null,
     lastResult: "QA watchdog is waiting for its first workforce cycle.",
     currentWork: "Check agent failures, blockers, stale evidence, and reliability risks before JARVIS reports success.",
+  },
+  {
+    id: "IT_INFRA",
+    domain: "CORE",
+    status: "IDLE",
+    permissionCeiling: "WRITE_INTERNAL",
+    lastRanAt: null,
+    lastResult: "Infrastructure agent is standing by.",
+    currentWork: "Watch runtime health, persistence, scheduled jobs, and core service availability.",
+  },
+  {
+    id: "IT_SECURITY",
+    domain: "CORE",
+    status: "IDLE",
+    permissionCeiling: "ANALYZE",
+    lastRanAt: null,
+    lastResult: "Security agent is standing by.",
+    currentWork: "Audit security boundaries, secrets posture, authorization gates, and risky configuration drift.",
+  },
+  {
+    id: "IT_INTEGRATIONS",
+    domain: "CORE",
+    status: "IDLE",
+    permissionCeiling: "WRITE_INTERNAL",
+    lastRanAt: null,
+    lastResult: "Integration agent is standing by.",
+    currentWork: "Watch connected systems and repair or surface broken integration paths without inventing connectivity.",
   },
 ];
 
@@ -205,6 +233,39 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
   });
   tasks = qaTaskResult.tasks;
 
+  const infraTaskResult = ensureTask(tasks, {
+    title: "Check JARVIS infrastructure health and durable runtime dependencies",
+    domain: "CORE",
+    assignedTo: "IT_INFRA",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: null,
+    source: "workforce.cycle",
+  });
+  tasks = infraTaskResult.tasks;
+
+  const securityTaskResult = ensureTask(tasks, {
+    title: "Audit security boundaries and automation authorization posture",
+    domain: "CORE",
+    assignedTo: "IT_SECURITY",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: null,
+    source: "workforce.cycle",
+  });
+  tasks = securityTaskResult.tasks;
+
+  const integrationsTaskResult = ensureTask(tasks, {
+    title: "Check active JARVIS integrations for degradation or broken paths",
+    domain: "CORE",
+    assignedTo: "IT_INTEGRATIONS",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: null,
+    source: "workforce.cycle",
+  });
+  tasks = integrationsTaskResult.tasks;
+
   tasks = updateTask(tasks, financeTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   agents = setAgent(agents, "FINANCE_CFO", {
     status: "RUNNING",
@@ -280,6 +341,77 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
       `observedAt=${tradingRuntime.observer?.observedAt ?? tradingRuntime.account.lastObservedAt ?? "none"}`,
     ],
     blockedReason: observerOnline ? null : "No current Local Agent observation is available.",
+  });
+
+  tasks = updateTask(tasks, infraTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  tasks = updateTask(tasks, securityTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  tasks = updateTask(tasks, integrationsTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+
+  const integrationRegistry = await getJarvisIntegrationRegistry();
+  const coreIntegrationIds = new Set(["SUPABASE", "OBSIDIAN", "TRADING_OBSERVER"]);
+  const coreIntegrations = integrationRegistry.filter((item) => coreIntegrationIds.has(item.id));
+  const degradedCore = coreIntegrations.filter((item) => item.state === "DEGRADED");
+  const configuredOptional = integrationRegistry.filter((item) => item.state === "CONNECTED" || item.state === "READY_TO_AUTHORIZE");
+  const degradedConfigured = configuredOptional.filter((item) => item.state === "DEGRADED");
+
+  const infraResult = degradedCore.length
+    ? "Infrastructure check found degraded core dependencies: " + degradedCore.map((item) => item.label).join(", ") + "."
+    : "Infrastructure check passed for core persistence, Obsidian bridge registration, and Trading Observer registration.";
+  agents = setAgent(agents, "IT_INFRA", {
+    status: degradedCore.length ? "ERROR" : "DONE",
+    lastRanAt: now,
+    lastResult: infraResult,
+    currentWork: degradedCore.length
+      ? "Restore degraded core infrastructure before expanding automation."
+      : "Keep core runtime, persistence, and scheduled work healthy.",
+  });
+  tasks = updateTask(tasks, infraTaskResult.task.id, {
+    status: degradedCore.length ? "FAILED" : "DONE",
+    result: infraResult,
+    evidence: coreIntegrations.map((item) => item.id + "=" + item.state),
+    blockedReason: degradedCore.length ? infraResult : null,
+  });
+
+  const securityFindings: string[] = [];
+  if (process.env.VERCEL_ENV === "production" && !process.env.CRON_SECRET) securityFindings.push("CRON_SECRET missing in production");
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) securityFindings.push("Supabase service role unavailable to server runtime");
+  const securityResult = securityFindings.length
+    ? "Security audit found configuration risks: " + securityFindings.join("; ") + "."
+    : "Security audit passed baseline checks for cron authorization and server-side persistence credentials.";
+  agents = setAgent(agents, "IT_SECURITY", {
+    status: securityFindings.length ? "ERROR" : "DONE",
+    lastRanAt: now,
+    lastResult: securityResult,
+    currentWork: securityFindings.length
+      ? "Resolve the reported configuration risks without exposing secret values."
+      : "Watch authorization boundaries and prevent agents from exceeding permission ceilings.",
+  });
+  tasks = updateTask(tasks, securityTaskResult.task.id, {
+    status: securityFindings.length ? "FAILED" : "DONE",
+    result: securityResult,
+    evidence: [
+      "cronSecret=" + (process.env.CRON_SECRET ? "configured" : "missing"),
+      "supabaseServiceRole=" + (process.env.SUPABASE_SERVICE_ROLE_KEY ? "configured" : "missing"),
+    ],
+    blockedReason: securityFindings.length ? securityResult : null,
+  });
+
+  const integrationsResult = degradedConfigured.length
+    ? "Integration check found degraded configured services: " + degradedConfigured.map((item) => item.label).join(", ") + "."
+    : "Integration check found no degraded connected or authorization-ready services. Unused providers are ignored.";
+  agents = setAgent(agents, "IT_INTEGRATIONS", {
+    status: degradedConfigured.length ? "ERROR" : "DONE",
+    lastRanAt: now,
+    lastResult: integrationsResult,
+    currentWork: degradedConfigured.length
+      ? "Repair or isolate degraded connected services."
+      : "Watch active connectors, Local Agent bridges, and provider handoffs.",
+  });
+  tasks = updateTask(tasks, integrationsTaskResult.task.id, {
+    status: degradedConfigured.length ? "FAILED" : "DONE",
+    result: integrationsResult,
+    evidence: configuredOptional.map((item) => item.id + "=" + item.state),
+    blockedReason: degradedConfigured.length ? integrationsResult : null,
   });
 
   const activeBuildObjective = previous.objectives.find(
