@@ -107,6 +107,9 @@ function workforceAgent(value: string): { id: AgentId; domain: RuntimeDomain; pe
   if (/\b(trading observer|observer agent)\b/.test(text)) return { id: "TRADING_OBSERVER", domain: "TRADING", permission: "READ" };
   if (/\b(qa watchdog|qa agent|qa)\b/.test(text)) return { id: "JARVIS_QA", domain: "CORE", permission: "ANALYZE" };
   if (/\b(executive agent|executive)\b/.test(text)) return { id: "EXECUTIVE", domain: "CORE", permission: "WRITE_INTERNAL" };
+  if (/\b(it infra|infrastructure agent|sre|devops agent)\b/.test(text)) return { id: "IT_INFRA", domain: "CORE", permission: "ANALYZE" };
+  if (/\b(it security|security agent|cybersecurity agent|cyber agent)\b/.test(text)) return { id: "IT_SECURITY", domain: "CORE", permission: "ANALYZE" };
+  if (/\b(it integrations|integration agent|integrations agent|api agent)\b/.test(text)) return { id: "IT_INTEGRATIONS", domain: "CORE", permission: "ANALYZE" };
   return null;
 }
 
@@ -122,7 +125,7 @@ function parseWorkforceCommand(input: string): WorkforceCommand | null {
     return { type: "STATUS" };
   }
 
-  const direct = text.match(/^(?:jarvis[,\s]*)?(?:have|tell|ask|give)\s+(?:the\s+)?(builder|engineer|developer agent|cfo|finance agent|finance cfo|sentryops research|research agent|researcher|trading observer|observer agent|qa watchdog|qa agent|qa|executive agent|executive)\s+(?:to\s+)?(.+)$/i);
+  const direct = text.match(/^(?:jarvis[,\s]*)?(?:have|tell|ask|give)\s+(?:the\s+)?(builder|engineer|developer agent|cfo|finance agent|finance cfo|sentryops research|research agent|researcher|trading observer|observer agent|qa watchdog|qa agent|qa|executive agent|executive|it infra|infrastructure agent|sre|devops agent|it security|security agent|cybersecurity agent|cyber agent|it integrations|integration agent|integrations agent|api agent)\s+(?:to\s+)?(.+)$/i);
   if (direct) {
     const agent = workforceAgent(direct[1]);
     const title = direct[2]?.trim();
