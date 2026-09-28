@@ -308,3 +308,64 @@ export async function lookupWorldKnowledgeFallback(query: string): Promise<Direc
     return null;
   }
 }
+
+
+export function needsLiveWorldSearch(query: string) {
+  const lower = query.toLowerCase();
+  return /\b(today|latest|current|right now|news|breaking|price|score|weather|recent|this week|this month)\b/.test(lower);
+}
+
+export async function lookupLiveWorldFallback(query: string): Promise<DirectAnswer | null> {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey || !needsLiveWorldSearch(query)) return null;
+
+  try {
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        search_depth: "basic",
+        max_results: 5,
+        include_answer: true,
+        include_raw_content: false,
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!response.ok) return null;
+    const body = await response.json() as {
+      answer?: string;
+      results?: Array<{ title?: string; url?: string; content?: string }>;
+    };
+
+    const direct = body.answer?.trim();
+    if (direct) {
+      return {
+        capability: "world.web",
+        source: "live web search",
+        answer: direct.length > 1200 ? direct.slice(0, 1197).trimEnd() + "…" : direct,
+      };
+    }
+
+    const snippets = (body.results ?? [])
+      .slice(0, 3)
+      .map(result => {
+        const title = result.title?.trim() || "Source";
+        const content = result.content?.trim() || "";
+        return title + ": " + content;
+      })
+      .filter(Boolean);
+
+    if (!snippets.length) return null;
+
+    return {
+      capability: "world.web",
+      source: "live web search",
+      answer: snippets.join(" ").slice(0, 1200),
+    };
+  } catch {
+    return null;
+  }
+}
