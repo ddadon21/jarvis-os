@@ -122,6 +122,25 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   }, []);
 
   useEffect(() => {
+    const onProactiveSpeak = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string; priority?: string }>).detail;
+      const text = detail?.text?.trim();
+      if (!text || !voiceEnabledRef.current) return;
+
+      stopWakeRecognition();
+      appendMessage("assistant", text);
+      fallbackStreamDoneRef.current = true;
+      fallbackPendingSpeechRef.current = 0;
+      fallbackSpeechBufferRef.current = "";
+      window.speechSynthesis?.cancel();
+      queueFallbackSpeech(text);
+    };
+
+    window.addEventListener("jarvis-proactive-speak", onProactiveSpeak);
+    return () => window.removeEventListener("jarvis-proactive-speak", onProactiveSpeak);
+  }, []);
+
+  useEffect(() => {
     const remembered = window.localStorage.getItem(VOICE_STORAGE_KEY) === "true";
     if (remembered) window.setTimeout(() => startVoice(true), 450);
 
