@@ -205,6 +205,9 @@
 .running .armLeft{animation:typeLeft .42s ease-in-out infinite alternate}
 .running .armRight{animation:typeRight .38s ease-in-out infinite alternate}
 .running .head{animation:headWork 1.7s ease-in-out infinite}
+.done .operator,.idle .operator{animation:idleShift 3.2s ease-in-out infinite}
+.done .head,.idle .head{animation:headWork 5.5s ease-in-out infinite}
+.done .screen i,.idle .screen i{animation:screenData 2.8s ease-in-out infinite alternate}
 .done .floorSignal{animation:scanFloor 2.4s linear infinite}
 .blocked .operator{animation:idleShift 3s ease-in-out infinite}
 .blocked .floorSignal{background:linear-gradient(90deg,transparent,rgba(221,137,88,.34),transparent);animation:livePulse 2s ease-in-out infinite}
