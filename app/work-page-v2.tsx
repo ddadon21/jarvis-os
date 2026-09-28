@@ -50,7 +50,38 @@ type SystemStatus = {
   mode: "ACTIVE" | "DEGRADED";
   backgroundResearch: { enabled: boolean; latestPulse: { ranAt: string; status: string; summary: string } | null };
   events: RuntimeEvent[];
-  integrations: { trading: string; finance: string; sentryopsResearch: string; life: string };
+  integrations: {
+    trading: string;
+    finance: string;
+    sentryopsResearch: string;
+    life: string;
+    calendar?: string;
+    email?: string;
+    meetings?: string;
+    contacts?: string;
+    webSearch?: string;
+  };
+  assistant?: {
+    updatedAt?: string;
+    sources?: {
+      calendar?: string;
+      email?: string;
+      meetings?: string;
+      contacts?: string;
+      webSearch?: string;
+    };
+    alerts?: Array<{
+      id: string;
+      kind: string;
+      priority: string;
+      message: string;
+      occurredAt: string;
+      relatedEventId?: string | null;
+    }>;
+    upcomingEventCount?: number;
+    meetingPresenceCount?: number;
+    recentCommunicationCount?: number;
+  };
   workforce?: { status?: string; lastCycleAt?: string | null; executiveSummary?: string };
 };
 
@@ -290,7 +321,24 @@ export default function WorkV2() {
         </div>
 
         <aside className="left-column">
-          <Panel title="MISSION CONTROL" corner="CORE"><div /></Panel>
+          <Panel title="MISSION CONTROL" corner="CORE">
+            <div className="assistant-radar">
+              {systemStatus?.assistant?.alerts?.[0] ? (
+                <div className={`assistant-alert ${systemStatus.assistant.alerts[0].priority.toLowerCase()}`}>
+                  <span>{systemStatus.assistant.alerts[0].priority}</span>
+                  <p>{systemStatus.assistant.alerts[0].message}</p>
+                </div>
+              ) : (
+                <div className="assistant-alert quiet"><span>RADAR</span><p>NO TIME-SENSITIVE ALERTS</p></div>
+              )}
+              <div className="assistant-source-grid">
+                <AssistantSource label="CAL" state={systemStatus?.assistant?.sources?.calendar ?? "STARTING"} />
+                <AssistantSource label="MAIL" state={systemStatus?.assistant?.sources?.email ?? "STARTING"} />
+                <AssistantSource label="MEET" state={systemStatus?.assistant?.sources?.meetings ?? "STARTING"} />
+                <AssistantSource label="WEB" state={systemStatus?.assistant?.sources?.webSearch ?? "STARTING"} />
+              </div>
+            </div>
+          </Panel>
           <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
@@ -381,4 +429,10 @@ function Panel({ title, corner, children, className = "" }: { title: string; cor
 
 function Event({ text, time }: { text: string; time: string }) {
   return <div className="event"><span>[{time}]</span><p>{text}</p><i /></div>;
+}
+
+function AssistantSource({ label, state }: { label: string; state: string }) {
+  const normalized = state.toLowerCase().replace(/_/g, "-");
+  const compact = state === "NEEDS_CONNECTION" ? "CONNECT" : state;
+  return <div className={`assistant-source ${normalized}`}><span>{label}</span><strong>{compact}</strong></div>;
 }
