@@ -1,7 +1,7 @@
 import { generateText, streamText } from "ai";
 import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
-import { lookupWorldKnowledgeFallback, resolveDirectAnswer } from "../../../../lib/jarvis-assistant-tools";
+import { lookupLiveWorldFallback, lookupWorldKnowledgeFallback, needsLiveWorldSearch, resolveDirectAnswer } from "../../../../lib/jarvis-assistant-tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -138,6 +138,50 @@ export async function POST(request: Request) {
   const runtimeContext = await getJarvisRuntimeContext();
   const assistantContext = await getAssistantRuntimeState();
   const directAnswer = resolveDirectAnswer(latestUser, runtimeContext, assistantContext);
+  const liveWorldAnswer = needsLiveWorldSearch(latestUser)
+    ? await lookupLiveWorldFallback(latestUser)
+    : null;
+
+  if (liveWorldAnswer) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sendEvent(controller, encoder, "meta", {
+          route: "FAST",
+          provider: "JARVIS Web",
+          brain: "WEB",
+          model: liveWorldAnswer.source,
+          source: liveWorldAnswer.source,
+          fallback: false,
+        });
+        sendEvent(controller, encoder, "delta", { text: liveWorldAnswer.answer });
+        sendEvent(controller, encoder, "final", {
+          memoryUpdates: [],
+          nextMove: {
+            title: "Continue current objective",
+            reason: "The request was answered from live public information.",
+            domain: activeDomain,
+          },
+          route: "FAST",
+          provider: "JARVIS Web",
+          brain: "WEB",
+          model: liveWorldAnswer.source,
+          firstTokenMs: Date.now() - startedAt,
+          totalMs: Date.now() - startedAt,
+        });
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store, no-transform",
+        Connection: "keep-alive",
+        "X-Jarvis-Route": "FAST",
+      },
+    });
+  }
 
   if (directAnswer) {
     const encoder = new TextEncoder();
@@ -238,7 +282,7 @@ export async function POST(request: Request) {
         });
       } catch (error) {
         if (!reply) {
-          const worldFallback = await lookupWorldKnowledgeFallback(latestUser);
+          const worldFallback = (await lookupLiveWorldFallback(latestUser)) ?? (await lookupWorldKnowledgeFallback(latestUser));
           if (worldFallback) {
             reply = worldFallback.answer;
             if (firstTokenAt === null) firstTokenAt = Date.now();
