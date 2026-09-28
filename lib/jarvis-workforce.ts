@@ -13,8 +13,11 @@ import {
   WorkforceState,
   appendRuntimeEvent,
   createRuntimeEvent,
+  getLatestPulse,
+  getLastPulseAt,
   getWorkforceState,
   setWorkforceState,
+  shouldRunPulse,
 } from "./jarvis-runtime";
 
 const DEFAULT_AGENTS: AgentState[] = [
@@ -168,7 +171,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
   return initial;
 }
 
-export async function runWorkforceCycle(): Promise<WorkforceState> {
+export async function runWorkforceCycle(options: { forceResearch?: boolean } = {}): Promise<WorkforceState> {
   const previous = await getOrSeedWorkforceState();
   const now = new Date().toISOString();
   const cycleId = crypto.randomUUID();
@@ -299,9 +302,14 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
     currentWork: "Research new evidence and compare it with the previous market pulse.",
   });
 
-  const sentryPulse = await runJarvisPulse();
+  const lastPulseAt = await getLastPulseAt();
+  const researchDue = options.forceResearch === true || shouldRunPulse(lastPulseAt, 240);
+  const previousPulse = await getLatestPulse();
+  const sentryPulse = researchDue || !previousPulse ? await runJarvisPulse() : previousPulse;
   const sentryFailed = sentryPulse.status === "ERROR";
-  const sentryResult = sentryPulse.summary;
+  const sentryResult = researchDue
+    ? sentryPulse.summary
+    : "Research pulse is current; no duplicate deep-research spend was needed this hourly workforce cycle. Latest: " + sentryPulse.summary;
   agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
     status: sentryFailed ? "ERROR" : "DONE",
     lastRanAt: now,
@@ -351,8 +359,8 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
   const coreIntegrationIds = new Set(["SUPABASE", "OBSIDIAN", "TRADING_OBSERVER"]);
   const coreIntegrations = integrationRegistry.filter((item) => coreIntegrationIds.has(item.id));
   const degradedCore = coreIntegrations.filter((item) => item.state === "DEGRADED");
-  const configuredOptional = integrationRegistry.filter((item) => item.state === "CONNECTED" || item.state === "READY_TO_AUTHORIZE");
-  const degradedConfigured = configuredOptional.filter((item) => item.state === "DEGRADED");
+  const activeIntegrations = integrationRegistry.filter((item) => item.state !== "NEEDS_APP_SETUP" && item.state !== "NEEDS_CONNECTION");
+  const degradedConfigured = activeIntegrations.filter((item) => item.state === "DEGRADED");
 
   const infraResult = degradedCore.length
     ? "Infrastructure check found degraded core dependencies: " + degradedCore.map((item) => item.label).join(", ") + "."
@@ -410,7 +418,7 @@ export async function runWorkforceCycle(): Promise<WorkforceState> {
   tasks = updateTask(tasks, integrationsTaskResult.task.id, {
     status: degradedConfigured.length ? "FAILED" : "DONE",
     result: integrationsResult,
-    evidence: configuredOptional.map((item) => item.id + "=" + item.state),
+    evidence: activeIntegrations.map((item) => item.id + "=" + item.state),
     blockedReason: degradedConfigured.length ? integrationsResult : null,
   });
 
