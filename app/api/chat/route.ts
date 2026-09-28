@@ -1,7 +1,7 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
+import { getJarvisRuntimeContext } from "../../../lib/jarvis-context";
 
 export const runtime = "nodejs";
 
