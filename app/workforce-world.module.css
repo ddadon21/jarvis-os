@@ -301,3 +301,16 @@
   .lowerGrid{grid-template-columns:1fr}
   .execPanel{grid-column:auto}
 }
+
+
+.commandActions{
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+.commandActions .alwaysOn{
+  border-color:rgba(84,216,164,.42);
+  background:rgba(84,216,164,.06);
+  color:#87e3bd;
+  box-shadow:inset 0 0 16px rgba(84,216,164,.04),0 0 13px rgba(84,216,164,.05);
+}
