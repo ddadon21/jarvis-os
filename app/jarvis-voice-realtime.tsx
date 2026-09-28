@@ -73,6 +73,8 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const fallbackStreamDoneRef = useRef(true);
   const fallbackSpeechBufferRef = useRef("");
   const fallbackSpeakingRef = useRef(false);
+  const pendingTranscriptRef = useRef("");
+  const pendingTranscriptTimerRef = useRef<number | null>(null);
 
   const realtimePeerRef = useRef<RTCPeerConnection | null>(null);
   const realtimeChannelRef = useRef<RTCDataChannel | null>(null);
@@ -618,12 +620,34 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     recognition.lang = "en-US";
     recognition.onresult = (event: any) => {
       let interim = "";
+      const finalParts: string[] = [];
+
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index];
         const text = result?.[0]?.transcript ?? "";
-        if (result.isFinal) void handleWakeTranscript(text);
+        if (result.isFinal) finalParts.push(text);
         else interim += text;
       }
+
+      if (finalParts.length) {
+        pendingTranscriptRef.current = [pendingTranscriptRef.current, finalParts.join(" ")]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (pendingTranscriptTimerRef.current !== null) {
+          window.clearTimeout(pendingTranscriptTimerRef.current);
+        }
+
+        pendingTranscriptTimerRef.current = window.setTimeout(() => {
+          const fullThought = pendingTranscriptRef.current.trim();
+          pendingTranscriptRef.current = "";
+          pendingTranscriptTimerRef.current = null;
+          if (fullThought) void handleWakeTranscript(fullThought);
+        }, 700);
+      }
+
       if (interim.trim() && !realtimeActiveRef.current && voiceStateRef.current !== "THINKING") {
         setVoice("LISTENING");
         setCaption(interim.trim());
@@ -673,6 +697,11 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   }
 
   function stopVoice() {
+    if (pendingTranscriptTimerRef.current !== null) {
+      window.clearTimeout(pendingTranscriptTimerRef.current);
+      pendingTranscriptTimerRef.current = null;
+    }
+    pendingTranscriptRef.current = "";
     voiceEnabledRef.current = false;
     setVoiceEnabled(false);
     fallbackArmedRef.current = false;
