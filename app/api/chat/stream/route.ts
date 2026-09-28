@@ -1,0 +1,221 @@
+import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
+import { generateText, streamText } from "ai";
+import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const CLAUDE_OPUS = "claude-opus-5";
+const CLAUDE_FAST = "claude-sonnet-4-6";
+const GPT_SOL = "gpt-5.6-sol";
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
+type Goal = { name: string; value: number; state: string };
+type Memory = { domain: string; fact: string };
+type Route = "FAST" | "STANDARD" | "DEEP";
+type Choice = { provider: "Anthropic" | "OpenAI"; brain: "CLAUDE" | "GPT"; model: string };
+type Metadata = {
+  memoryUpdates: Array<{ domain: string; fact: string }>;
+  nextMove: { title: string; reason: string; domain: string };
+};
+
+const SYSTEM = [
+  "You are JARVIS, Dwight Johnson's private executive operating intelligence.",
+  "Answer the actual question immediately. Be fast, precise, context-aware, reliable, and useful.",
+  "Use connected runtime state before older memory when they conflict. Respect timestamps and source-health flags.",
+  "Never invent live balances, market data, broker state, integrations, actions, memories, or research.",
+  "Keep Trading, Finance, SentryOps, and Life evidence separate unless executive synthesis is useful.",
+  "Distinguish observed facts, saved context, inference, and recommendation.",
+  "Keep routine answers compact. Expand when complexity genuinely requires it.",
+  "For difficult tasks, reason across constraints before answering.",
+  "If a connected source is unavailable, say so specifically instead of guessing.",
+  "Trading remains observation and analysis only unless an explicitly authorized execution tool exists.",
+  "Do not mention routing, provider fallback, latency, or internal orchestration unless Dwight asks.",
+  "Style: natural, composed, direct, compact. No filler or fake cinematic roleplay."
+].join("\n");
+
+function routeFor(text: string, domain: string): Route {
+  const value = text.trim();
+  const lower = value.toLowerCase();
+  const deep = ["deep", "in depth", "analyze", "analysis", "audit", "architecture", "strategy", "compare", "debug", "implement", "build", "design", "research", "optimize", "best way", "from start to finish"];
+  const fast = ["status", "is it online", "are we connected", "open ", "go to ", "yes", "no", "okay", "bet", "continue", "what's next", "what is next"];
+  if (value.length > 900 || deep.some(x => lower.includes(x))) return "DEEP";
+  if ((domain === "FINANCE" || domain === "TRADING") && value.length > 140) return "STANDARD";
+  if (value.length <= 180 && fast.some(x => lower.includes(x))) return "FAST";
+  if (value.length <= 110) return "FAST";
+  return "STANDARD";
+}
+
+function choices(route: Route): Choice[] {
+  const anthropicOn = Boolean(process.env.ANTHROPIC_API_KEY);
+  const openaiOn = Boolean(process.env.OPENAI_API_KEY);
+  const list: Choice[] = [];
+  if (route === "FAST") {
+    if (anthropicOn) list.push({ provider: "Anthropic", brain: "CLAUDE", model: CLAUDE_FAST });
+    if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
+  } else if (route === "DEEP") {
+    if (anthropicOn) list.push({ provider: "Anthropic", brain: "CLAUDE", model: CLAUDE_OPUS });
+    if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
+  } else {
+    if (openaiOn) list.push({ provider: "OpenAI", brain: "GPT", model: GPT_SOL });
+    if (anthropicOn) list.push({ provider: "Anthropic", brain: "CLAUDE", model: CLAUDE_OPUS });
+  }
+  return list;
+}
+
+function modelFor(choice: Choice) {
+  return choice.provider === "Anthropic" ? anthropic(choice.model) : openai(choice.model);
+}
+
+function domainFor(value: unknown, fallback = "CORE") {
+  const domain = typeof value === "string" ? value.toUpperCase() : "";
+  if (["TRADING", "FINANCE", "SENTRYOPS", "LIFE", "CORE"].includes(domain)) return domain;
+  return ["TRADING", "FINANCE", "SENTRYOPS", "LIFE"].includes(fallback.toUpperCase()) ? fallback.toUpperCase() : "CORE";
+}
+
+function normalizeMetadata(value: Partial<Metadata>, activeDomain: string): Metadata {
+  const memoryUpdates = Array.isArray(value.memoryUpdates)
+    ? value.memoryUpdates.filter(item => item && typeof item.fact === "string" && item.fact.trim()).map(item => ({
+        domain: domainFor(item.domain, activeDomain),
+        fact: item.fact.trim().slice(0, 280),
+      })).slice(0, 5)
+    : [];
+  const nextMove = value.nextMove && typeof value.nextMove.title === "string"
+    ? {
+        title: value.nextMove.title.trim().slice(0, 120),
+        reason: typeof value.nextMove.reason === "string" ? value.nextMove.reason.trim().slice(0, 300) : "",
+        domain: domainFor(value.nextMove.domain, activeDomain),
+      }
+    : {
+        title: "Continue current objective",
+        reason: "No stronger next move was required by this exchange.",
+        domain: domainFor(activeDomain),
+      };
+  return { memoryUpdates, nextMove };
+}
+
+function sendEvent(controller: ReadableStreamDefaultController<Uint8Array>, encoder: TextEncoder, event: string, data: unknown) {
+  controller.enqueue(encoder.encode("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n"));
+}
+
+async function extractMetadata(choice: Choice, user: string, reply: string, activeDomain: string, memories: Memory[]) {
+  try {
+    const result = await generateText({
+      model: modelFor(choice),
+      system: "You are JARVIS state extraction. Return only valid JSON. Save only durable non-secret facts. Do not save credentials, account numbers, temporary statuses, or fleeting chat details.",
+      prompt: [
+        "Active domain: " + activeDomain,
+        "Existing memory: " + JSON.stringify(memories.slice(-40)),
+        "User: " + user,
+        "JARVIS answer: " + reply,
+        'Return exactly: {"memoryUpdates":[{"domain":"TRADING|FINANCE|SENTRYOPS|LIFE|CORE","fact":"durable fact"}],"nextMove":{"title":"short action","reason":"concise reason","domain":"TRADING|FINANCE|SENTRYOPS|LIFE|CORE"}}'
+      ].join("\n"),
+      maxOutputTokens: 420,
+    });
+    const start = result.text.indexOf("{");
+    const end = result.text.lastIndexOf("}");
+    const cleaned = start >= 0 && end >= start ? result.text.slice(start, end + 1) : result.text.trim();
+    return normalizeMetadata(JSON.parse(cleaned) as Partial<Metadata>, activeDomain);
+  } catch {
+    return normalizeMetadata({}, activeDomain);
+  }
+}
+
+export async function POST(request: Request) {
+  const startedAt = Date.now();
+  const body = (await request.json().catch(() => ({}))) as {
+    messages?: ChatMessage[];
+    activeDomain?: string;
+    goals?: Goal[];
+    memories?: Memory[];
+  };
+
+  const messages = Array.isArray(body.messages) ? body.messages.slice(-24) : [];
+  const latestUser = [...messages].reverse().find(message => message.role === "user")?.content?.trim() || "";
+  if (!latestUser) return new Response("Missing user message.", { status: 400 });
+
+  const activeDomain = domainFor(body.activeDomain);
+  const goals = Array.isArray(body.goals) ? body.goals.slice(0, 20) : [];
+  const memories = Array.isArray(body.memories) ? body.memories.slice(-60) : [];
+  const route = routeFor(latestUser, activeDomain);
+  const candidates = choices(route);
+  if (!candidates.length) return new Response("No reasoning provider is connected.", { status: 503 });
+
+  const runtimeContext = await getJarvisRuntimeContext();
+  const context = [
+    "ROUTE DEPTH: " + route,
+    "ACTIVE DOMAIN: " + activeDomain,
+    "KNOWN GOALS: " + JSON.stringify(goals),
+    "DURABLE MEMORY: " + JSON.stringify(memories),
+    "CONNECTED RUNTIME STATE: " + JSON.stringify(runtimeContext),
+    "Runtime state is the freshest connected context. If a sourceHealth flag is false, that source is unavailable."
+  ].join("\n");
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let reply = "";
+      let firstTokenAt: number | null = null;
+      let activeChoice = candidates[0];
+      let streamed = false;
+
+      try {
+        let completed = false;
+        for (let index = 0; index < candidates.length && !completed; index += 1) {
+          const choice = candidates[index];
+          activeChoice = choice;
+          sendEvent(controller, encoder, "meta", { route, provider: choice.provider, brain: choice.brain, model: choice.model, fallback: index > 0 });
+
+          try {
+            const result = streamText({
+              model: modelFor(choice),
+              system: SYSTEM + "\n\nRUNTIME MODEL\nProvider: " + choice.provider + "\nModel: " + choice.model + "\n\n" + context,
+              messages,
+              maxOutputTokens: route === "FAST" ? 500 : route === "STANDARD" ? 1200 : 2200,
+            });
+
+            for await (const delta of result.textStream) {
+              if (!delta) continue;
+              if (firstTokenAt === null) firstTokenAt = Date.now();
+              streamed = true;
+              reply += delta;
+              sendEvent(controller, encoder, "delta", { text: delta });
+            }
+            completed = true;
+          } catch (error) {
+            if (streamed || index === candidates.length - 1) throw error;
+          }
+        }
+
+        const metadataChoice = candidates.find(item => item.model === CLAUDE_FAST) || candidates[0] || activeChoice;
+        const metadata = await extractMetadata(metadataChoice, latestUser, reply, activeDomain, memories);
+        sendEvent(controller, encoder, "final", {
+          ...metadata,
+          route,
+          provider: activeChoice.provider,
+          brain: activeChoice.brain,
+          model: activeChoice.model,
+          firstTokenMs: firstTokenAt ? firstTokenAt - startedAt : null,
+          totalMs: Date.now() - startedAt,
+        });
+      } catch (error) {
+        sendEvent(controller, encoder, "error", {
+          message: reply ? "The reasoning stream ended early. JARVIS kept the partial response." : "Reasoning provider unavailable. JARVIS interface remains online.",
+          detail: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      Connection: "keep-alive",
+      "X-Jarvis-Route": route,
+    },
+  });
+}
