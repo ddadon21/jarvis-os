@@ -70,7 +70,7 @@ export default function FinanceCockpitV2() {
   const updatePlan = (key: keyof PayoutPlan, value: string) => { setPlan(p => ({ ...p, [key]: value })); setSaved(""); };
   function savePlan() {
     if (projection.error) return;
-    try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); setSaved("Saved to local cache; JARVIS Cloud sync follows automatically. No money moved."); }
+    try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); window.dispatchEvent(new Event("jarvis-obsidian-sync-now")); setSaved("Saved to local cache; JARVIS Cloud and Obsidian sync follow automatically. No money moved."); }
     catch { setSaved("Storage unavailable. Your draft remains open but is not saved."); }
   }
 
