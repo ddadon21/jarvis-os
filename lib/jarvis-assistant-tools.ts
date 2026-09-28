@@ -243,11 +243,20 @@ export function resolveDirectAnswer(
         answer: "Meeting-presence data is not connected yet, so I cannot see whether someone is waiting or has joined.",
       };
     }
-    const waiting = [...assistant.meetingPresence.people]
+    const terms = queryTerms(question);
+    const waitingPeople = [...assistant.meetingPresence.people]
       .filter(person => person.state === "WAITING")
-      .sort((a, b) => Date.parse(a.waitingSince ?? a.updatedAt) - Date.parse(b.waitingSince ?? b.updatedAt))[0];
+      .map(person => ({
+        person,
+        score: terms.length
+          ? terms.reduce((score, term) => score + ([person.person, person.meetingTitle].filter(Boolean).join(" ").toLowerCase().includes(term) ? 1 : 0), 0)
+          : 0,
+      }))
+      .sort((a, b) => b.score - a.score || Date.parse(a.person.waitingSince ?? a.person.updatedAt) - Date.parse(b.person.waitingSince ?? b.person.updatedAt));
+
+    const waiting = (terms.length ? waitingPeople.find(item => item.score > 0)?.person : waitingPeople[0]?.person) ?? null;
     if (!waiting) {
-      return { capability: "operational.meetings", source: "meeting presence feed", answer: "I do not currently see anyone marked as waiting in the connected meeting feed." };
+      return { capability: "operational.meetings", source: "meeting presence feed", answer: "I do not currently see a matching person marked as waiting in the connected meeting feed." };
     }
     const mins = minutesSince(waiting.waitingSince);
     const who = waiting.person || "A guest";
