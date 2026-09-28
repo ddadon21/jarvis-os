@@ -85,6 +85,30 @@ type SystemStatus = {
   workforce?: { status?: string; lastCycleAt?: string | null; executiveSummary?: string };
 };
 
+type AssistantPulse = {
+  updatedAt?: string;
+  sources?: {
+    calendar?: string;
+    email?: string;
+    meetings?: string;
+    contacts?: string;
+    webSearch?: string;
+  };
+  alerts?: Array<{
+    id: string;
+    kind: string;
+    priority: string;
+    message: string;
+    occurredAt: string;
+    relatedEventId?: string | null;
+  }>;
+  counts?: {
+    upcomingEvents?: number;
+    meetingPresence?: number;
+    recentCommunications?: number;
+  };
+};
+
 type StreamMeta = {
   route?: "FAST" | "STANDARD" | "DEEP";
   provider?: string;
@@ -119,6 +143,8 @@ export default function WorkV2() {
   const [goals, setGoals] = useState<JarvisGoal[]>(defaultState.goals);
   const [nextMove, setNextMove] = useState<JarvisNextMove>(defaultState.nextMove);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [assistantPulse, setAssistantPulse] = useState<AssistantPulse | null>(null);
+  const spokenAssistantAlertsRef = useRef<Set<string>>(new Set());
   const [activeProvider, setActiveProvider] = useState("AUTO");
   const [activeModel, setActiveModel] = useState("JARVIS CORE");
   const [activeRoute, setActiveRoute] = useState<"IDLE" | "FAST" | "STANDARD" | "DEEP">("IDLE");
@@ -175,12 +201,43 @@ export default function WorkV2() {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshAssistant() {
+      try {
+        const response = await fetch("/api/assistant/alerts", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as AssistantPulse;
+        if (!cancelled) setAssistantPulse(data);
+      } catch {}
+    }
+    void refreshAssistant();
+    const timer = window.setInterval(refreshAssistant, 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    if (!voiceEnabled) return;
+    const alerts = assistantPulse?.alerts ?? [];
+    const urgent = alerts.find(alert => alert.priority === "CRITICAL" || alert.priority === "TIME_SENSITIVE");
+    if (!urgent) return;
+
+    const key = urgent.id + ":" + urgent.occurredAt;
+    if (spokenAssistantAlertsRef.current.has(key)) return;
+    spokenAssistantAlertsRef.current.add(key);
+
+    window.dispatchEvent(new CustomEvent("jarvis-proactive-speak", {
+      detail: { text: urgent.message, priority: urgent.priority },
+    }));
+  }, [assistantPulse, voiceEnabled]);
+
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
 
   const currentSector = useMemo(() => sectors.find((item) => item.id === domain) ?? sectors[0], [domain]);
   const SectorIcon = currentSector.icon;
   const runtimeEvents = systemStatus?.events ?? [];
   const systemMode = systemStatus?.online ? systemStatus.mode : "STARTING";
+  const assistantState = assistantPulse ?? systemStatus?.assistant ?? null;
 
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
@@ -323,19 +380,19 @@ export default function WorkV2() {
         <aside className="left-column">
           <Panel title="MISSION CONTROL" corner="CORE">
             <div className="assistant-radar">
-              {systemStatus?.assistant?.alerts?.[0] ? (
-                <div className={`assistant-alert ${systemStatus.assistant.alerts[0].priority.toLowerCase()}`}>
-                  <span>{systemStatus.assistant.alerts[0].priority}</span>
-                  <p>{systemStatus.assistant.alerts[0].message}</p>
+              {assistantState?.alerts?.[0] ? (
+                <div className={`assistant-alert ${assistantState!.alerts![0].priority.toLowerCase()}`}>
+                  <span>{assistantState!.alerts![0].priority}</span>
+                  <p>{assistantState!.alerts![0].message}</p>
                 </div>
               ) : (
                 <div className="assistant-alert quiet"><span>RADAR</span><p>NO TIME-SENSITIVE ALERTS</p></div>
               )}
               <div className="assistant-source-grid">
-                <AssistantSource label="CAL" state={systemStatus?.assistant?.sources?.calendar ?? "STARTING"} />
-                <AssistantSource label="MAIL" state={systemStatus?.assistant?.sources?.email ?? "STARTING"} />
-                <AssistantSource label="MEET" state={systemStatus?.assistant?.sources?.meetings ?? "STARTING"} />
-                <AssistantSource label="WEB" state={systemStatus?.assistant?.sources?.webSearch ?? "STARTING"} />
+                <AssistantSource label="CAL" state={assistantState?.sources?.calendar ?? "STARTING"} />
+                <AssistantSource label="MAIL" state={assistantState?.sources?.email ?? "STARTING"} />
+                <AssistantSource label="MEET" state={assistantState?.sources?.meetings ?? "STARTING"} />
+                <AssistantSource label="WEB" state={assistantState?.sources?.webSearch ?? "STARTING"} />
               </div>
             </div>
           </Panel>
