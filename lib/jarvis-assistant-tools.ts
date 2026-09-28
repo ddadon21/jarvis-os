@@ -37,6 +37,22 @@ function minutesUntil(value: string | null) {
   return Math.ceil((Date.parse(value) - Date.now()) / 60_000);
 }
 
+function queryTerms(value: string) {
+  const stop = new Set([
+    "did", "does", "do", "has", "have", "had", "the", "a", "an", "my", "me", "they", "them",
+    "he", "she", "him", "her", "client", "person", "guest", "meeting", "email", "emailed", "message",
+    "from", "about", "yet", "already", "today", "recent", "recently", "is", "are", "was", "were",
+  ]);
+  return value.toLowerCase().match(/[a-z0-9@._-]+/g)?.filter(term => term.length > 2 && !stop.has(term)) ?? [];
+}
+
+function communicationScore(question: string, signal: JarvisAssistantRuntime["communications"]["recent"][number]) {
+  const terms = queryTerms(question);
+  if (!terms.length) return 0;
+  const haystack = [signal.from, signal.subject, signal.summary].filter(Boolean).join(" ").toLowerCase();
+  return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+}
+
 function upcomingMeeting(assistant: JarvisAssistantRuntime) {
   const now = Date.now();
   return [...assistant.calendar.events]
@@ -242,7 +258,7 @@ export function resolveDirectAnswer(
     };
   }
 
-  if (/\b(email|emailed|inbox|message from)\b/.test(lower) && /\b(my|me|they|he|she|client|meeting)\b/.test(lower)) {
+  if (/\b(email|emailed|inbox|message from)\b/.test(lower) && /\b(my|me|they|he|she|client|meeting|email)\b/.test(lower)) {
     if (assistant.sources.email !== "CONNECTED") {
       return {
         capability: "personal.email",
@@ -250,6 +266,26 @@ export function resolveDirectAnswer(
         answer: "Your email is not connected to JARVIS yet, so I cannot truthfully check your inbox or recent messages.",
       };
     }
+
+    const emailSignals = assistant.communications.recent
+      .filter(signal => signal.channel === "EMAIL")
+      .map(signal => ({ signal, score: communicationScore(question, signal) }))
+      .sort((a, b) => b.score - a.score || Date.parse(b.signal.receivedAt) - Date.parse(a.signal.receivedAt));
+
+    const best = emailSignals.find(item => item.score > 0)?.signal ?? (queryTerms(question).length === 0 ? emailSignals[0]?.signal : null);
+    if (!best) {
+      return {
+        capability: "personal.email",
+        source: "assistant email feed",
+        answer: "I do not see a matching recent email in the connected JARVIS email feed. That only means there is no match in the currently synchronized window.",
+      };
+    }
+
+    return {
+      capability: "personal.email",
+      source: best.source,
+      answer: "The latest matching email signal is from " + (best.from || "an unknown sender") + (best.subject ? " about “" + best.subject + "”" : "") + ", received " + new Date(best.receivedAt).toLocaleString() + ". " + best.summary,
+    };
   }
 
   return null;
