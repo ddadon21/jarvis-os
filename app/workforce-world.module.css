@@ -94,7 +94,7 @@
     radial-gradient(circle at 50% 0,rgba(183,31,38,.04),transparent 34%);
   box-shadow:inset 0 0 50px rgba(0,0,0,.35);
 }
-.floorHead{display:flex;justify-content:space-between;align-items:end;gap:10px;margin-bottom:10px}
+.floorHead{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;margin-bottom:10px}
 .floorHead>div{display:grid;gap:2px}
 .floorHead span{font-size:6px;color:#6c7b81;letter-spacing:.14em}
 .floorHead strong{font-size:10px;letter-spacing:.12em}
