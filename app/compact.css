@@ -1766,7 +1766,7 @@
 }
 .obsidian-bridge-actions{
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:repeat(3,minmax(0,1fr));
   gap:5px;
 }
 .obsidian-bridge-actions button{
@@ -1840,4 +1840,13 @@
   line-height:1.4;
   white-space:pre-wrap;
   word-break:break-word;
+}
+
+
+.obsidian-bridge-sync{
+  display:block;
+  font-size:6.2px;
+  line-height:1.35;
+  letter-spacing:.035em;
+  color:#708087;
 }
