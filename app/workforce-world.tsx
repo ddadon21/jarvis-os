@@ -51,6 +51,12 @@ type Workforce = {
   executiveSummary: string;
   agents: Agent[];
   tasks?: Task[];
+  autonomy?: {
+    enabled: boolean;
+    runId: string | null;
+    startedAt: string | null;
+    cadenceMinutes: number;
+  };
 };
 type Payload = {
   workforce?: Workforce;
@@ -169,6 +175,31 @@ export default function WorkforceWorld() {
     return () => window.clearInterval(timer);
   }, []);
 
+  async function toggleAlwaysOn() {
+    if (busy) return;
+    setBusy(true);
+    const enabled = Boolean(payload?.workforce?.autonomy?.enabled);
+    setNotice(enabled ? "STOPPING DURABLE WORKFORCE" : "STARTING DURABLE 24/7 WORKFORCE");
+    try {
+      const response = await fetch("/api/workforce/always-on?manual=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: enabled ? "STOP" : "START", cadenceMinutes: 60 }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string; autonomy?: Workforce["autonomy"] };
+      if (!response.ok) throw new Error(body.error || "always-on control failed");
+      setPayload((current) => current?.workforce
+        ? { ...current, workforce: { ...current.workforce, autonomy: body.autonomy } }
+        : current);
+      setNotice(enabled ? "DURABLE WORKFORCE STOP REQUESTED" : "DURABLE 24/7 WORKFORCE ACTIVE");
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message.toUpperCase() : "ALWAYS-ON CONTROL FAILED");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runCycle() {
     if (busy) return;
     setBusy(true);
@@ -248,7 +279,7 @@ export default function WorkforceWorld() {
           <Stat label="EMPLOYEES" value={String(agents.length || 9)} />
           <Stat label="OPEN WORK" value={String(openTasks.length)} />
           <Stat label="COMPLETE" value={String(completed)} />
-          <Stat label="HEARTBEAT" value="1H" />
+          <Stat label="HEARTBEAT" value={workforce?.autonomy?.enabled ? (workforce.autonomy.cadenceMinutes + "M") : "OFF"} />
         </div>
         <Link href="/work" className={styles.coreLink}><BrainCircuit size={13} /> JARVIS CORE <ChevronRight size={12} /></Link>
       </header>
@@ -257,9 +288,14 @@ export default function WorkforceWorld() {
         <div>
           <span className={styles.liveDot} />
           <strong>{notice}</strong>
-          <small>24/7 HOURLY HEARTBEAT · DEEP RESEARCH THROTTLED TO ≤ 4H · EVENT/MANUAL RUNS AVAILABLE</small>
+          <small>DURABLE WORKFLOW · HOURLY HEARTBEAT · DEEP RESEARCH THROTTLED TO ≤ 4H · EVENT/MANUAL RUNS AVAILABLE</small>
         </div>
-        <button onClick={runCycle} disabled={busy}><Play size={12} /> {busy ? "WORKING" : "RUN ALL AGENTS"}</button>
+        <div className={styles.commandActions}>
+          <button onClick={toggleAlwaysOn} disabled={busy} className={payload?.workforce?.autonomy?.enabled ? styles.alwaysOn : ""}>
+            <CircleDot size={11} /> {payload?.workforce?.autonomy?.enabled ? "24/7 ACTIVE" : "START 24/7"}
+          </button>
+          <button onClick={runCycle} disabled={busy}><Play size={12} /> {busy ? "WORKING" : "RUN ALL AGENTS"}</button>
+        </div>
       </section>
 
       <section className={styles.floor}>
