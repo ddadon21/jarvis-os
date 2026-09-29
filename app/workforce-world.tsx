@@ -191,6 +191,10 @@ const officePositions: Record<string, {
   IT_INTEGRATIONS: { deskX: 83, deskY: 77, readyX: 62, readyY: 95 },
 }
 
+type OperatorIntent = "ACTIVE" | "PAUSED";
+
+const WORKFORCE_INTENT_KEY = "jarvis-workforce-operator-intent-v1";
+
 function timeAgo(value: string | null) {
   if (!value) return "NEVER";
   const delta = Math.max(0, Date.now() - Date.parse(value));
@@ -209,18 +213,90 @@ export default function WorkforceWorld() {
   const [taskText, setTaskText] = useState("");
   const [notice, setNotice] = useState("AUTONOMOUS FLOOR ONLINE");
   const [agentMotion, setAgentMotion] = useState<Record<string, AgentMotion>>({});
+  const [operatorIntent, setOperatorIntent] = useState<OperatorIntent | null>(null);
+  const operatorIntentRef = useRef<OperatorIntent | null>(null);
+  const repairingDurableRun = useRef(false);
   const previousStatuses = useRef<Record<string, AgentStatus>>({});
   const previousFloorActive = useRef<boolean | null>(null);
+
+  function commitOperatorIntent(intent: OperatorIntent) {
+    operatorIntentRef.current = intent;
+    setOperatorIntent(intent);
+    try {
+      window.localStorage.setItem(WORKFORCE_INTENT_KEY, intent);
+    } catch {
+      // Browser storage is a UI latch only; the durable workflow remains server-side.
+    }
+  }
+
+  async function repairDurableRunIfNeeded(incoming: Payload) {
+    if (
+      operatorIntentRef.current !== "ACTIVE" ||
+      incoming.workforce?.autonomy?.enabled ||
+      repairingDurableRun.current
+    ) return incoming;
+
+    repairingDurableRun.current = true;
+    try {
+      const response = await fetch("/api/workforce/always-on?manual=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "START", cadenceMinutes: 15 }),
+      });
+      const body = await response.json().catch(() => ({})) as { autonomy?: Workforce["autonomy"] };
+      if (!response.ok || !body.autonomy) return incoming;
+      return incoming.workforce
+        ? {
+            ...incoming,
+            workforce: {
+              ...incoming.workforce,
+              autonomy: body.autonomy,
+            },
+          }
+        : incoming;
+    } finally {
+      repairingDurableRun.current = false;
+    }
+  }
 
   async function refresh() {
     try {
       const response = await fetch("/api/workforce", { cache: "no-store" });
       if (!response.ok) throw new Error();
-      setPayload((await response.json()) as Payload);
+      let incoming = (await response.json()) as Payload;
+
+      if (incoming.workforce?.autonomy?.enabled && operatorIntentRef.current !== "PAUSED") {
+        commitOperatorIntent("ACTIVE");
+      }
+
+      incoming = await repairDurableRunIfNeeded(incoming);
+      setPayload(incoming);
     } catch {
-      setNotice("WORKFORCE LINK DEGRADED");
+      setNotice("WORKFORCE LINK DEGRADED · OPERATOR INTENT PRESERVED");
     }
   }
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(WORKFORCE_INTENT_KEY);
+      if (stored === "ACTIVE" || stored === "PAUSED") {
+        operatorIntentRef.current = stored;
+        setOperatorIntent(stored);
+      }
+    } catch {
+      // No-op: server state still initializes the floor.
+    }
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== WORKFORCE_INTENT_KEY) return;
+      if (event.newValue === "ACTIVE" || event.newValue === "PAUSED") {
+        operatorIntentRef.current = event.newValue;
+        setOperatorIntent(event.newValue);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -231,7 +307,10 @@ export default function WorkforceWorld() {
   async function toggleAlwaysOn() {
     if (busy) return;
     setBusy(true);
-    const enabled = Boolean(payload?.workforce?.autonomy?.enabled);
+    const enabled = operatorIntentRef.current === "ACTIVE" || (
+      operatorIntentRef.current === null &&
+      Boolean(payload?.workforce?.autonomy?.enabled)
+    );
     setNotice(enabled ? "PAUSING WORKFORCE · RETURNING TEAM TO READY BAY" : "STARTING DURABLE 24/7 WORKFORCE");
     try {
       const response = await fetch("/api/workforce/always-on?manual=1", {
@@ -244,7 +323,8 @@ export default function WorkforceWorld() {
       setPayload((current) => current?.workforce
         ? { ...current, workforce: { ...current.workforce, autonomy: body.autonomy } }
         : current);
-      setNotice(enabled ? "WORKFORCE PAUSED · TEAM RETURNING TO READY BAY" : "DURABLE 24/7 WORKFORCE ACTIVE");
+      commitOperatorIntent(enabled ? "PAUSED" : "ACTIVE");
+      setNotice(enabled ? "WORKFORCE PAUSED · TEAM RETURNING TO READY BAY" : "DURABLE 24/7 WORKFORCE ACTIVE · OPERATOR LOCKED");
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message.toUpperCase() : "ALWAYS-ON CONTROL FAILED");
@@ -256,10 +336,13 @@ export default function WorkforceWorld() {
   async function runCycle() {
     if (busy) return;
     setBusy(true);
-    const alreadyAlwaysOn = Boolean(payload?.workforce?.autonomy?.enabled);
-    setNotice(alreadyAlwaysOn ? "RUNNING IMMEDIATE TEAM CYCLE" : "STARTING TEAM · DURABLE OPERATIONS ENGAGING");
+    const serverAlwaysOn = Boolean(payload?.workforce?.autonomy?.enabled);
+    const visuallyActive = operatorIntentRef.current === "ACTIVE" || (
+      operatorIntentRef.current === null && serverAlwaysOn
+    );
+    setNotice(visuallyActive ? "RUNNING IMMEDIATE TEAM CYCLE" : "STARTING TEAM · DURABLE OPERATIONS ENGAGING");
     try {
-      if (!alreadyAlwaysOn) {
+      if (!serverAlwaysOn) {
         const startResponse = await fetch("/api/workforce/always-on?manual=1", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -270,7 +353,8 @@ export default function WorkforceWorld() {
         setPayload((current) => current?.workforce
           ? { ...current, workforce: { ...current.workforce, autonomy: startBody.autonomy } }
           : current);
-        setNotice("TEAM ACTIVE · FIRST DURABLE CYCLE RUNNING");
+        commitOperatorIntent("ACTIVE");
+        setNotice("TEAM ACTIVE · OPERATOR LOCKED UNTIL PAUSE");
         await refresh();
         return;
       }
@@ -283,6 +367,7 @@ export default function WorkforceWorld() {
       const body = await response.json().catch(() => ({})) as Payload & { error?: string };
       if (!response.ok) throw new Error(body.error || "cycle failed");
       setPayload((current) => ({ ...current, workforce: body.workforce }));
+      commitOperatorIntent("ACTIVE");
       setNotice("IMMEDIATE TEAM CYCLE COMPLETE · 24/7 OPERATIONS REMAIN ACTIVE");
       await refresh();
     } catch (error) {
@@ -360,7 +445,10 @@ export default function WorkforceWorld() {
     )
     .slice(0, 8);
   const indicatorEvidence = recentEvents.find((event) => event.type === "trading.indicator_evidence") ?? null;
-  const floorActive = Boolean(workforce?.autonomy?.enabled);
+  const serverFloorActive = Boolean(workforce?.autonomy?.enabled);
+  const floorActive = operatorIntent === "ACTIVE" || (
+    operatorIntent === null && serverFloorActive
+  );
 
   const agentIdsKey = agents.map((agent) => agent.id).join("|");
 
@@ -448,7 +536,7 @@ export default function WorkforceWorld() {
           <Stat label="EMPLOYEES" value={String(agents.length || 9)} />
           <Stat label="OPEN WORK" value={String(openTasks.length)} />
           <Stat label="COMPLETE" value={String(completed)} />
-          <Stat label="HEARTBEAT" value={workforce?.autonomy?.enabled ? (workforce.autonomy.cadenceMinutes + "M") : "OFF"} />
+          <Stat label="HEARTBEAT" value={floorActive ? ((workforce?.autonomy?.cadenceMinutes ?? 15) + "M") : "OFF"} />
         </div>
         <Link href="/work" className={styles.coreLink}><BrainCircuit size={13} /> JARVIS CORE <ChevronRight size={12} /></Link>
       </header>
@@ -460,8 +548,8 @@ export default function WorkforceWorld() {
           <small>DURABLE WORKFLOW · 15M OPERATING CYCLE · DEEP RESEARCH THROTTLED TO ≤ 4H · EVENT/MANUAL RUNS AVAILABLE</small>
         </div>
         <div className={styles.commandActions}>
-          <button onClick={toggleAlwaysOn} disabled={busy} className={payload?.workforce?.autonomy?.enabled ? styles.alwaysOn : ""}>
-            <CircleDot size={11} /> {payload?.workforce?.autonomy?.enabled ? "PAUSE WORKFORCE" : "START 24/7"}
+          <button onClick={toggleAlwaysOn} disabled={busy} className={floorActive ? styles.alwaysOn : ""}>
+            <CircleDot size={11} /> {floorActive ? "PAUSE WORKFORCE" : "START 24/7"}
           </button>
           <button onClick={runCycle} disabled={busy}><Play size={12} /> {busy ? "WORKING" : (floorActive ? "RUN TEAM NOW" : "RUN + KEEP ACTIVE")}</button>
         </div>
@@ -481,7 +569,9 @@ export default function WorkforceWorld() {
             <span><i className={styles.dotWorking} /> SEATED + WORKING</span>
             <span><i className={styles.dotReady} /> READY BAY</span>
             <span><i className={styles.dotBlocked} /> BLOCKED / INCIDENT</span>
-            <b>PAUSE = READY BAY · START = WALK TO DESKS · ACTIVE WORK = SEATED OPERATIONS</b>
+            <b>{floorActive
+              ? "OPERATOR LOCK: ACTIVE · CLICK / ZOOM / REFRESH CANNOT PAUSE THE TEAM"
+              : "PAUSED BY OPERATOR · START = WALK TO DESKS"}</b>
           </div>
 
           <div className={styles.simFloor}>
