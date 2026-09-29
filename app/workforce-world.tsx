@@ -221,7 +221,7 @@ export default function WorkforceWorld() {
     if (busy) return;
     setBusy(true);
     const enabled = Boolean(payload?.workforce?.autonomy?.enabled);
-    setNotice(enabled ? "STOPPING DURABLE WORKFORCE" : "STARTING DURABLE 24/7 WORKFORCE");
+    setNotice(enabled ? "PAUSING WORKFORCE · RETURNING TEAM TO READY BAY" : "STARTING DURABLE 24/7 WORKFORCE");
     try {
       const response = await fetch("/api/workforce/always-on?manual=1", {
         method: "POST",
@@ -233,7 +233,7 @@ export default function WorkforceWorld() {
       setPayload((current) => current?.workforce
         ? { ...current, workforce: { ...current.workforce, autonomy: body.autonomy } }
         : current);
-      setNotice(enabled ? "DURABLE WORKFORCE STOP REQUESTED" : "DURABLE 24/7 WORKFORCE ACTIVE");
+      setNotice(enabled ? "WORKFORCE PAUSED · TEAM RETURNING TO READY BAY" : "DURABLE 24/7 WORKFORCE ACTIVE");
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message.toUpperCase() : "ALWAYS-ON CONTROL FAILED");
@@ -415,7 +415,7 @@ export default function WorkforceWorld() {
         </div>
         <div className={styles.commandActions}>
           <button onClick={toggleAlwaysOn} disabled={busy} className={payload?.workforce?.autonomy?.enabled ? styles.alwaysOn : ""}>
-            <CircleDot size={11} /> {payload?.workforce?.autonomy?.enabled ? "24/7 ACTIVE" : "START 24/7"}
+            <CircleDot size={11} /> {payload?.workforce?.autonomy?.enabled ? "PAUSE WORKFORCE" : "START 24/7"}
           </button>
           <button onClick={runCycle} disabled={busy}><Play size={12} /> {busy ? "WORKING" : "RUN ALL AGENTS"}</button>
         </div>
