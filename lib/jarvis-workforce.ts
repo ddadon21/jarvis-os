@@ -15,6 +15,7 @@ import {
   createRuntimeEvent,
   getLatestPulse,
   getLastPulseAt,
+  getRecentEvents,
   getWorkforceState,
   setWorkforceState,
   shouldRunPulse,
@@ -303,6 +304,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     blockedReason: financeFailed ? "The configured direct finance refresh did not complete successfully." : null,
   });
   await emitIfChanged(previous, agents, "FINANCE_CFO", "finance.cfo_cycle", financeResult);
+  await emitHandoff("CFO", "EXECUTIVE", "FINANCE", financeResult);
 
   tasks = updateTask(tasks, sentryTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
@@ -335,6 +337,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
         ? "The live research provider was unavailable this cycle; JARVIS retained the last verified research state and will retry."
         : null,
   });
+  await emitHandoff("RESEARCH", "BUILDER", "SENTRYOPS", sentryPulse.nextMove.title + " · " + sentryResult);
 
   tasks = updateTask(tasks, tradingTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   const tradingRuntime = await getTradingState();
@@ -363,6 +366,28 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     ],
     blockedReason: observerOnline ? null : "No current Local Agent observation is available.",
   });
+  await emitHandoff("OBSERVER", "BUILDER", "TRADING", tradingResult);
+
+  const recentEvents = await getRecentEvents();
+  const latestIndicatorEvidence = recentEvents.find((event) => event.type === "trading.indicator_evidence") ?? null;
+  let indicatorLearningTask: AgentTask | null = null;
+  if (latestIndicatorEvidence) {
+    const source = `indicator-learning:${latestIndicatorEvidence.id}`;
+    indicatorLearningTask = tasks.find((task) => task.source === source) ?? null;
+    if (!indicatorLearningTask) {
+      const indicatorTaskResult = ensureTask(tasks, {
+        title: "Review new trading visual evidence against the DEVIANT indicator baseline",
+        domain: "TRADING",
+        assignedTo: "BUILDER",
+        priority: "HIGH",
+        permissionRequired: "WRITE_INTERNAL",
+        objectiveId: null,
+        source,
+      });
+      tasks = indicatorTaskResult.tasks;
+      indicatorLearningTask = indicatorTaskResult.task;
+    }
+  }
 
   tasks = updateTask(tasks, infraTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   tasks = updateTask(tasks, securityTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
@@ -454,7 +479,26 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
       !objective.id.startsWith("sentryops-"),
   ) ?? null;
 
-  if (activeBuildObjective) {
+  if (indicatorLearningTask && latestIndicatorEvidence) {
+    const indicatorReview = [
+      "Trading evidence packet reviewed against the DEVIANT baseline.",
+      latestIndicatorEvidence.summary,
+      "The baseline Pine file remains immutable. Any code revision must be versioned and supported by repeated evidence across journal images/notes plus Observer state, not one isolated screenshot.",
+    ].join(" ");
+    agents = setAgent(agents, "BUILDER", {
+      status: "DONE",
+      lastRanAt: now,
+      lastResult: indicatorReview,
+      currentWork: "Correlate journal screenshots and notes with Observer evidence, then test repeatable DEVIANT arrow hypotheses before proposing code changes.",
+    });
+    tasks = updateTask(tasks, indicatorLearningTask.id, {
+      status: "DONE",
+      result: indicatorReview,
+      evidence: [`runtimeEvent=${latestIndicatorEvidence.id}`, "baseline=deviant-refined-baseline-v1.pine"],
+      blockedReason: null,
+    });
+    await emitHandoff("BUILDER", "QA", "TRADING", "Indicator evidence reviewed; baseline preserved and candidate changes remain evidence-gated.");
+  } else if (activeBuildObjective) {
     const buildTaskResult = ensureTask(tasks, {
       title: `Turn objective into internal build plan: ${activeBuildObjective.title}`,
       domain: activeBuildObjective.domain,
@@ -482,8 +526,8 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     agents = setAgent(agents, "BUILDER", {
       status: "IDLE",
       lastRanAt: now,
-      lastResult: "No separate build objective needs work this cycle. Builder remains available.",
-      currentWork: "Stand by for a concrete software or business objective from Dwight.",
+      lastResult: "No new build or indicator-learning evidence needs action this cycle. Builder remains available.",
+      currentWork: "Stand by for validated product work or new trading evidence from Observer + journal images/notes.",
     });
   }
 
@@ -501,6 +545,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     evidence: qa.evidence,
     blockedReason: qa.hasBlockers && !qa.hasErrors ? qa.blockedReason : qa.hasErrors ? "At least one workforce agent reported an error." : null,
   });
+  await emitHandoff("QA", "EXECUTIVE", "CORE", qa.summary);
 
   const executiveSummary = synthesizeExecutiveSummary({
     financeResult,
@@ -754,6 +799,19 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     evidence,
     blockedReason: null,
   };
+}
+
+async function emitHandoff(from: string, to: string, domain: AgentTask["domain"], summary: string) {
+  const compact = summary.replace(/\s+/g, " ").trim().slice(0, 360);
+  await appendRuntimeEvent(
+    createRuntimeEvent({
+      type: "workforce.handoff",
+      domain,
+      source: `jarvis.handoff.${from.toLowerCase()}.${to.toLowerCase()}`,
+      importance: "NORMAL",
+      summary: `${from} → ${to}: ${compact}`,
+    }),
+  );
 }
 
 async function emitIfChanged(previous: WorkforceState, nextAgents: AgentState[], id: AgentId, type: string, summary: string) {
