@@ -237,7 +237,7 @@ export default function WorkforceWorld() {
       const response = await fetch("/api/workforce/always-on?manual=1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: enabled ? "STOP" : "START", cadenceMinutes: 60 }),
+        body: JSON.stringify({ action: enabled ? "STOP" : "START", cadenceMinutes: 15 }),
       });
       const body = await response.json().catch(() => ({})) as { error?: string; autonomy?: Workforce["autonomy"] };
       if (!response.ok) throw new Error(body.error || "always-on control failed");
@@ -263,7 +263,7 @@ export default function WorkforceWorld() {
         const startResponse = await fetch("/api/workforce/always-on?manual=1", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "START", cadenceMinutes: 60 }),
+          body: JSON.stringify({ action: "START", cadenceMinutes: 15 }),
         });
         const startBody = await startResponse.json().catch(() => ({})) as { error?: string; autonomy?: Workforce["autonomy"] };
         if (!startResponse.ok) throw new Error(startBody.error || "workforce start failed");
@@ -451,7 +451,7 @@ export default function WorkforceWorld() {
         <div>
           <span className={styles.liveDot} />
           <strong>{notice}</strong>
-          <small>DURABLE WORKFLOW · HOURLY HEARTBEAT · DEEP RESEARCH THROTTLED TO ≤ 4H · EVENT/MANUAL RUNS AVAILABLE</small>
+          <small>DURABLE WORKFLOW · 15M OPERATING CYCLE · DEEP RESEARCH THROTTLED TO ≤ 4H · EVENT/MANUAL RUNS AVAILABLE</small>
         </div>
         <div className={styles.commandActions}>
           <button onClick={toggleAlwaysOn} disabled={busy} className={payload?.workforce?.autonomy?.enabled ? styles.alwaysOn : ""}>
@@ -555,7 +555,9 @@ export default function WorkforceWorld() {
                       !floorActive ? "STANDBY" :
                       agent.status === "BLOCKED" ? "WAITING" :
                       agent.status === "ERROR" ? "INCIDENT" :
-                      "WORKING"
+                      agent.status === "RUNNING" ? "WORKING" :
+                      agent.status === "DONE" ? "MONITORING" :
+                      "ON DUTY"
                     }</span>
                   </div>
                   {floorActive && agent.status !== "ERROR" ? (
