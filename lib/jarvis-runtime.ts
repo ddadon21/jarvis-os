@@ -118,6 +118,7 @@ export type WorkforceState = {
     runId: string | null;
     startedAt: string | null;
     cadenceMinutes: number;
+    loopToken?: string | null;
   };
   executiveSummary: string;
 };
