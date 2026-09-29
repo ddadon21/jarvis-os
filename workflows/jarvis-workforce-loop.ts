@@ -1,16 +1,16 @@
 import { sleep } from "workflow";
 
-export async function jarvisWorkforceLoop(cadenceMinutes = 60) {
+export async function jarvisWorkforceLoop(cadenceMinutes = 60, loopToken: string | null = null) {
   "use workflow";
 
   while (true) {
-    const result = await runWorkforceHeartbeat();
+    const result = await runWorkforceHeartbeat(loopToken);
     if (!result.continue) return result;
     await sleep(cadenceMinutes * 60_000);
   }
 }
 
-async function runWorkforceHeartbeat(): Promise<{ continue: boolean; ranAt: string | null; status: string }> {
+async function runWorkforceHeartbeat(loopToken: string | null): Promise<{ continue: boolean; ranAt: string | null; status: string }> {
   "use step";
 
   const [{ getWorkforceState }, { runWorkforceCycle }] = await Promise.all([
@@ -20,6 +20,9 @@ async function runWorkforceHeartbeat(): Promise<{ continue: boolean; ranAt: stri
 
   const state = await getWorkforceState();
   if (state?.autonomy?.enabled === false) {
+    return { continue: false, ranAt: state.lastCycleAt, status: state.status };
+  }
+  if (state?.autonomy?.loopToken && state.autonomy.loopToken !== loopToken) {
     return { continue: false, ranAt: state.lastCycleAt, status: state.status };
   }
 
