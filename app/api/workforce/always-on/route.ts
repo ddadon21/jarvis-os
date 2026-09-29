@@ -15,7 +15,7 @@ export async function GET() {
       enabled: false,
       runId: null,
       startedAt: null,
-      cadenceMinutes: 60,
+      cadenceMinutes: 15,
       loopToken: null,
     },
     lastCycleAt: workforce.lastCycleAt,
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const action = body.action ?? "START";
-  const cadenceMinutes = Math.min(240, Math.max(15, Math.floor(body.cadenceMinutes ?? 60)));
+  const cadenceMinutes = Math.min(240, Math.max(15, Math.floor(body.cadenceMinutes ?? 15)));
   const workforce = await getOrSeedWorkforceState();
 
   if (action === "STOP") {
