@@ -54,6 +54,8 @@ export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[
     has("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET");
   const icloudReady =
     has("ICLOUD_CALDAV_USERNAME", "ICLOUD_APP_SPECIFIC_PASSWORD");
+  const supabaseServerConfigured = has("SUPABASE_SERVICE_ROLE_KEY");
+  const productionRuntime = process.env.VERCEL_ENV === "production";
 
   return [
     {
@@ -117,9 +119,17 @@ export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[
     {
       id: "SUPABASE",
       label: "Supabase",
-      state: has("SUPABASE_SERVICE_ROLE_KEY") ? "CONNECTED" : "DEGRADED",
+      state: supabaseServerConfigured
+        ? "CONNECTED"
+        : productionRuntime
+          ? "DEGRADED"
+          : "NEEDS_CONNECTION",
       capabilities: ["Structured memory", "Runtime persistence", "History"],
-      note: "Permanent structured source of truth for JARVIS.",
+      note: supabaseServerConfigured
+        ? "Server-side Supabase mirror is active for durable workforce state."
+        : productionRuntime
+          ? "Production expects a server-side Supabase service role for the durable workforce mirror."
+          : "Preview runtime is operating on Vercel Runtime Cache; the Supabase server mirror is intentionally treated as unattached instead of a failed service.",
     },
   ];
 }
