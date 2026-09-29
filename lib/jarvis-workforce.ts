@@ -307,20 +307,25 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   const previousPulse = await getLatestPulse();
   const sentryPulse = researchDue || !previousPulse ? await runJarvisPulse() : previousPulse;
   const sentryFailed = sentryPulse.status === "ERROR";
+  const sentryDegraded = sentryPulse.status === "DEGRADED";
   const sentryResult = researchDue
     ? sentryPulse.summary
     : "Research pulse is current; no duplicate deep-research spend was needed this hourly workforce cycle. Latest: " + sentryPulse.summary;
   agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
-    status: sentryFailed ? "ERROR" : "DONE",
+    status: sentryFailed ? "ERROR" : sentryDegraded ? "BLOCKED" : "DONE",
     lastRanAt: now,
     lastResult: sentryResult,
     currentWork: sentryPulse.nextMove.title,
   });
   tasks = updateTask(tasks, sentryTaskResult.task.id, {
-    status: sentryFailed ? "FAILED" : "DONE",
+    status: sentryFailed ? "FAILED" : sentryDegraded ? "BLOCKED" : "DONE",
     result: sentryResult,
-    evidence: [`sources=${sentryPulse.sourceCount}`, `pulse=${sentryPulse.ranAt}`],
-    blockedReason: sentryFailed ? "The SentryOps research pulse failed and will need a later retry." : null,
+    evidence: [`sources=${sentryPulse.sourceCount}`, `pulse=${sentryPulse.ranAt}`, `researchStatus=${sentryPulse.status}`],
+    blockedReason: sentryFailed
+      ? "The SentryOps research lane encountered an internal failure."
+      : sentryDegraded
+        ? "The live research provider was unavailable this cycle; JARVIS retained the last verified research state and will retry."
+        : null,
   });
 
   tasks = updateTask(tasks, tradingTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
@@ -359,12 +364,15 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   const coreIntegrationIds = new Set(["SUPABASE", "OBSIDIAN", "TRADING_OBSERVER"]);
   const coreIntegrations = integrationRegistry.filter((item) => coreIntegrationIds.has(item.id));
   const degradedCore = coreIntegrations.filter((item) => item.state === "DEGRADED");
+  const unattachedCore = coreIntegrations.filter((item) => item.state === "NEEDS_CONNECTION");
   const activeIntegrations = integrationRegistry.filter((item) => item.state !== "NEEDS_APP_SETUP" && item.state !== "NEEDS_CONNECTION");
   const degradedConfigured = activeIntegrations.filter((item) => item.state === "DEGRADED");
 
   const infraResult = degradedCore.length
     ? "Infrastructure check found degraded core dependencies: " + degradedCore.map((item) => item.label).join(", ") + "."
-    : "Infrastructure check passed for core persistence, Obsidian bridge registration, and Trading Observer registration.";
+    : unattachedCore.length
+      ? "Infrastructure is operational. Unattached preview-only mirrors: " + unattachedCore.map((item) => item.label).join(", ") + ". Vercel Runtime Cache remains active for the workforce."
+      : "Infrastructure check passed for core persistence, Obsidian bridge registration, and Trading Observer registration.";
   agents = setAgent(agents, "IT_INFRA", {
     status: degradedCore.length ? "ERROR" : "DONE",
     lastRanAt: now,
@@ -381,32 +389,37 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   });
 
   const securityFindings: string[] = [];
-  if (process.env.VERCEL_ENV === "production" && !process.env.CRON_SECRET) securityFindings.push("CRON_SECRET missing in production");
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) securityFindings.push("Supabase service role unavailable to server runtime");
+  const productionRuntime = process.env.VERCEL_ENV === "production";
+  if (productionRuntime && !process.env.CRON_SECRET) securityFindings.push("CRON_SECRET missing in production");
+  if (productionRuntime && !process.env.SUPABASE_SERVICE_ROLE_KEY) securityFindings.push("Supabase service role unavailable to production server runtime");
   const securityResult = securityFindings.length
-    ? "Security audit found configuration risks: " + securityFindings.join("; ") + "."
-    : "Security audit passed baseline checks for cron authorization and server-side persistence credentials.";
+    ? "Security audit found production configuration risks: " + securityFindings.join("; ") + "."
+    : "Security audit passed baseline checks. Preview-only missing service credentials are treated as environment configuration, not security incidents.";
   agents = setAgent(agents, "IT_SECURITY", {
     status: securityFindings.length ? "ERROR" : "DONE",
     lastRanAt: now,
     lastResult: securityResult,
     currentWork: securityFindings.length
-      ? "Resolve the reported configuration risks without exposing secret values."
+      ? "Resolve the reported production configuration risks without exposing secret values."
       : "Watch authorization boundaries and prevent agents from exceeding permission ceilings.",
   });
   tasks = updateTask(tasks, securityTaskResult.task.id, {
     status: securityFindings.length ? "FAILED" : "DONE",
     result: securityResult,
     evidence: [
-      "cronSecret=" + (process.env.CRON_SECRET ? "configured" : "missing"),
-      "supabaseServiceRole=" + (process.env.SUPABASE_SERVICE_ROLE_KEY ? "configured" : "missing"),
+      "environment=" + (process.env.VERCEL_ENV || "local"),
+      "cronSecret=" + (process.env.CRON_SECRET ? "configured" : productionRuntime ? "missing" : "optional-preview"),
+      "supabaseServiceRole=" + (process.env.SUPABASE_SERVICE_ROLE_KEY ? "configured" : productionRuntime ? "missing" : "optional-preview"),
     ],
     blockedReason: securityFindings.length ? securityResult : null,
   });
 
+  const previewUnattached = integrationRegistry.filter((item) => item.state === "NEEDS_CONNECTION" && item.id === "SUPABASE");
   const integrationsResult = degradedConfigured.length
     ? "Integration check found degraded configured services: " + degradedConfigured.map((item) => item.label).join(", ") + "."
-    : "Integration check found no degraded connected or authorization-ready services. Unused providers are ignored.";
+    : previewUnattached.length
+      ? "Connected services are healthy. Supabase server mirroring is not attached to this preview deployment, so JARVIS is using Runtime Cache without reporting a false integration failure."
+      : "Integration check found no degraded connected or authorization-ready services. Unused providers are ignored.";
   agents = setAgent(agents, "IT_INTEGRATIONS", {
     status: degradedConfigured.length ? "ERROR" : "DONE",
     lastRanAt: now,
@@ -418,7 +431,9 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   tasks = updateTask(tasks, integrationsTaskResult.task.id, {
     status: degradedConfigured.length ? "FAILED" : "DONE",
     result: integrationsResult,
-    evidence: activeIntegrations.map((item) => item.id + "=" + item.state),
+    evidence: integrationRegistry
+      .filter((item) => item.state !== "NEEDS_APP_SETUP")
+      .map((item) => item.id + "=" + item.state),
     blockedReason: degradedConfigured.length ? integrationsResult : null,
   });
 
@@ -485,10 +500,11 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     tradingResult,
     qaSummary: qa.summary,
   });
-  const degraded = agents.some((agent) => agent.status === "ERROR");
+  const hasErrors = agents.some((agent) => agent.status === "ERROR");
+  const hasBlockers = agents.some((agent) => agent.status === "BLOCKED");
 
   agents = setAgent(agents, "EXECUTIVE", {
-    status: degraded ? "ERROR" : "DONE",
+    status: hasErrors ? "ERROR" : "DONE",
     lastRanAt: now,
     lastResult: executiveSummary,
     currentWork: chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title, tasks),
@@ -498,7 +514,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     version: 1,
     cycleId,
     lastCycleAt: now,
-    status: degraded ? "DEGRADED" : "ACTIVE",
+    status: hasErrors || hasBlockers ? "DEGRADED" : "ACTIVE",
     agents,
     objectives: previous.objectives,
     tasks: pruneTasks(tasks),
@@ -511,7 +527,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
       type: "workforce.cycle_completed",
       domain: "CORE",
       source: "jarvis.workforce",
-      importance: degraded ? "IMPORTANT" : "NORMAL",
+      importance: hasErrors || hasBlockers ? "IMPORTANT" : "NORMAL",
       summary: executiveSummary,
     }),
   );
