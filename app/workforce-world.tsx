@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   TerminalSquare,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from "react";
 import styles from "./workforce-world.module.css";
 
 type AgentStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
@@ -75,6 +75,8 @@ const profiles: Record<string, {
   station: string;
   icon: typeof Bot;
   specialty: string;
+  accent: string;
+  zone: string;
 }> = {
   EXECUTIVE: {
     name: "EXECUTIVE",
@@ -82,6 +84,8 @@ const profiles: Record<string, {
     station: "Command Center",
     icon: BrainCircuit,
     specialty: "Priorities · delegation · approvals",
+    accent: "#ef4444",
+    zone: "EXECUTIVE WING",
   },
   FINANCE_CFO: {
     name: "CFO",
@@ -89,6 +93,8 @@ const profiles: Record<string, {
     station: "Capital Desk",
     icon: Landmark,
     specialty: "Cash · debt · leverage · capital",
+    accent: "#eab308",
+    zone: "CAPITAL WING",
   },
   SENTRYOPS_RESEARCH: {
     name: "RESEARCH",
@@ -96,6 +102,8 @@ const profiles: Record<string, {
     station: "Research Lab",
     icon: Search,
     specialty: "Markets · agencies · competitors",
+    accent: "#3b82f6",
+    zone: "SENTRYOPS LAB",
   },
   TRADING_OBSERVER: {
     name: "OBSERVER",
@@ -103,6 +111,8 @@ const profiles: Record<string, {
     station: "Observation Bay",
     icon: Eye,
     specialty: "Setups · execution · behavior",
+    accent: "#f97316",
+    zone: "MARKET BAY",
   },
   BUILDER: {
     name: "BUILDER",
@@ -110,6 +120,8 @@ const profiles: Record<string, {
     station: "Build Lab",
     icon: Code2,
     specialty: "JARVIS · SentryOps · automation",
+    accent: "#14b8a6",
+    zone: "ENGINEERING",
   },
   JARVIS_QA: {
     name: "QA",
@@ -117,6 +129,8 @@ const profiles: Record<string, {
     station: "QA Control",
     icon: ShieldCheck,
     specialty: "Failures · evidence · reliability",
+    accent: "#a855f7",
+    zone: "QA CONTROL",
   },
   IT_INFRA: {
     name: "INFRA",
@@ -124,6 +138,8 @@ const profiles: Record<string, {
     station: "Network Operations",
     icon: ServerCog,
     specialty: "Runtime · uptime · persistence",
+    accent: "#22c55e",
+    zone: "IT OPERATIONS",
   },
   IT_SECURITY: {
     name: "SECURITY",
@@ -131,6 +147,8 @@ const profiles: Record<string, {
     station: "Security Operations Center",
     icon: ShieldCheck,
     specialty: "Access · secrets · boundaries",
+    accent: "#e11d48",
+    zone: "SECURITY",
   },
   IT_INTEGRATIONS: {
     name: "INTEGRATIONS",
@@ -138,6 +156,8 @@ const profiles: Record<string, {
     station: "Integration Hub",
     icon: Network,
     specialty: "APIs · connectors · handoffs",
+    accent: "#06b6d4",
+    zone: "INTEGRATIONS",
   },
 };
 
@@ -263,7 +283,6 @@ export default function WorkforceWorld() {
   );
   const openTasks = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
   const completed = tasks.filter((task) => task.status === "DONE").length;
-  const walkers = agents.filter((agent) => agent.status === "IDLE" || agent.status === "DONE");
 
   return (
     <main className={styles.page}>
@@ -303,123 +322,125 @@ export default function WorkforceWorld() {
         <div className={styles.floorHead}>
           <div>
             <span>OPERATIONS FLOOR</span>
-            <strong>LIVE AI COMPANY FLOOR</strong>
+            <strong>HIMIE JOHNSON VENTURES // AI OFFICE</strong>
           </div>
-          <small>RUNNING agents work inside their lab. IDLE/DONE agents physically patrol and report across the floor.</small>
+          <small>SKY VIEW · FIXED WORKSTATIONS · STATE-DRIVEN ACTIVITY</small>
         </div>
 
         <div className={styles.worldShell}>
           <div className={styles.worldRibbon}>
-            <span><i className={styles.dotWorking} /> WORKING IN LAB</span>
-            <span><i className={styles.dotWalking} /> WALKING / REPORTING</span>
-            <span><i className={styles.dotBlocked} /> BLOCKED / WAITING</span>
-            <b>STATE-DRIVEN · NOT RANDOM ACTIVITY</b>
+            <span><i className={styles.dotWorking} /> ACTIVE AT DESK</span>
+            <span><i className={styles.dotReady} /> READY / IDLE</span>
+            <span><i className={styles.dotBlocked} /> BLOCKED / INCIDENT</span>
+            <b>NO RANDOM ROAMING · MOVEMENT REPRESENTS REAL WORK</b>
           </div>
 
           <div className={styles.floorWorld}>
-            <div className={styles.worldGridLines} />
-            <div className={styles.handoffLane}>
-              <span>AGENT HANDOFF CORRIDOR</span>
-              <i /><i /><i />
-            </div>
-            <div className={styles.jarvisCore}>
-              <BrainCircuit size={18} />
-              <strong>JARVIS CORE</strong>
-              <small>SUPERVISE · ROUTE · ESCALATE</small>
+            <div className={styles.ceilingGlow} />
+            <div className={styles.officeAisle + " " + styles.aisleHorizontal} />
+            <div className={styles.officeAisle + " " + styles.aisleVertical} />
+
+            <div className={styles.jarvisHub}>
+              <div className={styles.jarvisHubCore}><BrainCircuit size={16} /></div>
+              <div>
+                <strong>JARVIS CORE</strong>
+                <small>SUPERVISE · ROUTE · ESCALATE</small>
+              </div>
             </div>
 
-            <div className={styles.roamingLayer}>
-              {walkers.map((agent, index) => {
+            <div className={styles.officeGrid}>
+              {agents.map((agent, index) => {
                 const profile = profiles[agent.id] ?? {
                   name: agent.id,
                   role: agent.domain,
                   station: "Operations",
                   icon: Bot,
                   specialty: agent.currentWork,
-                };
-                return (
-                  <button
-                    type="button"
-                    key={"walker-" + agent.id}
-                    className={styles.floorWalker}
-                    style={{ animationDelay: `${index * -1.8}s` }}
-                    onClick={() => setSelectedId(agent.id)}
-                    title={profile.name + " · " + (agent.status === "DONE" ? "reporting" : "patrolling")}
-                  >
-                    <span className={styles.walkerPerson}>
-                      <i className={styles.walkerHead} />
-                      <i className={styles.walkerBody} />
-                      <i className={styles.walkerArmA} />
-                      <i className={styles.walkerArmB} />
-                      <i className={styles.walkerLegA} />
-                      <i className={styles.walkerLegB} />
-                    </span>
-                    <b>{profile.name}</b>
-                    <small>{agent.status === "DONE" ? "REPORTING" : "PATROL"}</small>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className={styles.roomGrid}>
-              {agents.map((agent) => {
-                const profile = profiles[agent.id] ?? {
-                  name: agent.id,
-                  role: agent.domain,
-                  station: "Operations",
-                  icon: Bot,
-                  specialty: agent.currentWork,
+                  accent: "#94a3b8",
+                  zone: "OPERATIONS",
                 };
                 const Icon = profile.icon;
-                const inLab = agent.status === "RUNNING" || agent.status === "BLOCKED" || agent.status === "ERROR";
                 const mode =
-                  agent.status === "RUNNING" ? "ACTIVE WORK" :
+                  agent.status === "RUNNING" ? "WORKING" :
                   agent.status === "BLOCKED" ? "WAITING INPUT" :
                   agent.status === "ERROR" ? "INCIDENT" :
-                  agent.status === "DONE" ? "REPORTING" : "PATROL";
+                  agent.status === "DONE" ? "READY TO REPORT" : "READY";
 
                 return (
                   <button
                     type="button"
                     key={agent.id}
-                    className={styles.labRoom + " " + styles[agent.status.toLowerCase()] + (selectedId === agent.id ? " " + styles.selectedRoom : "")}
+                    className={
+                      styles.officeStation +
+                      " " + styles[agent.status.toLowerCase()] +
+                      (selectedId === agent.id ? " " + styles.selectedStation : "")
+                    }
+                    style={{
+                      "--agent-accent": profile.accent,
+                      "--station-index": index,
+                    } as CSSProperties}
                     onClick={() => setSelectedId(agent.id)}
                   >
-                    <div className={styles.roomHeader}>
-                      <div><Icon size={12} /><span>{profile.station}</span></div>
-                      <strong>{mode}</strong>
+                    <div className={styles.stationZone}>
+                      <span>{profile.zone}</span>
+                      <b>{String(index + 1).padStart(2, "0")}</b>
                     </div>
 
-                    <div className={styles.roomInterior}>
-                      <div className={styles.roomGlass} />
-                      <LabRig agentId={agent.id} status={agent.status} />
+                    <div className={styles.stationRoom}>
+                      <div className={styles.roomWallBack} />
+                      <div className={styles.roomWallSide} />
+                      <div className={styles.stationLighting} />
 
-                      {inLab ? (
-                        <div className={styles.roomWorker}>
-                          <span className={styles.workerHead}><i /></span>
-                          <span className={styles.workerTorso} />
-                          <span className={styles.workerArmLeft} />
-                          <span className={styles.workerArmRight} />
-                          <span className={styles.workerLegLeft} />
-                          <span className={styles.workerLegRight} />
-                          <span className={styles.workerShadow} />
+                      <div className={styles.monitorArray}>
+                        <div className={styles.monitorMain}>
+                          <i /><i /><i /><i />
+                          <small>{agent.status === "RUNNING" ? "LIVE WORK" : agent.status === "ERROR" ? "ALERT" : "STANDBY"}</small>
                         </div>
-                      ) : (
-                        <div className={styles.emptyStation}>
-                          <span>OUT ON FLOOR</span>
+                        <div className={styles.monitorSide}>
+                          <i /><i /><i />
                         </div>
-                      )}
+                      </div>
 
-                      <div className={styles.roomDoor}><i /></div>
+                      <div className={styles.desk3d}>
+                        <span className={styles.deskTop} />
+                        <span className={styles.deskFront} />
+                        <span className={styles.deskLegLeft} />
+                        <span className={styles.deskLegRight} />
+                        <span className={styles.keyboard} />
+                      </div>
+
+                      <div className={styles.worker3d}>
+                        <span className={styles.workerHair} />
+                        <span className={styles.workerHead3d}><i /></span>
+                        <span className={styles.workerTorso3d} />
+                        <span className={styles.workerArm3dLeft} />
+                        <span className={styles.workerArm3dRight} />
+                        <span className={styles.workerLeg3dLeft} />
+                        <span className={styles.workerLeg3dRight} />
+                        <span className={styles.workerChair} />
+                        <span className={styles.workerShadow3d} />
+                      </div>
+
+                      <div className={styles.stationConsole}>
+                        <Icon size={11} />
+                        <span>{profile.station}</span>
+                      </div>
+
+                      {agent.status === "DONE" ? <div className={styles.reportPulse}>REPORT READY</div> : null}
+                      {agent.status === "ERROR" || agent.status === "BLOCKED" ? <div className={styles.alertBeacon} /> : null}
                     </div>
 
-                    <div className={styles.roomCopy}>
+                    <div className={styles.stationFooter}>
                       <div>
                         <strong>{profile.name}</strong>
                         <span>{profile.role}</span>
                       </div>
-                      <small>{agent.currentWork || profile.specialty}</small>
+                      <div className={styles.stationState}>
+                        <i />
+                        <b>{mode}</b>
+                      </div>
                     </div>
+                    <small className={styles.stationTask}>{agent.currentWork || profile.specialty}</small>
                   </button>
                 );
               })}
@@ -490,38 +511,6 @@ export default function WorkforceWorld() {
         </div>
       </section>
     </main>
-  );
-}
-
-function LabRig({ agentId, status }: { agentId: string; status: AgentStatus }) {
-  const labels: Record<string, string> = {
-    EXECUTIVE: "PRIORITY MATRIX",
-    FINANCE_CFO: "CAPITAL MODEL",
-    SENTRYOPS_RESEARCH: "AGENCY INTEL",
-    TRADING_OBSERVER: "TRADING FEED",
-    BUILDER: "BUILD PIPELINE",
-    JARVIS_QA: "TEST HARNESS",
-    IT_INFRA: "RUNTIME NOC",
-    IT_SECURITY: "SECURITY SOC",
-    IT_INTEGRATIONS: "API FABRIC",
-  };
-  const label = labels[agentId] ?? "OPERATIONS";
-
-  return (
-    <div className={styles.labRig}>
-      <div className={styles.rigWall}>
-        <span /><span /><span />
-        <small>{status === "RUNNING" ? "LIVE PROCESSING" : status === "ERROR" ? "ALERT" : status === "BLOCKED" ? "AWAITING INPUT" : "STANDBY"}</small>
-      </div>
-      <div className={styles.rigConsole}>
-        <i /><i /><i /><i />
-      </div>
-      <div className={styles.rigTable}>
-        <span />
-        <b>{label}</b>
-      </div>
-      <div className={styles.rigTower}><i /><i /><i /></div>
-    </div>
   );
 }
 
