@@ -16,6 +16,7 @@ export async function GET() {
       runId: null,
       startedAt: null,
       cadenceMinutes: 60,
+      loopToken: null,
     },
     lastCycleAt: workforce.lastCycleAt,
     status: workforce.status,
@@ -35,11 +36,18 @@ export async function POST(request: Request) {
   if (action === "STOP") {
     const next = {
       ...workforce,
+      status: "STARTING" as const,
+      agents: workforce.agents.map((agent) => ({
+        ...agent,
+        status: "IDLE" as const,
+        currentWork: "Off duty in the Ready Bay. Awaiting the next workforce start.",
+      })),
       autonomy: {
         enabled: false,
         runId: workforce.autonomy?.runId ?? null,
         startedAt: workforce.autonomy?.startedAt ?? null,
         cadenceMinutes: workforce.autonomy?.cadenceMinutes ?? cadenceMinutes,
+        loopToken: workforce.autonomy?.loopToken ?? null,
       },
     };
     await setWorkforceState(next);
@@ -54,7 +62,8 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, autonomy: workforce.autonomy, alreadyRunning: true });
   }
 
-  const run = await start(jarvisWorkforceLoop, [cadenceMinutes]);
+  const loopToken = crypto.randomUUID();
+  const run = await start(jarvisWorkforceLoop, [cadenceMinutes, loopToken]);
   const now = new Date().toISOString();
   const next = {
     ...workforce,
@@ -63,6 +72,7 @@ export async function POST(request: Request) {
       runId: run.runId,
       startedAt: now,
       cadenceMinutes,
+      loopToken,
     },
   };
   await setWorkforceState(next);
