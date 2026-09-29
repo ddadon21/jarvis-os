@@ -408,7 +408,7 @@ internal sealed class ObserverContext : ApplicationContext
 
     private static bool IsRichExecutionSemantic(string semantic)
     {
-        if (semantic.Contains("JARVIS_OCR_EXECUTION|STATUS=PENDING", StringComparison.OrdinalIgnoreCase)) return true;
+        if (Regex.IsMatch(semantic, @"JARVIS_OCR_EXECUTION\\|STATUS=(?:PREPARING|PENDING|OPEN)", RegexOptions.IgnoreCase)) return true;
         if (semantic.Contains("Cancel project order", StringComparison.OrdinalIgnoreCase)) return true;
         return Regex.IsMatch(
             semantic,
