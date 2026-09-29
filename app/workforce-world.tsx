@@ -20,10 +20,11 @@ import {
   ShieldCheck,
   TerminalSquare,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import styles from "./workforce-world.module.css";
 
 type AgentStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
+type AgentMotion = "READY" | "WALKING" | "SEATED" | "REPORTING" | "BLOCKED" | "ERROR";
 type Agent = {
   id: string;
   domain: string;
@@ -161,6 +162,23 @@ const profiles: Record<string, {
   },
 };
 
+const officePositions: Record<string, {
+  deskX: number;
+  deskY: number;
+  readyX: number;
+  readyY: number;
+}> = {
+  EXECUTIVE: { deskX: 17, deskY: 21, readyX: 10, readyY: 91 },
+  FINANCE_CFO: { deskX: 50, deskY: 19, readyX: 20, readyY: 91 },
+  SENTRYOPS_RESEARCH: { deskX: 83, deskY: 21, readyX: 30, readyY: 91 },
+  TRADING_OBSERVER: { deskX: 17, deskY: 49, readyX: 40, readyY: 91 },
+  BUILDER: { deskX: 50, deskY: 49, readyX: 50, readyY: 91 },
+  JARVIS_QA: { deskX: 83, deskY: 49, readyX: 60, readyY: 91 },
+  IT_INFRA: { deskX: 17, deskY: 77, readyX: 70, readyY: 91 },
+  IT_SECURITY: { deskX: 50, deskY: 77, readyX: 80, readyY: 91 },
+  IT_INTEGRATIONS: { deskX: 83, deskY: 77, readyX: 90, readyY: 91 },
+};
+
 function timeAgo(value: string | null) {
   if (!value) return "NEVER";
   const delta = Math.max(0, Date.now() - Date.parse(value));
@@ -178,6 +196,8 @@ export default function WorkforceWorld() {
   const [busy, setBusy] = useState(false);
   const [taskText, setTaskText] = useState("");
   const [notice, setNotice] = useState("AUTONOMOUS FLOOR ONLINE");
+  const [agentMotion, setAgentMotion] = useState<Record<string, AgentMotion>>({});
+  const previousStatuses = useRef<Record<string, AgentStatus>>({});
 
   async function refresh() {
     try {
@@ -284,6 +304,47 @@ export default function WorkforceWorld() {
   const openTasks = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
   const completed = tasks.filter((task) => task.status === "DONE").length;
 
+  useEffect(() => {
+    if (!agents.length) return;
+    const timers: number[] = [];
+    setAgentMotion((current) => {
+      const next = { ...current };
+      for (const agent of agents) {
+        const previous = previousStatuses.current[agent.id];
+        if (!previous) {
+          next[agent.id] =
+            agent.status === "RUNNING" ? "SEATED" :
+            agent.status === "BLOCKED" ? "BLOCKED" :
+            agent.status === "ERROR" ? "ERROR" :
+            agent.status === "DONE" ? "REPORTING" : "READY";
+          previousStatuses.current[agent.id] = agent.status;
+          continue;
+        }
+
+        if (agent.status === "RUNNING" && previous !== "RUNNING") {
+          next[agent.id] = "WALKING";
+          timers.push(window.setTimeout(() => {
+            setAgentMotion((state) => ({ ...state, [agent.id]: "SEATED" }));
+          }, 2600));
+        } else if (agent.status === "RUNNING" && next[agent.id] !== "WALKING") {
+          next[agent.id] = "SEATED";
+        } else if (agent.status === "BLOCKED") {
+          next[agent.id] = "BLOCKED";
+        } else if (agent.status === "ERROR") {
+          next[agent.id] = "ERROR";
+        } else if (agent.status === "DONE") {
+          next[agent.id] = "REPORTING";
+        } else if (agent.status === "IDLE") {
+          next[agent.id] = "READY";
+        }
+        previousStatuses.current[agent.id] = agent.status;
+      }
+      return next;
+    });
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [agents]);
+
+
   return (
     <main className={styles.page}>
       <div className={styles.grid} />
@@ -322,33 +383,106 @@ export default function WorkforceWorld() {
         <div className={styles.floorHead}>
           <div>
             <span>OPERATIONS FLOOR</span>
-            <strong>HIMIE JOHNSON VENTURES // AI OFFICE</strong>
+            <strong>HIMIE JOHNSON VENTURES // LIVE AI OPERATIONS</strong>
           </div>
-          <small>SKY VIEW · FIXED WORKSTATIONS · STATE-DRIVEN ACTIVITY</small>
+          <small>TOP OFFICE VIEW · PEOPLE MOVE WHEN REAL WORK STARTS</small>
         </div>
 
         <div className={styles.worldShell}>
           <div className={styles.worldRibbon}>
-            <span><i className={styles.dotWorking} /> ACTIVE AT DESK</span>
-            <span><i className={styles.dotReady} /> READY / IDLE</span>
+            <span><i className={styles.dotWorking} /> SEATED + WORKING</span>
+            <span><i className={styles.dotReady} /> READY BAY</span>
             <span><i className={styles.dotBlocked} /> BLOCKED / INCIDENT</span>
-            <b>NO RANDOM ROAMING · MOVEMENT REPRESENTS REAL WORK</b>
+            <b>CHARACTERS ARE SEPARATE FROM DESKS · MOTION FOLLOWS AGENT STATE</b>
           </div>
 
-          <div className={styles.floorWorld}>
-            <div className={styles.ceilingGlow} />
-            <div className={styles.officeAisle + " " + styles.aisleHorizontal} />
-            <div className={styles.officeAisle + " " + styles.aisleVertical} />
+          <div className={styles.simFloor}>
+            <div className={styles.simFloorPlane} />
+            <div className={styles.glassNorthWall} />
+            <div className={styles.centralAisle} />
+            <div className={styles.crossAisle} />
 
-            <div className={styles.jarvisHub}>
-              <div className={styles.jarvisHubCore}><BrainCircuit size={16} /></div>
-              <div>
-                <strong>JARVIS CORE</strong>
-                <small>SUPERVISE · ROUTE · ESCALATE</small>
-              </div>
+            <div className={styles.jarvisOverlook}>
+              <div className={styles.jarvisOrb}><BrainCircuit size={16} /></div>
+              <div><strong>JARVIS</strong><small>COMMAND OVERLOOK</small></div>
             </div>
 
-            <div className={styles.officeGrid}>
+            <div className={styles.readyBay}>
+              <strong>READY BAY</strong>
+              <small>IDLE EMPLOYEES WAIT HERE UNTIL WORK IS ASSIGNED</small>
+            </div>
+
+            {agents.map((agent, index) => {
+              const profile = profiles[agent.id] ?? {
+                name: agent.id,
+                role: agent.domain,
+                station: "Operations",
+                icon: Bot,
+                specialty: agent.currentWork,
+                accent: "#94a3b8",
+                zone: "OPERATIONS",
+              };
+              const Icon = profile.icon;
+              const pos = officePositions[agent.id] ?? {
+                deskX: 16 + (index % 3) * 34,
+                deskY: 22 + Math.floor(index / 3) * 28,
+                readyX: 10 + index * 10,
+                readyY: 91,
+              };
+              return (
+                <button
+                  type="button"
+                  key={"desk-" + agent.id}
+                  className={
+                    styles.deskPod +
+                    " " + styles[agent.status.toLowerCase()] +
+                    (selectedId === agent.id ? " " + styles.selectedDeskPod : "")
+                  }
+                  style={{
+                    "--agent-accent": profile.accent,
+                    "--desk-x": pos.deskX + "%",
+                    "--desk-y": pos.deskY + "%",
+                  } as CSSProperties}
+                  onClick={() => setSelectedId(agent.id)}
+                >
+                  <div className={styles.deskLabel}>
+                    <span>{profile.zone}</span>
+                    <b>{String(index + 1).padStart(2, "0")}</b>
+                  </div>
+                  <div className={styles.isometricDesk}>
+                    <span className={styles.deskSurface} />
+                    <span className={styles.deskFace} />
+                    <span className={styles.deskSide} />
+                    <span className={styles.deskFootA} />
+                    <span className={styles.deskFootB} />
+                    <span className={styles.chairBase} />
+                    <span className={styles.chairBack} />
+                  </div>
+                  <div className={styles.deskScreens}>
+                    <span className={styles.screenPrimary}><i /><i /><i /><i /></span>
+                    <span className={styles.screenSecondary}><i /><i /><i /></span>
+                  </div>
+                  <div className={styles.deskIdentity}>
+                    <Icon size={11} />
+                    <div><strong>{profile.name}</strong><small>{profile.station}</small></div>
+                  </div>
+                  <div className={styles.workSignal}>
+                    <i />
+                    <span>{
+                      agent.status === "RUNNING" ? "WORKING" :
+                      agent.status === "BLOCKED" ? "WAITING" :
+                      agent.status === "ERROR" ? "INCIDENT" :
+                      agent.status === "DONE" ? "REPORT READY" : "STANDBY"
+                    }</span>
+                  </div>
+                  {agent.status === "RUNNING" ? (
+                    <div className={styles.activeTaskRibbon}>{agent.currentWork || profile.specialty}</div>
+                  ) : null}
+                </button>
+              );
+            })}
+
+            <div className={styles.peopleLayer}>
               {agents.map((agent, index) => {
                 const profile = profiles[agent.id] ?? {
                   name: agent.id,
@@ -359,88 +493,51 @@ export default function WorkforceWorld() {
                   accent: "#94a3b8",
                   zone: "OPERATIONS",
                 };
-                const Icon = profile.icon;
-                const mode =
-                  agent.status === "RUNNING" ? "WORKING" :
-                  agent.status === "BLOCKED" ? "WAITING INPUT" :
-                  agent.status === "ERROR" ? "INCIDENT" :
-                  agent.status === "DONE" ? "READY TO REPORT" : "READY";
+                const pos = officePositions[agent.id] ?? {
+                  deskX: 16 + (index % 3) * 34,
+                  deskY: 22 + Math.floor(index / 3) * 28,
+                  readyX: 10 + index * 10,
+                  readyY: 91,
+                };
+                const motion = agentMotion[agent.id] ??
+                  (agent.status === "RUNNING" ? "SEATED" :
+                   agent.status === "BLOCKED" ? "BLOCKED" :
+                   agent.status === "ERROR" ? "ERROR" :
+                   agent.status === "DONE" ? "REPORTING" : "READY");
 
                 return (
                   <button
                     type="button"
-                    key={agent.id}
+                    key={"person-" + agent.id}
                     className={
-                      styles.officeStation +
-                      " " + styles[agent.status.toLowerCase()] +
-                      (selectedId === agent.id ? " " + styles.selectedStation : "")
+                      styles.simPerson +
+                      " " + styles["motion" + motion] +
+                      (selectedId === agent.id ? " " + styles.selectedPerson : "")
                     }
                     style={{
                       "--agent-accent": profile.accent,
-                      "--station-index": index,
+                      "--desk-x": pos.deskX + "%",
+                      "--desk-y": (pos.deskY + 3.2) + "%",
+                      "--ready-x": pos.readyX + "%",
+                      "--ready-y": pos.readyY + "%",
+                      "--walk-delay": (index * 70) + "ms",
                     } as CSSProperties}
                     onClick={() => setSelectedId(agent.id)}
+                    title={profile.name + " · " + motion}
                   >
-                    <div className={styles.stationZone}>
-                      <span>{profile.zone}</span>
-                      <b>{String(index + 1).padStart(2, "0")}</b>
-                    </div>
-
-                    <div className={styles.stationRoom}>
-                      <div className={styles.roomWallBack} />
-                      <div className={styles.roomWallSide} />
-                      <div className={styles.stationLighting} />
-
-                      <div className={styles.monitorArray}>
-                        <div className={styles.monitorMain}>
-                          <i /><i /><i /><i />
-                          <small>{agent.status === "RUNNING" ? "LIVE WORK" : agent.status === "ERROR" ? "ALERT" : "STANDBY"}</small>
-                        </div>
-                        <div className={styles.monitorSide}>
-                          <i /><i /><i />
-                        </div>
-                      </div>
-
-                      <div className={styles.desk3d}>
-                        <span className={styles.deskTop} />
-                        <span className={styles.deskFront} />
-                        <span className={styles.deskLegLeft} />
-                        <span className={styles.deskLegRight} />
-                        <span className={styles.keyboard} />
-                      </div>
-
-                      <div className={styles.worker3d}>
-                        <span className={styles.workerHair} />
-                        <span className={styles.workerHead3d}><i /></span>
-                        <span className={styles.workerTorso3d} />
-                        <span className={styles.workerArm3dLeft} />
-                        <span className={styles.workerArm3dRight} />
-                        <span className={styles.workerLeg3dLeft} />
-                        <span className={styles.workerLeg3dRight} />
-                        <span className={styles.workerChair} />
-                        <span className={styles.workerShadow3d} />
-                      </div>
-
-                      <div className={styles.stationConsole}>
-                        <Icon size={11} />
-                        <span>{profile.station}</span>
-                      </div>
-
-                      {agent.status === "DONE" ? <div className={styles.reportPulse}>REPORT READY</div> : null}
-                      {agent.status === "ERROR" || agent.status === "BLOCKED" ? <div className={styles.alertBeacon} /> : null}
-                    </div>
-
-                    <div className={styles.stationFooter}>
-                      <div>
-                        <strong>{profile.name}</strong>
-                        <span>{profile.role}</span>
-                      </div>
-                      <div className={styles.stationState}>
-                        <i />
-                        <b>{mode}</b>
-                      </div>
-                    </div>
-                    <small className={styles.stationTask}>{agent.currentWork || profile.specialty}</small>
+                    <span className={styles.personShadow} />
+                    <span className={styles.personLegLeft} />
+                    <span className={styles.personLegRight} />
+                    <span className={styles.personTorso} />
+                    <span className={styles.personArmLeft} />
+                    <span className={styles.personArmRight} />
+                    <span className={styles.personHead}><i /></span>
+                    <span className={styles.personHair} />
+                    <span className={styles.personName}>{profile.name}</span>
+                    {motion === "WALKING" ? <span className={styles.personAction}>WALKING TO DESK</span> : null}
+                    {motion === "SEATED" ? <span className={styles.personAction}>WORKING</span> : null}
+                    {motion === "BLOCKED" ? <span className={styles.personAction}>BLOCKED</span> : null}
+                    {motion === "ERROR" ? <span className={styles.personAction}>INCIDENT</span> : null}
                   </button>
                 );
               })}
