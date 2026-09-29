@@ -1,6 +1,6 @@
 import { sleep } from "workflow";
 
-export async function jarvisWorkforceLoop(cadenceMinutes = 60, loopToken: string | null = null) {
+export async function jarvisWorkforceLoop(cadenceMinutes = 15, loopToken: string | null = null) {
   "use workflow";
 
   while (true) {
