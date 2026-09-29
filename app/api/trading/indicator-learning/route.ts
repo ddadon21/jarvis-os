@@ -93,7 +93,14 @@ export async function POST(request: Request) {
   }
 
   const fingerprint = [
-    String(day.updated_at ?? ""),
+    String(day.trade_date ?? ""),
+    String(day.realized_pnl ?? ""),
+    String(day.notes ?? ""),
+    String(day.feeling ?? ""),
+    String(day.trade_management ?? ""),
+    String(day.errors ?? ""),
+    String(day.session_rating ?? ""),
+    String(day.screenshot_count ?? ""),
     ...imageRows.map((item) => String(item.id)),
   ].join("|");
 
