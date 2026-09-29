@@ -302,11 +302,24 @@ export default function WorkforceWorld() {
   const selected = agents.find((agent) => agent.id === selectedId) ?? agents[0] ?? null;
   const selectedProfile = selected ? profiles[selected.id] : null;
   const selectedTasks = useMemo(
-    () => selected ? tasks.filter((task) => task.assignedTo === selected.id).slice(0, 8) : [],
+    () => selected ? tasks.filter((task) => task.assignedTo === selected.id) : [],
     [selected, tasks],
   );
   const openTasks = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
   const completed = tasks.filter((task) => task.status === "DONE").length;
+  const queueTasks = useMemo(() => {
+    const source = selectedTasks.length ? selectedTasks : tasks;
+    const active = source
+      .filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status))
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    const complete = source
+      .filter((task) => task.status === "DONE")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    const failedHistory = source
+      .filter((task) => task.status === "FAILED")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return [...active, ...complete, ...failedHistory].slice(0, 8);
+  }, [selectedTasks, tasks]);
   const floorActive = Boolean(workforce?.autonomy?.enabled || manualCycleActive);
 
   useEffect(() => {
@@ -612,7 +625,7 @@ export default function WorkforceWorld() {
         <div className={styles.queuePanel}>
           <div className={styles.panelTitle}><Activity size={13} /><span>WORK QUEUE</span><small>{openTasks.length} OPEN</small></div>
           <div className={styles.queue}>
-            {(selectedTasks.length ? selectedTasks : tasks.slice(0, 8)).map((task) => (
+            {queueTasks.map((task) => (
               <div className={styles.task} key={task.id}>
                 <i className={styles["task" + task.status]} />
                 <div>
