@@ -362,6 +362,12 @@ export default function WorkforceWorld() {
   const indicatorEvidence = recentEvents.find((event) => event.type === "trading.indicator_evidence") ?? null;
   const floorActive = Boolean(workforce?.autonomy?.enabled);
 
+  const agentIdsKey = agents.map((agent) => agent.id).join("|");
+
+  useEffect(() => {
+    previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
+  }, [agents]);
+
   useEffect(() => {
     if (!agents.length) return;
     const timers: number[] = [];
@@ -377,54 +383,54 @@ export default function WorkforceWorld() {
           : "READY",
       ])));
       previousFloorActive.current = floorActive;
-      previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
       return;
     }
 
-    if (floorActive !== wasActive) {
-      if (floorActive) {
-        setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "WALKING" as AgentMotion])));
-        agents.forEach((agent, index) => {
-          timers.push(window.setTimeout(() => {
-            setAgentMotion((state) => ({ ...state, [agent.id]: "SEATED" }));
-          }, 2600 + index * 70));
-        });
-      } else {
-        setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "RETURNING" as AgentMotion])));
-        agents.forEach((agent, index) => {
-          timers.push(window.setTimeout(() => {
-            setAgentMotion((state) => ({ ...state, [agent.id]: "READY" }));
-          }, 2400 + index * 55));
-        });
-      }
-      previousFloorActive.current = floorActive;
-      previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
-      return () => timers.forEach((timer) => window.clearTimeout(timer));
-    }
+    if (floorActive === wasActive) return;
 
     if (floorActive) {
-      setAgentMotion((current) => {
-        const next = { ...current };
-        for (const agent of agents) {
-          const previous = previousStatuses.current[agent.id];
-          if (current[agent.id] === "WALKING" || current[agent.id] === "RETURNING") continue;
-          if (agent.status !== previous) {
-            next[agent.id] =
-              agent.status === "BLOCKED" ? "BLOCKED" :
-              agent.status === "ERROR" ? "ERROR" :
-              "SEATED";
-          }
-          previousStatuses.current[agent.id] = agent.status;
-        }
-        return next;
+      setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "WALKING" as AgentMotion])));
+      agents.forEach((agent, index) => {
+        timers.push(window.setTimeout(() => {
+          const latestStatus = previousStatuses.current[agent.id];
+          setAgentMotion((state) => ({
+            ...state,
+            [agent.id]:
+              latestStatus === "BLOCKED" ? "BLOCKED" :
+              latestStatus === "ERROR" ? "ERROR" :
+              "SEATED",
+          }));
+        }, 2600 + index * 70));
       });
     } else {
-      previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
+      setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "RETURNING" as AgentMotion])));
+      agents.forEach((agent, index) => {
+        timers.push(window.setTimeout(() => {
+          setAgentMotion((state) => ({ ...state, [agent.id]: "READY" }));
+        }, 2400 + index * 55));
+      });
     }
 
     previousFloorActive.current = floorActive;
     return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [floorActive, agentIdsKey]);
+
+  useEffect(() => {
+    if (!floorActive || !agents.length) return;
+    setAgentMotion((current) => {
+      const next = { ...current };
+      for (const agent of agents) {
+        const motion = current[agent.id];
+        if (motion === "WALKING" || motion === "RETURNING") continue;
+        next[agent.id] =
+          agent.status === "BLOCKED" ? "BLOCKED" :
+          agent.status === "ERROR" ? "ERROR" :
+          "SEATED";
+      }
+      return next;
+    });
   }, [agents, floorActive]);
+
 
 
   return (
