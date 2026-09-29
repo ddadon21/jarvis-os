@@ -43,8 +43,25 @@ function executionReadCompleteness(frame: FrameRead): number {
 }
 
 export function isRichExecutionRead(frame: FrameRead): boolean {
-  return (frame.intentState === "PREPARING" || frame.positionStatus === "PENDING" || frame.positionStatus === "OPEN")
-    && executionReadCompleteness(frame) === 8 && (frame.quantity ?? 0) > 0;
+  if ((frame.quantity ?? 0) <= 0) return false;
+
+  // Once TradingView confirms a filled position, the original entry order type
+  // is often no longer rendered. Do not downgrade a complete live trade merely
+  // because LIMIT/STOP/MARKET disappeared after the fill.
+  if (frame.positionStatus === "OPEN") {
+    return [
+      frame.symbol,
+      frame.side,
+      frame.quantity,
+      frame.entryPrice,
+      frame.currentPrice,
+      frame.stopPrice,
+      frame.targetPrice,
+    ].every((value) => value != null);
+  }
+
+  return (frame.intentState === "PREPARING" || frame.positionStatus === "PENDING")
+    && executionReadCompleteness(frame) === 8;
 }
 
 function compatibleExecution(a: Pick<FrameRead, "symbol" | "side">, b: Pick<FrameRead, "symbol" | "side">) {
