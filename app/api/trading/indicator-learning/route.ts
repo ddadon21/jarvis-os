@@ -80,6 +80,24 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "Could not load trade images" }, { status: 502 });
   }
 
+  const tradeDate = String(day.trade_date ?? "");
+  const nextDate = tradeDate && Number.isFinite(Date.parse(tradeDate + "T00:00:00.000Z"))
+    ? new Date(Date.parse(tradeDate + "T00:00:00.000Z") + 86_400_000).toISOString()
+    : null;
+  const dayStart = tradeDate ? tradeDate + "T00:00:00.000Z" : null;
+  let observerSnapshots: Array<Record<string, unknown>> = [];
+  if (dayStart && nextDate) {
+    const { data: snapshots } = await supabase
+      .from("trading_observer_snapshots")
+      .select("observed_at,connection,status,intent_state,symbol,side,quantity,order_type,entry_price,current_price,stop_price,target_price,open_pnl,confidence,evidence")
+      .eq("workspace_id", day.workspace_id)
+      .gte("observed_at", dayStart)
+      .lt("observed_at", nextDate)
+      .order("observed_at", { ascending: true })
+      .limit(24);
+    observerSnapshots = (snapshots ?? []) as Array<Record<string, unknown>>;
+  }
+
   const notes = [
     String(day.notes ?? "").trim(),
     String(day.feeling ?? "").trim(),
@@ -180,7 +198,10 @@ tradeManagement=${String(day.trade_management ?? "")}
 errors=${String(day.errors ?? "")}
 screenshots=${imageRows.length}
 
-LATEST OBSERVER CONTEXT:
+OBSERVER EVIDENCE FROM THIS TRADING DAY:
+${JSON.stringify(observerSnapshots)}
+
+LATEST LIVE OBSERVER CONTEXT (use only if it plausibly matches the trading day):
 ${JSON.stringify(observerContext)}
 
 RULES:
@@ -240,6 +261,7 @@ Return ONLY JSON:
     analyzedAt: new Date().toISOString(),
     screenshotCount: imageRows.length,
     observerObservedAt: observerContext?.observedAt ?? null,
+    observerSnapshotCount: observerSnapshots.length,
     baseline: "deviant-refined-baseline-v1.pine",
   };
 
