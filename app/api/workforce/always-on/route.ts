@@ -1,6 +1,6 @@
 import { start } from "workflow/api";
 import { getOrSeedWorkforceState } from "../../../../lib/jarvis-workforce";
-import { setWorkforceState } from "../../../../lib/jarvis-runtime";
+import { appendRuntimeEvent, createRuntimeEvent, setWorkforceState } from "../../../../lib/jarvis-runtime";
 import { jarvisWorkforceLoop } from "../../../../workflows/jarvis-workforce-loop";
 
 export const runtime = "nodejs";
@@ -51,6 +51,13 @@ export async function POST(request: Request) {
       },
     };
     await setWorkforceState(next);
+    await appendRuntimeEvent(createRuntimeEvent({
+      type: "workforce.shift_paused",
+      domain: "CORE",
+      source: "jarvis.workforce.control",
+      importance: "NORMAL",
+      summary: "Himie Johnson Ventures workforce paused by Dwight. Agents returned to the Ready Bay and will remain off duty until restarted.",
+    }));
     return Response.json({
       ok: true,
       autonomy: next.autonomy,
@@ -90,6 +97,13 @@ export async function POST(request: Request) {
       },
     };
     await setWorkforceState(next);
+    await appendRuntimeEvent(createRuntimeEvent({
+      type: "workforce.shift_started",
+      domain: "CORE",
+      source: "jarvis.workforce.control",
+      importance: "IMPORTANT",
+      summary: "Himie Johnson Ventures workforce started. Agents are on duty on a 15-minute operating cycle and remain active until Dwight pauses the team.",
+    }));
 
     return Response.json({
       ok: true,
