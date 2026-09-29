@@ -101,6 +101,7 @@ test('live MYM position survives opposite-side exit accessibility labels', () =>
   assert.equal(frame.targetPrice, 52571);
   assert.equal(frame.openPnl, 69.5);
   assert.equal(frame.orderType, null);
+  assert.equal(isRichExecutionRead(frame), true);
 });
 test('live trailing stops are valid on either side of entry', () => {
   for (const side of ['LONG', 'SHORT']) {
