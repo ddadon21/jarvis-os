@@ -63,25 +63,58 @@ export async function POST(request: Request) {
   }
 
   const loopToken = crypto.randomUUID();
-  const run = await start(jarvisWorkforceLoop, [cadenceMinutes, loopToken]);
   const now = new Date().toISOString();
-  const next = {
+
+  // Persist the operating intent before the durable workflow starts. This
+  // prevents the first heartbeat from racing the START write and mistaking the
+  // workforce for paused.
+  const starting = {
     ...workforce,
     autonomy: {
       enabled: true,
-      runId: run.runId,
+      runId: null,
       startedAt: now,
       cadenceMinutes,
       loopToken,
     },
   };
-  await setWorkforceState(next);
+  await setWorkforceState(starting);
 
-  return Response.json({
-    ok: true,
-    autonomy: next.autonomy,
-    note: "Durable JARVIS workforce started.",
-  });
+  try {
+    const run = await start(jarvisWorkforceLoop, [cadenceMinutes, loopToken]);
+    const next = {
+      ...starting,
+      autonomy: {
+        ...starting.autonomy,
+        runId: run.runId,
+      },
+    };
+    await setWorkforceState(next);
+
+    return Response.json({
+      ok: true,
+      autonomy: next.autonomy,
+      note: "Durable JARVIS workforce started.",
+    });
+  } catch (error) {
+    const failed = {
+      ...starting,
+      status: "DEGRADED" as const,
+      agents: starting.agents.map((agent) => ({
+        ...agent,
+        status: "IDLE" as const,
+        currentWork: "Ready Bay standby. Durable workforce start did not complete.",
+      })),
+      autonomy: {
+        ...starting.autonomy,
+        enabled: false,
+        runId: null,
+      },
+    };
+    await setWorkforceState(failed);
+    console.error("Durable workforce start failed", error);
+    return Response.json({ ok: false, error: "Could not start durable workforce." }, { status: 502 });
+  }
 }
 
 function isAuthorized(request: Request) {
