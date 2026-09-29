@@ -1,5 +1,5 @@
 import { addWorkforceTask, getOrSeedWorkforceState, runWorkforceCycle } from "../../../lib/jarvis-workforce";
-import type { AgentId, AgentPermission, AgentTaskPriority, RuntimeDomain } from "../../../lib/jarvis-runtime";
+import { getRecentEvents, type AgentId, type AgentPermission, type AgentTaskPriority, type RuntimeDomain } from "../../../lib/jarvis-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -15,10 +15,14 @@ type WorkforceBody = {
 };
 
 export async function GET() {
-  const state = await getOrSeedWorkforceState();
+  const [state, recentEvents] = await Promise.all([
+    getOrSeedWorkforceState(),
+    getRecentEvents(),
+  ]);
   return Response.json({
     ok: true,
     workforce: state,
+    recentEvents: recentEvents.slice(0, 24),
     counts: {
       agents: state.agents.length,
       activeObjectives: state.objectives.filter((objective) => objective.status === "ACTIVE").length,
