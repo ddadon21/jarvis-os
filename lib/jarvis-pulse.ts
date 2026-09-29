@@ -125,25 +125,27 @@ Return ONLY JSON with this shape:
     const pulse: JarvisPulse = {
       id: crypto.randomUUID(),
       ranAt: new Date().toISOString(),
-      status: "ERROR",
-      lane: "CORE_HEARTBEAT",
-      summary: "Background research could not complete this cycle. Jarvis remains online and will retry on the next scheduled pulse.",
+      status: "DEGRADED",
+      lane: "SENTRYOPS_RESEARCH",
+      summary: previous
+        ? "Live SentryOps research was temporarily unavailable this cycle. JARVIS retained the last verified research state and will retry automatically instead of treating a provider outage as an agent failure."
+        : "Live SentryOps research was temporarily unavailable this cycle. JARVIS remains operational and will retry automatically; no market findings were invented.",
       opportunities: previous?.opportunities ?? [],
       nextMove: previous?.nextMove ?? {
-        title: "Restore background research",
-        reason: "The last research cycle failed, so new public-market intelligence is not yet available.",
-        domain: "CORE",
+        title: "Retry live SentryOps research",
+        reason: "The research provider was unavailable, so JARVIS will retry rather than manufacture evidence.",
+        domain: "SENTRYOPS",
       },
-      sourceCount: 0,
+      sourceCount: previous?.sourceCount ?? 0,
     };
 
     await setLatestPulse(pulse);
     await appendRuntimeEvent(
       createRuntimeEvent({
-        type: "research.pulse_failed",
-        domain: "CORE",
+        type: "research.pulse_degraded",
+        domain: "SENTRYOPS",
         source: "jarvis.background",
-        importance: "IMPORTANT",
+        importance: "NORMAL",
         summary: pulse.summary,
       }),
     );
