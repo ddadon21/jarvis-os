@@ -142,13 +142,21 @@ type TaskSeed = {
 export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
   const existing = await getWorkforceState();
   if (existing) {
-    const agents = mergeMissingAgents(existing.agents);
+    const workforceEnabled = existing.autonomy?.enabled === true;
+    const mergedAgents = mergeMissingAgents(existing.agents);
+    const agents = workforceEnabled
+      ? mergedAgents
+      : mergedAgents.map((agent) => ({
+          ...agent,
+          status: "IDLE" as const,
+        }));
     const objectives = mergeMissingObjectives(existing.objectives);
     const tasks = Array.isArray(existing.tasks) ? existing.tasks : [];
     const changed =
       agents.length !== existing.agents.length ||
       objectives.length !== existing.objectives.length ||
-      !Array.isArray(existing.tasks);
+      !Array.isArray(existing.tasks) ||
+      agents.some((agent, index) => agent.status !== existing.agents[index]?.status);
 
     if (!changed) return existing;
 
