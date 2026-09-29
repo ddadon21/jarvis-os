@@ -263,6 +263,7 @@ export default function WorkforceWorld() {
   );
   const openTasks = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
   const completed = tasks.filter((task) => task.status === "DONE").length;
+  const walkers = agents.filter((agent) => agent.status === "IDLE" || agent.status === "DONE");
 
   return (
     <main className={styles.page}>
@@ -302,58 +303,128 @@ export default function WorkforceWorld() {
         <div className={styles.floorHead}>
           <div>
             <span>OPERATIONS FLOOR</span>
-            <strong>LIVE EMPLOYEE STATIONS</strong>
+            <strong>LIVE AI COMPANY FLOOR</strong>
           </div>
-          <small>Characters animate according to real agent state.</small>
+          <small>RUNNING agents work inside their lab. IDLE/DONE agents physically patrol and report across the floor.</small>
         </div>
 
-        <div className={styles.stationGrid}>
-          {agents.map((agent) => {
-            const profile = profiles[agent.id] ?? {
-              name: agent.id,
-              role: agent.domain,
-              station: "Operations",
-              icon: Bot,
-              specialty: agent.currentWork,
-            };
-            const Icon = profile.icon;
-            return (
-              <button
-                type="button"
-                key={agent.id}
-                className={styles.station + " " + styles[agent.status.toLowerCase()] + (selectedId === agent.id ? " " + styles.selected : "")}
-                onClick={() => setSelectedId(agent.id)}
-              >
-                <div className={styles.stationTop}>
-                  <div><Icon size={12} /><span>{profile.station}</span></div>
-                  <strong>{agent.status}</strong>
-                </div>
+        <div className={styles.worldShell}>
+          <div className={styles.worldRibbon}>
+            <span><i className={styles.dotWorking} /> WORKING IN LAB</span>
+            <span><i className={styles.dotWalking} /> WALKING / REPORTING</span>
+            <span><i className={styles.dotBlocked} /> BLOCKED / WAITING</span>
+            <b>STATE-DRIVEN · NOT RANDOM ACTIVITY</b>
+          </div>
 
-                <div className={styles.scene}>
-                  <div className={styles.screen}>
-                    <i /><i /><i />
-                    <span>{agent.status === "RUNNING" ? "PROCESSING" : agent.status === "ERROR" ? "ALERT" : agent.status === "BLOCKED" ? "WAITING" : "READY"}</span>
-                  </div>
-                  <div className={styles.operator}>
-                    <span className={styles.head}><i /></span>
-                    <span className={styles.body} />
-                    <span className={styles.armLeft} />
-                    <span className={styles.armRight} />
-                    <span className={styles.legLeft} />
-                    <span className={styles.legRight} />
-                  </div>
-                  <div className={styles.desk}><span /></div>
-                  <div className={styles.floorSignal} />
-                </div>
+          <div className={styles.floorWorld}>
+            <div className={styles.worldGridLines} />
+            <div className={styles.handoffLane}>
+              <span>AGENT HANDOFF CORRIDOR</span>
+              <i /><i /><i />
+            </div>
+            <div className={styles.jarvisCore}>
+              <BrainCircuit size={18} />
+              <strong>JARVIS CORE</strong>
+              <small>SUPERVISE · ROUTE · ESCALATE</small>
+            </div>
 
-                <div className={styles.stationCopy}>
-                  <strong>{profile.name}</strong>
-                  <span>{profile.role}</span>
-                  <small>{profile.specialty}</small>
-                </div>
-              </button>
-            );
-          })}
+            <div className={styles.roamingLayer}>
+              {walkers.map((agent, index) => {
+                const profile = profiles[agent.id] ?? {
+                  name: agent.id,
+                  role: agent.domain,
+                  station: "Operations",
+                  icon: Bot,
+                  specialty: agent.currentWork,
+                };
+                return (
+                  <button
+                    type="button"
+                    key={"walker-" + agent.id}
+                    className={styles.floorWalker}
+                    style={{ animationDelay: `${index * -1.8}s` }}
+                    onClick={() => setSelectedId(agent.id)}
+                    title={profile.name + " · " + (agent.status === "DONE" ? "reporting" : "patrolling")}
+                  >
+                    <span className={styles.walkerPerson}>
+                      <i className={styles.walkerHead} />
+                      <i className={styles.walkerBody} />
+                      <i className={styles.walkerArmA} />
+                      <i className={styles.walkerArmB} />
+                      <i className={styles.walkerLegA} />
+                      <i className={styles.walkerLegB} />
+                    </span>
+                    <b>{profile.name}</b>
+                    <small>{agent.status === "DONE" ? "REPORTING" : "PATROL"}</small>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className={styles.roomGrid}>
+              {agents.map((agent) => {
+                const profile = profiles[agent.id] ?? {
+                  name: agent.id,
+                  role: agent.domain,
+                  station: "Operations",
+                  icon: Bot,
+                  specialty: agent.currentWork,
+                };
+                const Icon = profile.icon;
+                const inLab = agent.status === "RUNNING" || agent.status === "BLOCKED" || agent.status === "ERROR";
+                const mode =
+                  agent.status === "RUNNING" ? "ACTIVE WORK" :
+                  agent.status === "BLOCKED" ? "WAITING INPUT" :
+                  agent.status === "ERROR" ? "INCIDENT" :
+                  agent.status === "DONE" ? "REPORTING" : "PATROL";
+
+                return (
+                  <button
+                    type="button"
+                    key={agent.id}
+                    className={styles.labRoom + " " + styles[agent.status.toLowerCase()] + (selectedId === agent.id ? " " + styles.selectedRoom : "")}
+                    onClick={() => setSelectedId(agent.id)}
+                  >
+                    <div className={styles.roomHeader}>
+                      <div><Icon size={12} /><span>{profile.station}</span></div>
+                      <strong>{mode}</strong>
+                    </div>
+
+                    <div className={styles.roomInterior}>
+                      <div className={styles.roomGlass} />
+                      <LabRig agentId={agent.id} status={agent.status} />
+
+                      {inLab ? (
+                        <div className={styles.roomWorker}>
+                          <span className={styles.workerHead}><i /></span>
+                          <span className={styles.workerTorso} />
+                          <span className={styles.workerArmLeft} />
+                          <span className={styles.workerArmRight} />
+                          <span className={styles.workerLegLeft} />
+                          <span className={styles.workerLegRight} />
+                          <span className={styles.workerShadow} />
+                        </div>
+                      ) : (
+                        <div className={styles.emptyStation}>
+                          <span>OUT ON FLOOR</span>
+                        </div>
+                      )}
+
+                      <div className={styles.roomDoor}><i /></div>
+                    </div>
+
+                    <div className={styles.roomCopy}>
+                      <div>
+                        <strong>{profile.name}</strong>
+                        <span>{profile.role}</span>
+                      </div>
+                      <small>{agent.currentWork || profile.specialty}</small>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -419,6 +490,38 @@ export default function WorkforceWorld() {
         </div>
       </section>
     </main>
+  );
+}
+
+function LabRig({ agentId, status }: { agentId: string; status: AgentStatus }) {
+  const labels: Record<string, string> = {
+    EXECUTIVE: "PRIORITY MATRIX",
+    FINANCE_CFO: "CAPITAL MODEL",
+    SENTRYOPS_RESEARCH: "AGENCY INTEL",
+    TRADING_OBSERVER: "TRADING FEED",
+    BUILDER: "BUILD PIPELINE",
+    JARVIS_QA: "TEST HARNESS",
+    IT_INFRA: "RUNTIME NOC",
+    IT_SECURITY: "SECURITY SOC",
+    IT_INTEGRATIONS: "API FABRIC",
+  };
+  const label = labels[agentId] ?? "OPERATIONS";
+
+  return (
+    <div className={styles.labRig}>
+      <div className={styles.rigWall}>
+        <span /><span /><span />
+        <small>{status === "RUNNING" ? "LIVE PROCESSING" : status === "ERROR" ? "ALERT" : status === "BLOCKED" ? "AWAITING INPUT" : "STANDBY"}</small>
+      </div>
+      <div className={styles.rigConsole}>
+        <i /><i /><i /><i />
+      </div>
+      <div className={styles.rigTable}>
+        <span />
+        <b>{label}</b>
+      </div>
+      <div className={styles.rigTower}><i /><i /><i /></div>
+    </div>
   );
 }
 
