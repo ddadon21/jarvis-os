@@ -24,7 +24,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } f
 import styles from "./workforce-world.module.css";
 
 type AgentStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
-type AgentMotion = "READY" | "WALKING" | "SEATED" | "REPORTING" | "BLOCKED" | "ERROR";
+type AgentMotion = "READY" | "WALKING" | "RETURNING" | "SEATED" | "REPORTING" | "BLOCKED" | "ERROR";
 type Agent = {
   id: string;
   domain: string;
@@ -168,16 +168,16 @@ const officePositions: Record<string, {
   readyX: number;
   readyY: number;
 }> = {
-  EXECUTIVE: { deskX: 17, deskY: 21, readyX: 10, readyY: 91 },
-  FINANCE_CFO: { deskX: 50, deskY: 19, readyX: 20, readyY: 91 },
-  SENTRYOPS_RESEARCH: { deskX: 83, deskY: 21, readyX: 30, readyY: 91 },
-  TRADING_OBSERVER: { deskX: 17, deskY: 49, readyX: 40, readyY: 91 },
-  BUILDER: { deskX: 50, deskY: 49, readyX: 50, readyY: 91 },
-  JARVIS_QA: { deskX: 83, deskY: 49, readyX: 60, readyY: 91 },
-  IT_INFRA: { deskX: 17, deskY: 77, readyX: 70, readyY: 91 },
-  IT_SECURITY: { deskX: 50, deskY: 77, readyX: 80, readyY: 91 },
-  IT_INTEGRATIONS: { deskX: 83, deskY: 77, readyX: 90, readyY: 91 },
-};
+  EXECUTIVE: { deskX: 17, deskY: 21, readyX: 34, readyY: 89 },
+  FINANCE_CFO: { deskX: 50, deskY: 19, readyX: 42, readyY: 89 },
+  SENTRYOPS_RESEARCH: { deskX: 83, deskY: 21, readyX: 50, readyY: 89 },
+  TRADING_OBSERVER: { deskX: 17, deskY: 49, readyX: 58, readyY: 89 },
+  BUILDER: { deskX: 50, deskY: 49, readyX: 66, readyY: 89 },
+  JARVIS_QA: { deskX: 83, deskY: 49, readyX: 38, readyY: 95 },
+  IT_INFRA: { deskX: 17, deskY: 77, readyX: 46, readyY: 95 },
+  IT_SECURITY: { deskX: 50, deskY: 77, readyX: 54, readyY: 95 },
+  IT_INTEGRATIONS: { deskX: 83, deskY: 77, readyX: 62, readyY: 95 },
+}
 
 function timeAgo(value: string | null) {
   if (!value) return "NEVER";
@@ -197,7 +197,9 @@ export default function WorkforceWorld() {
   const [taskText, setTaskText] = useState("");
   const [notice, setNotice] = useState("AUTONOMOUS FLOOR ONLINE");
   const [agentMotion, setAgentMotion] = useState<Record<string, AgentMotion>>({});
+  const [manualCycleActive, setManualCycleActive] = useState(false);
   const previousStatuses = useRef<Record<string, AgentStatus>>({});
+  const previousFloorActive = useRef<boolean | null>(null);
 
   async function refresh() {
     try {
@@ -243,6 +245,7 @@ export default function WorkforceWorld() {
   async function runCycle() {
     if (busy) return;
     setBusy(true);
+    setManualCycleActive(true);
     setNotice("WORKFORCE CYCLE IN PROGRESS");
     try {
       const response = await fetch("/api/workforce?manual=1", {
@@ -258,6 +261,7 @@ export default function WorkforceWorld() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message.toUpperCase() : "CYCLE FAILED");
     } finally {
+      setManualCycleActive(false);
       setBusy(false);
     }
   }
@@ -301,48 +305,73 @@ export default function WorkforceWorld() {
     () => selected ? tasks.filter((task) => task.assignedTo === selected.id).slice(0, 8) : [],
     [selected, tasks],
   );
-  const openTasks = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
+  const openTasks = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
   const completed = tasks.filter((task) => task.status === "DONE").length;
+  const floorActive = Boolean(workforce?.autonomy?.enabled || manualCycleActive);
 
   useEffect(() => {
     if (!agents.length) return;
     const timers: number[] = [];
-    setAgentMotion((current) => {
-      const next = { ...current };
-      for (const agent of agents) {
-        const previous = previousStatuses.current[agent.id];
-        if (!previous) {
-          next[agent.id] =
-            agent.status === "RUNNING" ? "SEATED" :
-            agent.status === "BLOCKED" ? "BLOCKED" :
-            agent.status === "ERROR" ? "ERROR" :
-            agent.status === "DONE" ? "REPORTING" : "READY";
-          previousStatuses.current[agent.id] = agent.status;
-          continue;
-        }
+    const wasActive = previousFloorActive.current;
 
-        if (agent.status === "RUNNING" && previous !== "RUNNING") {
-          next[agent.id] = "WALKING";
+    if (wasActive === null) {
+      setAgentMotion(Object.fromEntries(agents.map((agent) => [
+        agent.id,
+        floorActive
+          ? agent.status === "BLOCKED" ? "BLOCKED"
+          : agent.status === "ERROR" ? "ERROR"
+          : "SEATED"
+          : "READY",
+      ])));
+      previousFloorActive.current = floorActive;
+      previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
+      return;
+    }
+
+    if (floorActive !== wasActive) {
+      if (floorActive) {
+        setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "WALKING" as AgentMotion])));
+        agents.forEach((agent, index) => {
           timers.push(window.setTimeout(() => {
             setAgentMotion((state) => ({ ...state, [agent.id]: "SEATED" }));
-          }, 2600));
-        } else if (agent.status === "RUNNING" && next[agent.id] !== "WALKING") {
-          next[agent.id] = "SEATED";
-        } else if (agent.status === "BLOCKED") {
-          next[agent.id] = "BLOCKED";
-        } else if (agent.status === "ERROR") {
-          next[agent.id] = "ERROR";
-        } else if (agent.status === "DONE") {
-          next[agent.id] = "REPORTING";
-        } else if (agent.status === "IDLE") {
-          next[agent.id] = "READY";
-        }
-        previousStatuses.current[agent.id] = agent.status;
+          }, 2600 + index * 70));
+        });
+      } else {
+        setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "RETURNING" as AgentMotion])));
+        agents.forEach((agent, index) => {
+          timers.push(window.setTimeout(() => {
+            setAgentMotion((state) => ({ ...state, [agent.id]: "READY" }));
+          }, 2400 + index * 55));
+        });
       }
-      return next;
-    });
+      previousFloorActive.current = floorActive;
+      previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
+      return () => timers.forEach((timer) => window.clearTimeout(timer));
+    }
+
+    if (floorActive) {
+      setAgentMotion((current) => {
+        const next = { ...current };
+        for (const agent of agents) {
+          const previous = previousStatuses.current[agent.id];
+          if (current[agent.id] === "WALKING" || current[agent.id] === "RETURNING") continue;
+          if (agent.status !== previous) {
+            next[agent.id] =
+              agent.status === "BLOCKED" ? "BLOCKED" :
+              agent.status === "ERROR" ? "ERROR" :
+              "SEATED";
+          }
+          previousStatuses.current[agent.id] = agent.status;
+        }
+        return next;
+      });
+    } else {
+      previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
+    }
+
+    previousFloorActive.current = floorActive;
     return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, [agents]);
+  }, [agents, floorActive]);
 
 
   return (
@@ -393,7 +422,7 @@ export default function WorkforceWorld() {
             <span><i className={styles.dotWorking} /> SEATED + WORKING</span>
             <span><i className={styles.dotReady} /> READY BAY</span>
             <span><i className={styles.dotBlocked} /> BLOCKED / INCIDENT</span>
-            <b>CHARACTERS ARE SEPARATE FROM DESKS · MOTION FOLLOWS AGENT STATE</b>
+            <b>PAUSE = READY BAY · START = WALK TO DESKS · ACTIVE WORK = SEATED OPERATIONS</b>
           </div>
 
           <div className={styles.simFloor}>
@@ -436,6 +465,7 @@ export default function WorkforceWorld() {
                   className={
                     styles.deskPod +
                     " " + styles[agent.status.toLowerCase()] +
+                    (floorActive && agent.status !== "BLOCKED" && agent.status !== "ERROR" ? " " + styles.operating : "") +
                     (selectedId === agent.id ? " " + styles.selectedDeskPod : "")
                   }
                   style={{
@@ -469,13 +499,13 @@ export default function WorkforceWorld() {
                   <div className={styles.workSignal}>
                     <i />
                     <span>{
-                      agent.status === "RUNNING" ? "WORKING" :
+                      !floorActive ? "STANDBY" :
                       agent.status === "BLOCKED" ? "WAITING" :
                       agent.status === "ERROR" ? "INCIDENT" :
-                      agent.status === "DONE" ? "REPORT READY" : "STANDBY"
+                      "WORKING"
                     }</span>
                   </div>
-                  {agent.status === "RUNNING" ? (
+                  {floorActive && agent.status !== "ERROR" ? (
                     <div className={styles.activeTaskRibbon}>{agent.currentWork || profile.specialty}</div>
                   ) : null}
                 </button>
@@ -500,10 +530,10 @@ export default function WorkforceWorld() {
                   readyY: 91,
                 };
                 const motion = agentMotion[agent.id] ??
-                  (agent.status === "RUNNING" ? "SEATED" :
+                  (!floorActive ? "READY" :
                    agent.status === "BLOCKED" ? "BLOCKED" :
                    agent.status === "ERROR" ? "ERROR" :
-                   agent.status === "DONE" ? "REPORTING" : "READY");
+                   "SEATED");
 
                 return (
                   <button
@@ -535,6 +565,7 @@ export default function WorkforceWorld() {
                     <span className={styles.personHair} />
                     <span className={styles.personName}>{profile.name}</span>
                     {motion === "WALKING" ? <span className={styles.personAction}>WALKING TO DESK</span> : null}
+                    {motion === "RETURNING" ? <span className={styles.personAction}>RETURNING TO READY BAY</span> : null}
                     {motion === "SEATED" ? <span className={styles.personAction}>WORKING</span> : null}
                     {motion === "BLOCKED" ? <span className={styles.personAction}>BLOCKED</span> : null}
                     {motion === "ERROR" ? <span className={styles.personAction}>INCIDENT</span> : null}
