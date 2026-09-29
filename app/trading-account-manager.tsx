@@ -670,6 +670,25 @@ async function pushCloudSnapshot(
   if (settingError) throw settingError;
 }
 
+async function requestIndicatorLearning(supabase: SupabaseClient, tradingDayId: string) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+
+    await fetch("/api/trading/indicator-learning", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ tradingDayId }),
+    });
+  } catch {
+    // Indicator learning is a background research lane. Journal saving remains primary.
+  }
+}
+
 async function getCloudTradingDay(supabase: SupabaseClient, workspaceId: string, key: string) {
   const { data, error } = await supabase
     .from("trading_days")
@@ -936,9 +955,24 @@ export default function TradingAccountManager({
       setCloudStatus("SYNCING");
       setCloudMessage("Saving to permanent memory…");
       void pushCloudSnapshot(supabase, workspaceId, accounts, journal, selectedId)
-        .then(() => {
+        .then(async () => {
           setCloudStatus("SYNCED");
           setCloudMessage("Permanent memory synced");
+
+          const activeAccount = accounts.find((item) => item.id === selectedId) ?? accounts[0] ?? null;
+          if (!activeAccount) return;
+          const key = entryKey(activeAccount, selectedDay);
+          const entry = journal[key];
+          const hasLearningEvidence = Boolean(
+            entry?.hasImage ||
+            entry?.notes.trim() ||
+            entry?.feeling?.trim() ||
+            entry?.tradeManagement?.trim() ||
+            entry?.errors?.trim()
+          );
+          if (!hasLearningEvidence) return;
+          const tradingDayId = await getCloudTradingDay(supabase, workspaceId, key);
+          if (tradingDayId) void requestIndicatorLearning(supabase, tradingDayId);
         })
         .catch((error) => {
           setCloudStatus("ERROR");
@@ -947,7 +981,7 @@ export default function TradingAccountManager({
     }, 800);
 
     return () => window.clearTimeout(timer);
-  }, [accounts, journal, selectedId, hydrated, cloudReady, workspaceId, user?.id]);
+  }, [accounts, journal, selectedId, selectedDay, hydrated, cloudReady, workspaceId, user?.id]);
 
   const account = accounts.find((item) => item.id === selectedId) ?? accounts[0] ?? null;
 
@@ -1301,6 +1335,7 @@ export default function TradingAccountManager({
             hasImage: actualCount > 0,
             imageCount: actualCount,
           });
+          void requestIndicatorLearning(supabase, tradingDayId);
         }
 
         setCloudStatus("SYNCED");
