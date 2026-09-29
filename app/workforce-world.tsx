@@ -46,6 +46,17 @@ type Task = {
   evidence: string[];
   blockedReason: string | null;
 };
+type RuntimeEvent = {
+  id: string;
+  type: string;
+  domain: string;
+  source: string;
+  importance: string;
+  occurredAt: string;
+  receivedAt: string;
+  summary: string;
+};
+
 type Workforce = {
   status: string;
   lastCycleAt: string | null;
@@ -61,6 +72,7 @@ type Workforce = {
 };
 type Payload = {
   workforce?: Workforce;
+  recentEvents?: RuntimeEvent[];
   counts?: {
     agents: number;
     activeObjectives: number;
@@ -197,7 +209,6 @@ export default function WorkforceWorld() {
   const [taskText, setTaskText] = useState("");
   const [notice, setNotice] = useState("AUTONOMOUS FLOOR ONLINE");
   const [agentMotion, setAgentMotion] = useState<Record<string, AgentMotion>>({});
-  const [manualCycleActive, setManualCycleActive] = useState(false);
   const previousStatuses = useRef<Record<string, AgentStatus>>({});
   const previousFloorActive = useRef<boolean | null>(null);
 
@@ -245,9 +256,25 @@ export default function WorkforceWorld() {
   async function runCycle() {
     if (busy) return;
     setBusy(true);
-    setManualCycleActive(true);
-    setNotice("WORKFORCE CYCLE IN PROGRESS");
+    const alreadyAlwaysOn = Boolean(payload?.workforce?.autonomy?.enabled);
+    setNotice(alreadyAlwaysOn ? "RUNNING IMMEDIATE TEAM CYCLE" : "STARTING TEAM · DURABLE OPERATIONS ENGAGING");
     try {
+      if (!alreadyAlwaysOn) {
+        const startResponse = await fetch("/api/workforce/always-on?manual=1", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "START", cadenceMinutes: 60 }),
+        });
+        const startBody = await startResponse.json().catch(() => ({})) as { error?: string; autonomy?: Workforce["autonomy"] };
+        if (!startResponse.ok) throw new Error(startBody.error || "workforce start failed");
+        setPayload((current) => current?.workforce
+          ? { ...current, workforce: { ...current.workforce, autonomy: startBody.autonomy } }
+          : current);
+        setNotice("TEAM ACTIVE · FIRST DURABLE CYCLE RUNNING");
+        await refresh();
+        return;
+      }
+
       const response = await fetch("/api/workforce?manual=1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -256,12 +283,11 @@ export default function WorkforceWorld() {
       const body = await response.json().catch(() => ({})) as Payload & { error?: string };
       if (!response.ok) throw new Error(body.error || "cycle failed");
       setPayload((current) => ({ ...current, workforce: body.workforce }));
-      setNotice("CYCLE COMPLETE");
+      setNotice("IMMEDIATE TEAM CYCLE COMPLETE · 24/7 OPERATIONS REMAIN ACTIVE");
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message.toUpperCase() : "CYCLE FAILED");
     } finally {
-      setManualCycleActive(false);
       setBusy(false);
     }
   }
@@ -320,7 +346,21 @@ export default function WorkforceWorld() {
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     return [...active, ...complete, ...failedHistory].slice(0, 8);
   }, [selectedTasks, tasks]);
-  const floorActive = Boolean(workforce?.autonomy?.enabled || manualCycleActive);
+  const recentEvents = payload?.recentEvents ?? [];
+  const teamComms = recentEvents
+    .filter((event) => event.type === "workforce.handoff")
+    .slice(0, 8);
+  const workProof = recentEvents
+    .filter((event) =>
+      event.type !== "workforce.handoff" &&
+      (event.type.startsWith("workforce.") ||
+       event.type.startsWith("finance.") ||
+       event.type.startsWith("research.") ||
+       event.type.startsWith("trading."))
+    )
+    .slice(0, 8);
+  const indicatorEvidence = recentEvents.find((event) => event.type === "trading.indicator_evidence") ?? null;
+  const floorActive = Boolean(workforce?.autonomy?.enabled);
 
   useEffect(() => {
     if (!agents.length) return;
@@ -395,7 +435,7 @@ export default function WorkforceWorld() {
           <div className={styles.brandIcon}><Building2 size={19} /></div>
           <div>
             <strong>JARVIS // AI WORKFORCE</strong>
-            <span>HIMIE JOHNSON VENTURES · AUTONOMOUS OPERATIONS FLOOR</span>
+            <span>HIMIE JOHNSON VENTURES · $100M OPERATING STANDARD · AUTONOMOUS OPERATIONS FLOOR</span>
           </div>
         </div>
         <div className={styles.headerStats}>
@@ -417,7 +457,7 @@ export default function WorkforceWorld() {
           <button onClick={toggleAlwaysOn} disabled={busy} className={payload?.workforce?.autonomy?.enabled ? styles.alwaysOn : ""}>
             <CircleDot size={11} /> {payload?.workforce?.autonomy?.enabled ? "PAUSE WORKFORCE" : "START 24/7"}
           </button>
-          <button onClick={runCycle} disabled={busy}><Play size={12} /> {busy ? "WORKING" : "RUN ALL AGENTS"}</button>
+          <button onClick={runCycle} disabled={busy}><Play size={12} /> {busy ? "WORKING" : (floorActive ? "RUN TEAM NOW" : "RUN + KEEP ACTIVE")}</button>
         </div>
       </section>
 
@@ -586,6 +626,100 @@ export default function WorkforceWorld() {
                 );
               })}
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.opsProof}>
+        <div className={styles.opsProofHead}>
+          <div>
+            <span>HJV OPERATIONS COMMS</span>
+            <strong>{floorActive ? "TEAM ONLINE · COLLABORATING" : "TEAM OFF DUTY · READY BAY"}</strong>
+          </div>
+          <div className={styles.opsProofStatus}>
+            <i className={floorActive ? styles.opsLive : styles.opsQuiet} />
+            <b>{floorActive ? "CONTINUES UNTIL YOU PAUSE" : "PAUSED"}</b>
+          </div>
+        </div>
+
+        <div className={styles.opsProofGrid}>
+          <div className={styles.commsPanel}>
+            <div className={styles.opsPanelTitle}>
+              <Network size={12} />
+              <span>TEAM HANDOFFS</span>
+              <small>{teamComms.length ? "LIVE" : "WAITING"}</small>
+            </div>
+            <div className={styles.opsStream}>
+              {(teamComms.length ? teamComms : [{
+                id: "no-handoffs",
+                type: "workforce.handoff",
+                domain: "CORE",
+                source: "jarvis.handoff",
+                importance: "BACKGROUND",
+                occurredAt: new Date(0).toISOString(),
+                receivedAt: new Date(0).toISOString(),
+                summary: floorActive
+                  ? "Agents are online. Handoffs will appear here as specialist work moves between departments."
+                  : "Start the workforce to begin live department handoffs.",
+              }]).map((event) => (
+                <div className={styles.opsLine} key={event.id}>
+                  <i />
+                  <div>
+                    <b>{event.summary.includes(":") ? event.summary.split(":")[0] : event.domain}</b>
+                    <span>{event.summary.includes(":") ? event.summary.slice(event.summary.indexOf(":") + 1).trim() : event.summary}</span>
+                  </div>
+                  <small>{event.id === "no-handoffs" ? "—" : timeAgo(event.occurredAt)}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className={styles.commsPanel}>
+            <div className={styles.opsPanelTitle}>
+              <Activity size={12} />
+              <span>PROOF OF WORK</span>
+              <small>{workProof.length ? "ACTIVITY" : "STANDBY"}</small>
+            </div>
+            <div className={styles.opsStream}>
+              {(workProof.length ? workProof : [{
+                id: "no-proof",
+                type: "workforce.waiting",
+                domain: "CORE",
+                source: "jarvis.workforce",
+                importance: "BACKGROUND",
+                occurredAt: new Date(0).toISOString(),
+                receivedAt: new Date(0).toISOString(),
+                summary: "No new completed work has been recorded yet.",
+              }]).map((event) => (
+                <div className={styles.opsLine} key={event.id}>
+                  <i />
+                  <div>
+                    <b>{event.type.replace(/[._]/g, " ").toUpperCase()}</b>
+                    <span>{event.summary}</span>
+                  </div>
+                  <small>{event.id === "no-proof" ? "—" : timeAgo(event.occurredAt)}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className={styles.indicatorLabPanel}>
+            <div className={styles.opsPanelTitle}>
+              <Eye size={12} />
+              <span>TRADING LEARNING LOOP</span>
+              <small>{indicatorEvidence ? "EVIDENCE IN" : "ARMED"}</small>
+            </div>
+            <div className={styles.indicatorFlow}>
+              <div><b>01</b><span>OBSERVER</span><small>live execution evidence</small></div>
+              <i>→</i>
+              <div><b>02</b><span>JOURNAL VISION</span><small>pictures + notes</small></div>
+              <i>→</i>
+              <div><b>03</b><span>BUILDER + QA</span><small>test indicator hypotheses</small></div>
+            </div>
+            <p>{indicatorEvidence
+              ? indicatorEvidence.summary
+              : "The indicator baseline stays unchanged until real trading evidence arrives. New trade pictures and notes are now routed into the same learning loop as Observer evidence."}</p>
+            <small className={styles.baselineLock}>BASELINE LOCKED · NEW CODE MUST BE VERSIONED + EVIDENCE-BACKED</small>
           </div>
         </div>
       </section>
