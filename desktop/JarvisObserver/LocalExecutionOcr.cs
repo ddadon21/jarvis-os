@@ -92,7 +92,7 @@ internal sealed class LocalExecutionOcr
     private static OcrRow? FindActiveOrderAnchor(List<OcrRow> rows, Point? pointer = null)
     {
         var candidates = rows.Where(row => Regex.IsMatch(row.Text,
-            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+\d|^\d+\s+(Buy|Sell)\b|^\d+\s+[+−-].*USD|^(Buy|Sell)$",
+            @"\b(change order type|change order quantity|add order on)\b|^(Buy|Sell)\s+\d|^\d+\s+(Buy|Sell)\b|^[+−-]?\d+(?:\.\d+)?\s+[+−-].*USD|^(Buy|Sell)$",
             RegexOptions.IgnoreCase)).Where(row => row.Y > 120).ToList();
         if (candidates.Count == 0) return null;
         if (pointer is not null)
@@ -368,14 +368,19 @@ internal sealed class LocalExecutionOcr
             .Select(group => group.First())
             .ToList();
 
-        if (reconstructed.Count == 0) return null;
-
-        var symbol = NormalizeContractRoot(reconstructed.Select(order => order.Contract).FirstOrDefault(contract => !string.IsNullOrWhiteSpace(contract))) ?? InferSymbol(rows, reconstructed.OrderByDescending(order => order.Anchor.Y).FirstOrDefault()?.Anchor);
+        // A filled TradingView position can be visible even when the chart does not
+        // expose explicit "Buy/Sell Stop/Limit" text. Detect the live position row
+        // before requiring reconstructed working orders.
+        var liveAnchor = FindLivePositionAnchor(rows);
+        var symbol = NormalizeContractRoot(reconstructed.Select(order => order.Contract).FirstOrDefault(contract => !string.IsNullOrWhiteSpace(contract)))
+            ?? InferSymbol(rows, liveAnchor ?? reconstructed.OrderByDescending(order => order.Anchor.Y).FirstOrDefault()?.Anchor);
 
         // A live position has its own quantity/P&L/close row. Exit orders alone
         // cannot prove a fill, and the exit's LIMIT/STOP is not the entry type.
         var live = TryBuildLivePosition(rows, reconstructed, symbol);
         if (live is not null) return live;
+
+        if (reconstructed.Count == 0) return null;
 
         // A live bracketed position presents as two same-side exit orders: one STOP
         // and one LIMIT, with the original opposite-side entry order gone.
@@ -480,33 +485,118 @@ internal sealed class LocalExecutionOcr
         double? SecondaryLimitPrice,
         OcrRow Anchor);
 
+    private static OcrRow? FindLivePositionAnchor(List<OcrRow> rows)
+    {
+        var candidates = LiveMoneyRows(rows);
+        var signedQuantity = candidates
+            .Where(item => item.QuantityToken.StartsWith("+", StringComparison.Ordinal)
+                || item.QuantityToken.StartsWith("-", StringComparison.Ordinal)
+                || item.QuantityToken.StartsWith("−", StringComparison.Ordinal))
+            .OrderByDescending(item => item.Row.Y)
+            .FirstOrDefault();
+        return signedQuantity?.Row ?? (candidates.Count == 1 ? candidates[0].Row : null);
+    }
+
+    private static List<LiveMoneyRow> LiveMoneyRows(List<OcrRow> rows)
+    {
+        return rows.Select(row =>
+        {
+            var match = Regex.Match(
+                row.Text.Trim(),
+                @"^([+−-]?\d+(?:\.\d+)?)\s+([+−-]?)\s*([\d,]+(?:\.\d+)?)\s+USD\s*[x×✕]?$",
+                RegexOptions.IgnoreCase);
+            if (!match.Success) return null;
+            var signedQuantity = ParseSignedNumber(match.Groups[1].Value);
+            var pnl = ParseNumber(match.Groups[3].Value.Replace(",", ""));
+            if (signedQuantity is null || pnl is null) return null;
+            if (match.Groups[2].Value is "-" or "−") pnl = -pnl;
+            return new LiveMoneyRow(row, match.Groups[1].Value, signedQuantity.Value, pnl.Value);
+        }).Where(item => item is not null).Cast<LiveMoneyRow>().ToList();
+    }
+
     private static string? TryBuildLivePosition(List<OcrRow> rows, List<ReconstructedOrder> orders, string? symbol)
     {
         if (rows.Any(row => Regex.IsMatch(row.Text, @"change order quantity|change order type", RegexOptions.IgnoreCase))) return null;
-        var candidates = rows.Select(row => new { row, match = Regex.Match(row.Text.Trim(),
-            @"^(\d+(?:\.\d+)?)\s+([+−-]?)\s*([\d,]+(?:\.\d+)?)\s+USD\s*[x×✕]?$", RegexOptions.IgnoreCase) })
-            .Where(item => item.match.Success).ToList();
-        // Draft risk/reward overlays contain two P&L labels; do not promote them.
-        var distinct = candidates.GroupBy(item => Math.Round(item.row.Y / 20)).Select(group => group.First()).ToList();
-        if (distinct.Count != 1) return null;
-        var position = distinct[0];
-        var quantity = ParseNumber(position.match.Groups[1].Value);
+
+        var moneyRows = LiveMoneyRows(rows);
+        if (moneyRows.Count == 0) return null;
+
+        // TradingView's filled-position chip uses a signed quantity for shorts
+        // (for example "-1 +620.00 USD"). Bracket risk/reward chips keep an
+        // unsigned quantity, so the signed row is the strongest position anchor.
+        var signedRows = moneyRows
+            .Where(item => item.QuantityToken.StartsWith("+", StringComparison.Ordinal)
+                || item.QuantityToken.StartsWith("-", StringComparison.Ordinal)
+                || item.QuantityToken.StartsWith("−", StringComparison.Ordinal))
+            .ToList();
+
+        LiveMoneyRow? position = signedRows.Count == 1
+            ? signedRows[0]
+            : moneyRows.Count == 1
+                ? moneyRows[0]
+                : null;
+        if (position is null) return null;
+
+        var quantity = Math.Abs(position.SignedQuantity);
+        if (quantity <= 0 || symbol is null) return null;
+
         var exits = orders.Where(order => order.Quantity == quantity).ToList();
         var actions = exits.Select(order => order.Action).Distinct().ToList();
-        if (actions.Count != 1 || exits.Count == 0) return null;
-        var side = actions[0] == "SELL" ? "LONG" : "SHORT";
-        var entry = FindOrderPrice(rows, position.row);
-        if (entry is null || symbol is null || quantity is null || quantity <= 0) return null;
-        var pnl = ParseNumber(position.match.Groups[3].Value);
-        if (position.match.Groups[2].Value is "-" or "−") pnl = -pnl;
+
+        string? side = position.SignedQuantity < 0
+            ? "SHORT"
+            : position.QuantityToken.StartsWith("+", StringComparison.Ordinal)
+                ? "LONG"
+                : actions.Count == 1
+                    ? (actions[0] == "SELL" ? "LONG" : "SHORT")
+                    : null;
+        if (side is null) return null;
+
+        var entry = FindOrderPrice(rows, position.Row);
+        if (entry is null) return null;
+
+        // In the compact chart-position widget the stop/target rows may only show
+        // quantity + projected USD loss/profit. Recover those prices directly.
+        var stop = exits.FirstOrDefault(order => order.Type == "STOP")?.Price
+            ?? FindLiveBracketPrice(rows, position.Row, quantity, negative: true);
+        var target = exits.FirstOrDefault(order => order.Type == "LIMIT")?.Price
+            ?? FindLiveBracketPrice(rows, position.Row, quantity, negative: false);
+
         return string.Join("|", new[] {
             "JARVIS_OCR_EXECUTION", "STATUS=OPEN", $"SYMBOL={symbol}", $"SIDE={side}",
             $"QTY={Format(quantity)}", "TYPE=", $"ENTRY={Format(entry)}",
-            $"CURRENT={Format(FindCurrentPrice(rows, position.row))}",
-            $"STOP={Format(exits.FirstOrDefault(order => order.Type == "STOP")?.Price)}",
-            $"TARGET={Format(exits.FirstOrDefault(order => order.Type == "LIMIT")?.Price)}", $"PNL={Format(pnl)}"
+            $"CURRENT={Format(FindCurrentPrice(rows, position.Row))}",
+            $"STOP={Format(stop)}",
+            $"TARGET={Format(target)}", $"PNL={Format(position.Pnl)}"
         });
     }
+
+    private static double? FindLiveBracketPrice(List<OcrRow> rows, OcrRow positionAnchor, double quantity, bool negative)
+    {
+        var candidates = LiveMoneyRows(rows)
+            .Where(item => !ReferenceEquals(item.Row, positionAnchor))
+            .Where(item => Math.Abs(Math.Abs(item.SignedQuantity) - quantity) < 0.0001)
+            .Where(item => negative ? item.Pnl < 0 : item.Pnl > 0)
+            .OrderBy(item => VerticalDistance(item.Row, positionAnchor))
+            .ToList();
+
+        foreach (var candidate in candidates)
+        {
+            var price = FindOrderPrice(rows, candidate.Row) ?? FindNearestPriceWide(rows, candidate.Row);
+            if (price is not null) return price;
+        }
+        return null;
+    }
+
+    private static double? ParseSignedNumber(string raw)
+    {
+        var normalized = raw.Replace("−", "-").Replace(",", "");
+        return double.TryParse(normalized, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+    }
+
+    private sealed record LiveMoneyRow(OcrRow Row, string QuantityToken, double SignedQuantity, double Pnl);
 
     private static double? FindOrderPrice(List<OcrRow> rows, OcrRow anchor)
     {
