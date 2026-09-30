@@ -211,7 +211,15 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
         source: task.source,
       }),
     }));
-    const operatingSystem = existing.operatingSystem
+    const needsInstitutionalMigration =
+      !existing.operatingSystem?.truth ||
+      !existing.operatingSystem?.worldState ||
+      !existing.operatingSystem?.decisionMemory ||
+      !existing.operatingSystem?.scenarios ||
+      !existing.operatingSystem?.opportunities ||
+      !existing.operatingSystem?.metrics ||
+      !existing.operatingSystem?.capitalDesk;
+    const operatingSystem = existing.operatingSystem && !needsInstitutionalMigration
       ? {
           ...existing.operatingSystem,
           governance: existing.operatingSystem.governance ?? BALANCED_GOVERNANCE,
@@ -219,7 +227,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
       : buildOperatingSystem({
           previous: existing,
           agents,
-          tasks,
+          tasks: applyTruthVerification(tasks, new Date().toISOString()),
           executiveFocus: existing.executiveSummary || "Close the highest-risk open loop before expanding.",
         });
     const changed =
@@ -227,6 +235,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
       objectives.length !== existing.objectives.length ||
       !Array.isArray(existing.tasks) ||
       !existing.operatingSystem ||
+      needsInstitutionalMigration ||
       tasks.some((task, index) =>
         task.definitionOfDone !== existing.tasks?.[index]?.definitionOfDone ||
         !existing.tasks?.[index]?.governance
@@ -420,6 +429,44 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   });
   await emitHandoff("RESEARCH", "BUILDER", "SENTRYOPS", sentryPulse.nextMove.title + " · " + sentryResult);
 
+  const opportunityPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 } as const;
+  const topOpportunity = [...sentryPulse.opportunities]
+    .sort((a, b) => opportunityPriority[b.priority] - opportunityPriority[a.priority])[0] ?? null;
+  if (topOpportunity) {
+    const opportunitySource = `jarvis.opportunity:${sentryPulse.id}`;
+    const existingOpportunityTask = tasks.find((task) => task.source === opportunitySource);
+    if (!existingOpportunityTask) {
+      const opportunityTask = ensureTask(tasks, {
+        title: `Validate opportunity signal: ${topOpportunity.title}`,
+        domain: "SENTRYOPS",
+        assignedTo: "EXECUTIVE",
+        priority: topOpportunity.priority === "HIGH" ? "HIGH" : "MEDIUM",
+        permissionRequired: "ANALYZE",
+        objectiveId: sentryObjective?.id ?? null,
+        source: opportunitySource,
+        definitionOfDone: "Research evidence is translated into a clear executive next check, without converting an interesting signal into an external commitment.",
+      });
+      tasks = opportunityTask.tasks;
+      tasks = updateTask(tasks, opportunityTask.task.id, {
+        status: "DONE",
+        result: `Opportunity triaged for executive review. ${topOpportunity.whyItMatters} Next check: ${sentryPulse.nextMove.title}`,
+        evidence: [
+          `researchPulse=${sentryPulse.id}`,
+          `priority=${topOpportunity.priority}`,
+          `sources=${sentryPulse.sourceCount}`,
+          topOpportunity.evidence.slice(0, 240),
+        ],
+        blockedReason: null,
+      });
+      await emitHandoff(
+        "RESEARCH",
+        "EXECUTIVE",
+        "SENTRYOPS",
+        `Opportunity triaged: ${topOpportunity.title} · ${topOpportunity.whyItMatters}`,
+      );
+    }
+  }
+
   tasks = updateTask(tasks, tradingTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   const tradingRuntime = await getTradingState();
   const observerOnline =
@@ -612,8 +659,13 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     });
   }
 
+  tasks = applyTruthVerification(tasks, now);
   tasks = updateTask(tasks, qaTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
-  const qa = auditCycle(agents, tasks);
+  const qa = auditCycle(
+    agents,
+    tasks,
+    activeBuildObjective ?? previous.objectives.find((objective) => objective.status === "ACTIVE") ?? null,
+  );
   agents = setAgent(agents, "JARVIS_QA", {
     status: qa.hasErrors ? "ERROR" : qa.hasBlockers ? "BLOCKED" : "DONE",
     lastRanAt: now,
@@ -626,6 +678,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     evidence: qa.evidence,
     blockedReason: qa.hasBlockers && !qa.hasErrors ? qa.blockedReason : qa.hasErrors ? "At least one workforce agent reported an error." : null,
   });
+  tasks = applyTruthVerification(tasks, now);
   await emitHandoff("QA", "EXECUTIVE", "CORE", qa.summary);
 
   const executiveSummary = synthesizeExecutiveSummary({
@@ -642,6 +695,10 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     agents,
     tasks,
     executiveFocus,
+    finance,
+    sentryPulse,
+    tradingRuntime,
+    integrationRegistry,
   });
 
   agents = setAgent(agents, "EXECUTIVE", {
@@ -965,8 +1022,281 @@ function defaultDefinitionOfDone(input: { title: string; assignedTo?: string; do
   ].join(", ") + ".";
 }
 
+function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
+  return tasks.map((task) => {
+    if (task.status !== "DONE") {
+      if (task.status === "FAILED" && task.result) {
+        return {
+          ...task,
+          verification: {
+            state: "DISPUTED" as const,
+            checkedBy: task.assignedTo === "JARVIS_QA" ? "EXECUTIVE" as const : "JARVIS_QA" as const,
+            checkedAt,
+            rationale: "The attempted outcome did not complete cleanly; the result is retained as failure evidence rather than accepted as verified success.",
+            evidenceCount: task.evidence.length,
+          },
+        };
+      }
+      return task;
+    }
+
+    const evidence = task.evidence.filter((item) => item.trim().length > 0);
+    const hasResult = Boolean(task.result?.trim());
+    const hasDefinition = Boolean(task.definitionOfDone?.trim());
+    const state =
+      hasResult && hasDefinition && evidence.length > 0 ? "VERIFIED" as const :
+      evidence.length > 0 ? "OBSERVED" as const :
+      "CLAIMED" as const;
+    const checkedBy = task.assignedTo === "JARVIS_QA" ? "EXECUTIVE" as const : "JARVIS_QA" as const;
+
+    return {
+      ...task,
+      verification: {
+        state,
+        checkedBy,
+        checkedAt,
+        rationale:
+          state === "VERIFIED"
+            ? "Verifier found a recorded outcome, a definition of done, and supporting evidence. External facts remain bounded by the freshness and quality of their cited source."
+            : state === "OBSERVED"
+              ? "Evidence exists, but the outcome or completion standard is incomplete."
+              : "The agent reported completion without enough recorded evidence for independent verification.",
+        evidenceCount: evidence.length,
+      },
+    };
+  });
+}
+
 function riskRank(value: WorkforceGap["risk"]) {
   return value === "CRITICAL" ? 4 : value === "HIGH" ? 3 : value === "MEDIUM" ? 2 : 1;
+}
+
+function buildTruthLayer(tasks: AgentTask[]): WorkforceOperatingSystem["truth"] {
+  const completed = tasks
+    .filter((task) => task.status === "DONE")
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  const stateOf = (task: AgentTask) => task.verification?.state ?? (task.evidence.length ? "OBSERVED" as const : "CLAIMED" as const);
+  const verified = completed.filter((task) => stateOf(task) === "VERIFIED").length;
+  const observed = completed.filter((task) => stateOf(task) === "OBSERVED").length;
+  const claimed = completed.filter((task) => stateOf(task) === "CLAIMED").length;
+  const disputed = tasks.filter((task) => task.verification?.state === "DISPUTED").length;
+  const verificationRate = completed.length ? Math.round((verified / completed.length) * 100) : 100;
+
+  return {
+    verified,
+    observed,
+    claimed,
+    disputed,
+    verificationRate,
+    recent: completed.slice(0, 10).map((task) => ({
+      taskId: task.id,
+      title: task.title,
+      state: stateOf(task),
+      checkedBy: task.verification?.checkedBy ?? null,
+      rationale: task.verification?.rationale ?? "No verifier rationale recorded yet.",
+      evidenceCount: task.verification?.evidenceCount ?? task.evidence.length,
+      updatedAt: task.updatedAt,
+    })),
+  };
+}
+
+function buildWorldState(input: {
+  agents: AgentState[];
+  executiveFocus: string;
+  finance?: Awaited<ReturnType<typeof getOrSeedFinanceState>>;
+  sentryPulse?: NonNullable<Awaited<ReturnType<typeof getLatestPulse>>>;
+  tradingRuntime?: Awaited<ReturnType<typeof getTradingState>>;
+  now: string;
+}): WorkforceOperatingSystem["worldState"] {
+  const coreAgents = input.agents.filter((agent) => agent.domain === "CORE");
+  const coreError = coreAgents.some((agent) => agent.status === "ERROR");
+  const coreBlocked = coreAgents.some((agent) => agent.status === "BLOCKED");
+  const tradingConnection = input.tradingRuntime?.account.connection;
+  const observedAt = input.tradingRuntime?.observer?.observedAt ?? input.tradingRuntime?.account.lastObservedAt ?? input.now;
+
+  return {
+    asOf: input.now,
+    mission: input.executiveFocus,
+    domains: [
+      {
+        domain: "CORE",
+        status: coreError ? "DEGRADED" : coreBlocked ? "BLOCKED" : "HEALTHY",
+        truth: coreError ? "DISPUTED" : "VERIFIED",
+        summary: coreError
+          ? "One or more core agents reported an error."
+          : coreBlocked
+            ? "Core operations are live with at least one blocked dependency."
+            : "Core workforce, governance, and runtime checks are operating without a reported core error.",
+        source: "workforce.agent-health",
+        asOf: input.now,
+      },
+      {
+        domain: "FINANCE",
+        status: input.finance ? "HEALTHY" : "UNKNOWN",
+        truth: input.finance ? (input.finance.mode === "DIRECT" ? "VERIFIED" : "OBSERVED") : "CLAIMED",
+        summary: input.finance
+          ? `${input.finance.mode} finance state · liquidity ${input.finance.metrics.liquidity.toFixed(2)} · personal debt ${input.finance.metrics.personalDebt.toFixed(2)}.`
+          : "Finance runtime has not been loaded into this bootstrap operating picture.",
+        source: input.finance?.source ?? "finance.runtime",
+        asOf: input.finance?.asOf ?? input.now,
+      },
+      {
+        domain: "SENTRYOPS",
+        status: !input.sentryPulse ? "UNKNOWN" : input.sentryPulse.status === "OK" ? "HEALTHY" : input.sentryPulse.status === "DEGRADED" ? "DEGRADED" : "BLOCKED",
+        truth: !input.sentryPulse ? "CLAIMED" : input.sentryPulse.status === "OK" && input.sentryPulse.sourceCount > 0 ? "VERIFIED" : input.sentryPulse.status === "ERROR" ? "DISPUTED" : "OBSERVED",
+        summary: input.sentryPulse
+          ? `${input.sentryPulse.summary} Sources: ${input.sentryPulse.sourceCount}.`
+          : "No current SentryOps research pulse is loaded.",
+        source: "jarvis.research-pulse",
+        asOf: input.sentryPulse?.ranAt ?? input.now,
+      },
+      {
+        domain: "TRADING",
+        status: !input.tradingRuntime ? "UNKNOWN" : tradingConnection === "OBSERVING" ? "HEALTHY" : tradingConnection === "DEGRADED" ? "DEGRADED" : "BLOCKED",
+        truth: input.tradingRuntime?.observer?.observedAt ? "OBSERVED" : "CLAIMED",
+        summary: input.tradingRuntime
+          ? `Observer connection ${tradingConnection}. Latest symbol ${input.tradingRuntime.observer?.symbol ?? "none"}; state ${input.tradingRuntime.observer?.status ?? "UNKNOWN"}.`
+          : "Trading runtime is not loaded into this bootstrap operating picture.",
+        source: "trading.observer",
+        asOf: observedAt,
+      },
+      {
+        domain: "LIFE",
+        status: "UNKNOWN",
+        truth: "CLAIMED",
+        summary: "Life remains a user-facing domain without a server-side telemetry feed in the workforce cycle. JARVIS will not invent live status.",
+        source: "life.no-live-feed",
+        asOf: input.now,
+      },
+    ],
+  };
+}
+
+function buildScenarioBook(input: {
+  finance?: Awaited<ReturnType<typeof getOrSeedFinanceState>>;
+  sentryPulse?: NonNullable<Awaited<ReturnType<typeof getLatestPulse>>>;
+  integrationRegistry?: Awaited<ReturnType<typeof getJarvisIntegrationRegistry>>;
+}): WorkforceOperatingSystem["scenarios"] {
+  const degraded = input.integrationRegistry?.filter((item) => item.state === "DEGRADED") ?? [];
+  const liquidity = input.finance?.metrics.liquidity ?? null;
+  const debt = input.finance?.metrics.personalDebt ?? null;
+  return [
+    {
+      id: "scenario-provider-outage",
+      title: "Critical provider or integration outage",
+      trigger: degraded.length ? `Active degradation detected: ${degraded.map((item) => item.label).join(", ")}.` : "A critical runtime, data, or integration provider becomes unavailable.",
+      impact: "Agent evidence can go stale, automation can stall, and false-success risk rises if the system keeps acting as though the provider is healthy.",
+      response: "Degrade explicitly, preserve durable state, queue retryable work, isolate the failed dependency, and escalate only the action that requires executive authority.",
+      owner: "IT_INFRA",
+      status: degraded.length ? "ACTIVE" : "WATCH",
+    },
+    {
+      id: "scenario-sentryops-surge",
+      title: "SentryOps demand outruns delivery capacity",
+      trigger: "Multiple agencies or pilots require implementation in the same window.",
+      impact: "Integration, support, security, and onboarding load can expand faster than product capacity.",
+      response: "Model delivery capacity before commitments, standardize the integration path, protect reliability, and sequence customers by repeatability and strategic value.",
+      owner: "EXECUTIVE",
+      status: input.sentryPulse?.opportunities.some((item) => item.priority === "HIGH") ? "ACTIVE" : "WATCH",
+    },
+    {
+      id: "scenario-cashflow-shock",
+      title: "Variable income pauses while obligations continue",
+      trigger: "Trading or other variable cash inflow pauses for a sustained period.",
+      impact: liquidity === null || debt === null
+        ? "Finance state is unavailable, so JARVIS cannot quantify the immediate capital pressure."
+        : `Current runtime shows ${liquidity.toFixed(2)} liquidity and ${debt.toFixed(2)} personal debt; a cash-flow pause would increase the importance of liquidity discipline and high-ROI deployment.`,
+      response: "Preserve required liquidity, avoid unmeasured expansion, prioritize obligations and the highest-evidence cash-generating work, then re-open discretionary deployment as the operating picture improves.",
+      owner: "FINANCE_CFO",
+      status: debt !== null && liquidity !== null && debt > liquidity ? "ACTIVE" : "WATCH",
+    },
+  ];
+}
+
+function buildOpportunityBook(
+  pulse: NonNullable<Awaited<ReturnType<typeof getLatestPulse>>> | undefined,
+  previous: WorkforceOperatingSystem["opportunities"],
+  now: string,
+): WorkforceOperatingSystem["opportunities"] {
+  const current = (pulse?.opportunities ?? []).map((item) => ({
+    id: `sentry:${item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72)}`,
+    title: item.title,
+    domain: "SENTRYOPS" as const,
+    priority: item.priority,
+    status: item.priority === "HIGH" ? "VALIDATE" as const : "WATCH" as const,
+    whyItMatters: item.whyItMatters,
+    evidence: item.evidence,
+    nextAction: pulse?.nextMove.title ?? "Validate the signal against a second source and a concrete buyer/problem path.",
+    updatedAt: pulse?.ranAt ?? now,
+  }));
+  const currentIds = new Set(current.map((item) => item.id));
+  const carry = previous
+    .filter((item) => !currentIds.has(item.id) && item.status !== "REJECTED")
+    .map((item) => ({ ...item, status: "WATCH" as const }))
+    .slice(0, 6);
+  return [...current, ...carry].slice(0, 12);
+}
+
+function buildOperatingMetrics(
+  tasks: AgentTask[],
+  gaps: WorkforceGap[],
+  opportunities: WorkforceOperatingSystem["opportunities"],
+): WorkforceOperatingSystem["metrics"] {
+  const now = Date.now();
+  const done = tasks.filter((task) => task.status === "DONE");
+  const verified = done.filter((task) => task.verification?.state === "VERIFIED");
+  const autonomousDone = done.filter((task) => task.governance?.action === "AUTO_PROCEED");
+  const open = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
+  const stale = open.filter((task) => Number.isFinite(Date.parse(task.updatedAt)) && now - Date.parse(task.updatedAt) > 24 * 60 * 60 * 1000);
+  const closedLast24h = tasks.filter((task) =>
+    ["DONE", "FAILED"].includes(task.status) &&
+    Number.isFinite(Date.parse(task.updatedAt)) &&
+    now - Date.parse(task.updatedAt) <= 24 * 60 * 60 * 1000
+  ).length;
+  return {
+    verificationRate: done.length ? Math.round((verified.length / done.length) * 100) : 100,
+    autonomousCompletionRate: done.length ? Math.round((autonomousDone.length / done.length) * 100) : 0,
+    openLoops: open.length,
+    staleOpenTasks: stale.length,
+    waitingOnDwight: open.filter((task) => task.status === "WAITING_APPROVAL").length,
+    closedLast24h,
+    activeGaps: gaps.filter((gap) => gap.status !== "RESOLVED").length,
+    activeOpportunities: opportunities.filter((item) => item.status !== "REJECTED").length,
+  };
+}
+
+function buildDecisionMemory(input: {
+  previous: WorkforceOperatingSystem["decisionMemory"];
+  now: string;
+  executiveFocus: string;
+  expansionGate: boolean;
+  avoidanceGap: WorkforceGap | undefined;
+  truthRate: number;
+  activeOpportunities: number;
+  activeObjectiveId: string | null;
+}): WorkforceOperatingSystem["decisionMemory"] {
+  const last = input.previous[0];
+  if (last?.decision === input.executiveFocus) return input.previous.slice(0, 40);
+  const reason = input.expansionGate && input.avoidanceGap
+    ? `A ${input.avoidanceGap.risk.toLowerCase()} unresolved gap is constraining clean expansion: ${input.avoidanceGap.title}.`
+    : "The operating picture does not show a higher-risk unresolved gap, so the executive lane can advance the highest-leverage objective.";
+  const record = {
+    id: crypto.randomUUID(),
+    at: input.now,
+    owner: "EXECUTIVE" as const,
+    decision: input.executiveFocus,
+    reason,
+    expectedOutcome: input.expansionGate && input.avoidanceGap
+      ? input.avoidanceGap.definitionOfDone
+      : "Move the approved mission forward, attach evidence, and re-evaluate on the next cycle.",
+    evidence: [
+      `truthVerificationRate=${input.truthRate}%`,
+      `activeOpportunities=${input.activeOpportunities}`,
+      input.avoidanceGap ? `topGap=${input.avoidanceGap.id}` : "topGap=none",
+    ],
+    objectiveId: input.activeObjectiveId,
+  };
+  return [record, ...input.previous].slice(0, 40);
 }
 
 function buildOperatingSystem(input: {
@@ -974,6 +1304,10 @@ function buildOperatingSystem(input: {
   agents: AgentState[];
   tasks: AgentTask[];
   executiveFocus: string;
+  finance?: Awaited<ReturnType<typeof getOrSeedFinanceState>>;
+  sentryPulse?: NonNullable<Awaited<ReturnType<typeof getLatestPulse>>>;
+  tradingRuntime?: Awaited<ReturnType<typeof getTradingState>>;
+  integrationRegistry?: Awaited<ReturnType<typeof getJarvisIntegrationRegistry>>;
 }): WorkforceOperatingSystem {
   const now = new Date().toISOString();
   const prior = input.previous?.operatingSystem?.gaps ?? [];
@@ -1035,12 +1369,59 @@ function buildOperatingSystem(input: {
   const unresolved = gapList.filter((gap) => gap.status !== "RESOLVED");
   const expansionGate = unresolved.some((gap) => gap.risk === "CRITICAL" || gap.risk === "HIGH");
   const avoidanceGap = unresolved[0];
+  const truth = buildTruthLayer(input.tasks);
+  const opportunities = buildOpportunityBook(input.sentryPulse, input.previous?.operatingSystem?.opportunities ?? [], now);
+  const scenarios = buildScenarioBook({
+    finance: input.finance,
+    sentryPulse: input.sentryPulse,
+    integrationRegistry: input.integrationRegistry,
+  });
+  const worldState = buildWorldState({
+    agents: input.agents,
+    executiveFocus: input.executiveFocus,
+    finance: input.finance,
+    sentryPulse: input.sentryPulse,
+    tradingRuntime: input.tradingRuntime,
+    now,
+  });
+  const metrics = buildOperatingMetrics(input.tasks, gapList, opportunities);
+  const decisionMemory = buildDecisionMemory({
+    previous: input.previous?.operatingSystem?.decisionMemory ?? [],
+    now,
+    executiveFocus: input.executiveFocus,
+    expansionGate,
+    avoidanceGap,
+    truthRate: truth.verificationRate,
+    activeOpportunities: opportunities.filter((item) => item.status !== "REJECTED").length,
+    activeObjectiveId: input.previous?.objectives.find((objective) => objective.status === "ACTIVE")?.id ?? null,
+  });
+  const financeLiquidity = input.finance?.metrics.liquidity ?? 0;
+  const financeDebt = input.finance?.metrics.personalDebt ?? 0;
 
   return {
     doctrine: OPERATING_DOCTRINE,
     gaps: gapList,
     boringQueue: BORING_WORK,
     governance: BALANCED_GOVERNANCE,
+    truth,
+    worldState,
+    decisionMemory,
+    scenarios,
+    opportunities,
+    metrics,
+    capitalDesk: {
+      asOf: input.finance?.asOf ?? now,
+      mode: "CONTROLLED_AGGRESSION",
+      liquidity: financeLiquidity,
+      personalDebt: financeDebt,
+      currentStage: input.finance?.currentStage ?? "Finance runtime not loaded in this bootstrap state.",
+      constraint: input.finance
+        ? financeDebt > 0
+          ? "Personal debt remains an active claim on capital. Every deployment should be compared against debt reduction, required liquidity, and expected strategic return."
+          : "No personal debt pressure is present in the current runtime snapshot. Preserve required liquidity and deploy capital only against evidence-backed objectives."
+        : "Live finance state is not loaded in this bootstrap state; do not invent deployable capital.",
+      nextMove: input.finance ? financeDirective(input.finance) : "Load the finance runtime before making a capital-allocation call.",
+    },
     chiefOfStaff: {
       meaningfulTasks: meaningful.length,
       blockedTasks: blocked.length,
@@ -1072,7 +1453,7 @@ function buildPlanForObjective(objective: WorkforceObjective) {
   ].join(" ");
 }
 
-function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
+function auditCycle(agents: AgentState[], tasks: AgentTask[], objective: WorkforceObjective | null) {
   const failures = agents.filter((agent) => agent.status === "ERROR");
   const blockers = agents.filter((agent) => agent.status === "BLOCKED");
   const waitingApproval = tasks.filter((task) => task.status === "WAITING_APPROVAL");
@@ -1086,6 +1467,15 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     (task.governance?.action === "BLOCKED" && !["BLOCKED", "FAILED"].includes(task.status)) ||
     (task.governance?.action === "WAIT_FOR_DWIGHT" && !["WAITING_APPROVAL", "BLOCKED", "FAILED"].includes(task.status)),
   );
+  const recentUnverified = tasks.filter((task) =>
+    task.status === "DONE" &&
+    task.verification?.state !== "VERIFIED" &&
+    Number.isFinite(Date.parse(task.updatedAt)) &&
+    Date.now() - Date.parse(task.updatedAt) <= 24 * 60 * 60 * 1000
+  );
+  const adversarialCheck = objective
+    ? `Red-team pressure: prove the evidence behind "${objective.title}", name the dependency most likely to fail, preserve a rollback path, and do not confuse activity with the success definition.`
+    : "Red-team pressure: challenge the highest-leverage assumption before expanding scope; require evidence, a measurable result, and a rollback path.";
 
   const evidence = [
     `errors=${failures.length}`,
@@ -1094,6 +1484,8 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     `stillRunning=${running.length}`,
     `missingDefinitionOfDone=${openWithoutDone.length}`,
     `governanceViolations=${governanceViolations.length}`,
+    `recentUnverified=${recentUnverified.length}`,
+    `redTeam=${objective?.id ?? "core"}`,
   ];
 
   if (governanceViolations.length) {
@@ -1107,11 +1499,22 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     };
   }
 
+  if (recentUnverified.length) {
+    return {
+      hasErrors: false,
+      hasBlockers: true,
+      summary: `QA rejected ${recentUnverified.length} recent completion claim${recentUnverified.length === 1 ? "" : "s"} because the proof state is not VERIFIED. ${adversarialCheck}`,
+      nextCheck: "Attach evidence or restore the definition of done, then let QA re-check the completion claim.",
+      evidence,
+      blockedReason: recentUnverified.map((task) => `${task.assignedTo}: ${task.title} [${task.verification?.state ?? "CLAIMED"}]`).join(" | "),
+    };
+  }
+
   if (failures.length) {
     return {
       hasErrors: true,
       hasBlockers: blockers.length > 0,
-      summary: `QA found ${failures.length} agent error${failures.length === 1 ? "" : "s"}: ${failures.map((agent) => agent.id).join(", ")}. JARVIS must not report a clean cycle.`,
+      summary: `QA found ${failures.length} agent error${failures.length === 1 ? "" : "s"}: ${failures.map((agent) => agent.id).join(", ")}. JARVIS must not report a clean cycle. ${adversarialCheck}`,
       nextCheck: "Re-check failed agents after their provider or data dependency recovers.",
       evidence,
       blockedReason: failures.map((agent) => `${agent.id}: ${agent.lastResult}`).join(" | "),
@@ -1122,7 +1525,7 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     return {
       hasErrors: false,
       hasBlockers: true,
-      summary: `QA found no agent errors, but ${blockers.length} agent${blockers.length === 1 ? "" : "s"} are blocked, ${waitingApproval.length} task${waitingApproval.length === 1 ? "" : "s"} await approval, and ${openWithoutDone.length} open task${openWithoutDone.length === 1 ? "" : "s"} lack a definition of done.`,
+      summary: `QA found no agent errors, but ${blockers.length} agent${blockers.length === 1 ? "" : "s"} are blocked, ${waitingApproval.length} task${waitingApproval.length === 1 ? "" : "s"} await approval, and ${openWithoutDone.length} open task${openWithoutDone.length === 1 ? "" : "s"} lack a definition of done. ${adversarialCheck}`,
       nextCheck: "Watch blocked dependencies and surface approval requests without bypassing them.",
       evidence,
       blockedReason:
@@ -1134,7 +1537,7 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
   return {
     hasErrors: false,
     hasBlockers: false,
-    summary: "QA verified the cycle: no agent errors, no blocked agents, and no approval-gated tasks were hidden.",
+    summary: `QA verified the cycle: no agent errors, no blocked agents, no hidden approval-gated work, and recent completion claims passed the proof-state check. ${adversarialCheck}`,
     nextCheck: "Continue checking evidence freshness and task outcomes on the next cycle.",
     evidence,
     blockedReason: null,
