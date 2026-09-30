@@ -1,5 +1,3 @@
-import type { WorkforceOperatingSystem } from "./jarvis-runtime";
-
 export const JARVIS_OPERATING_DOCTRINE = [
   "See the mission.",
   "Find the gaps.",
@@ -8,6 +6,17 @@ export const JARVIS_OPERATING_DOCTRINE = [
   "Verify the result.",
   "Then expand.",
 ] as const;
+
+export type JarvisGovernancePolicy = {
+  mode: "BALANCED_AUTONOMY";
+  standard: string;
+  autoProceed: string[];
+  askDwightFirst: string[];
+  neverWithoutExplicitUnlock: string[];
+  changeControl: string;
+  scopeControl: string;
+  exceptionRule: string;
+};
 
 export const JARVIS_BALANCED_GOVERNANCE = {
   mode: "BALANCED_AUTONOMY",
@@ -31,7 +40,7 @@ export const JARVIS_BALANCED_GOVERNANCE = {
   changeControl: "Observe → reproduce → diagnose → smallest reversible intervention → measure → QA → keep or revert. Redesign is the last resort after repeated evidence.",
   scopeControl: "Agents and JARVIS may move fast inside approved objectives. New ideas go to Vision/Backlog; no subsystem may create a new mission or materially widen scope without Dwight.",
   exceptionRule: "Dwight can explicitly authorize expansion; hard safety and permission boundaries still remain in force.",
-} satisfies NonNullable<WorkforceOperatingSystem["governance"]>;
+} satisfies JarvisGovernancePolicy;
 
 export const JARVIS_AUTHORITY_CLASSES = [
   {
