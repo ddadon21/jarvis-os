@@ -84,6 +84,69 @@ export type WorkforceGovernanceDecision = {
   evaluatedAt: string;
 };
 
+export type TruthState = "CLAIMED" | "OBSERVED" | "VERIFIED" | "DISPUTED";
+
+export type TaskVerification = {
+  state: TruthState;
+  checkedBy: AgentId | null;
+  checkedAt: string | null;
+  rationale: string;
+  evidenceCount: number;
+};
+
+export type WorkforceWorldSignal = {
+  domain: RuntimeDomain;
+  status: "HEALTHY" | "DEGRADED" | "BLOCKED" | "UNKNOWN";
+  truth: TruthState;
+  summary: string;
+  source: string;
+  asOf: string;
+};
+
+export type WorkforceDecisionMemory = {
+  id: string;
+  at: string;
+  owner: AgentId;
+  decision: string;
+  reason: string;
+  expectedOutcome: string;
+  evidence: string[];
+  objectiveId: string | null;
+};
+
+export type WorkforceScenario = {
+  id: string;
+  title: string;
+  trigger: string;
+  impact: string;
+  response: string;
+  owner: AgentId;
+  status: "WATCH" | "ACTIVE" | "RESOLVED";
+};
+
+export type WorkforceOpportunity = {
+  id: string;
+  title: string;
+  domain: RuntimeDomain;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+  status: "WATCH" | "VALIDATE" | "READY" | "REJECTED";
+  whyItMatters: string;
+  evidence: string;
+  nextAction: string;
+  updatedAt: string;
+};
+
+export type WorkforceMetrics = {
+  verificationRate: number;
+  autonomousCompletionRate: number;
+  openLoops: number;
+  staleOpenTasks: number;
+  waitingOnDwight: number;
+  closedLast24h: number;
+  activeGaps: number;
+  activeOpportunities: number;
+};
+
 export type AgentTask = {
   id: string;
   title: string;
@@ -101,6 +164,7 @@ export type AgentTask = {
   blockedReason: string | null;
   definitionOfDone?: string;
   governance?: WorkforceGovernanceDecision;
+  verification?: TaskVerification;
 };
 
 export type WorkforceGap = {
@@ -127,6 +191,40 @@ export type WorkforceOperatingSystem = {
     changeControl: string;
     scopeControl: string;
     exceptionRule: string;
+  };
+  truth: {
+    verified: number;
+    observed: number;
+    claimed: number;
+    disputed: number;
+    verificationRate: number;
+    recent: Array<{
+      taskId: string;
+      title: string;
+      state: TruthState;
+      checkedBy: AgentId | null;
+      rationale: string;
+      evidenceCount: number;
+      updatedAt: string;
+    }>;
+  };
+  worldState: {
+    asOf: string;
+    mission: string;
+    domains: WorkforceWorldSignal[];
+  };
+  decisionMemory: WorkforceDecisionMemory[];
+  scenarios: WorkforceScenario[];
+  opportunities: WorkforceOpportunity[];
+  metrics: WorkforceMetrics;
+  capitalDesk: {
+    asOf: string;
+    mode: "CONTROLLED_AGGRESSION";
+    liquidity: number;
+    personalDebt: number;
+    currentStage: string;
+    constraint: string;
+    nextMove: string;
   };
   chiefOfStaff: {
     meaningfulTasks: number;
