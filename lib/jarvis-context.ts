@@ -4,6 +4,7 @@ import { getFinanceState, getLatestPulse, getRecentEvents, getWorkforceState } f
 import { getOrSeedFinanceState } from "./finance-live";
 import { getOrSeedWorkforceState } from "./jarvis-workforce";
 import { getJarvisIntegrationRegistry } from "./jarvis-integration-registry";
+import { getLocalAgentPresence } from "./trading-device-link";
 import { getTradingState } from "./trading-runtime";
 import { getTradingPayoutSummary } from "./trading-payouts";
 import { getAssistantRuntimeState, getAssistantAlerts } from "./jarvis-assistant-runtime";
@@ -142,7 +143,7 @@ function compactWorkforce(value: Awaited<ReturnType<typeof getWorkforceState>>) 
 }
 
 export async function getJarvisRuntimeContext() {
-  const [finance, trading, payouts, assistant, workforce, pulse, events, integrations] = await Promise.all([
+  const [finance, trading, payouts, assistant, workforce, pulse, events, integrations, localAgent] = await Promise.all([
     safe(() => getOrSeedFinanceState()),
     safe(() => getTradingState()),
     safe(() => getTradingPayoutSummary("ALL")),
@@ -151,9 +152,10 @@ export async function getJarvisRuntimeContext() {
     safe(() => getLatestPulse()),
     safe(() => getRecentEvents()),
     safe(() => getJarvisIntegrationRegistry()),
+    safe(() => getLocalAgentPresence()),
   ]);
 
-  const core = finance.ok && trading.ok && assistant.ok && workforce.ok && pulse.ok && events.ok && integrations.ok
+  const core = finance.ok && trading.ok && assistant.ok && workforce.ok && pulse.ok && events.ok && integrations.ok && localAgent.ok
     ? { ok: true as const, value: buildJarvisCoreState({
         finance: finance.value,
         trading: trading.value,
@@ -162,6 +164,7 @@ export async function getJarvisRuntimeContext() {
         pulse: pulse.value,
         events: events.value,
         integrations: integrations.value,
+        localAgent: localAgent.value,
       }) }
     : {
         ok: false as const,
@@ -189,6 +192,7 @@ export async function getJarvisRuntimeContext() {
       research: pulse.ok,
       events: events.ok,
       integrations: integrations.ok,
+      localAgent: localAgent.ok,
     },
   };
 }
