@@ -12,7 +12,7 @@ using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
-// Local Agent release: 0.7.1 — Trading Observer + bidirectional Obsidian bridge
+// Local Agent release: 0.8.0 — Trading Observer + Obsidian + Jarvis Desktop Action Runtime
 
 internal static class Program
 {
@@ -34,6 +34,8 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly LocalExecutionOcr _executionOcr = new();
     private readonly HttpClient _http = CreateHttpClient();
     private readonly UIA3Automation _automation = new();
+    private readonly Control _uiInvoker = new();
+    private readonly DesktopActionRuntime _desktopRuntime;
     private readonly string _root;
     private readonly string _configPath;
     private ObserverConfig _config;
@@ -52,6 +54,7 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastPairAttemptUtc = DateTime.MinValue;
     private string? _pairDialogShownForCode;
     private string? _lastObsidianCommandId;
+    private string? _lastDesktopCommandId;
     private bool _deploymentAccessPrimed;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
@@ -83,6 +86,8 @@ internal sealed class ObserverContext : ApplicationContext
         Directory.CreateDirectory(_root);
         _configPath = Path.Combine(_root, "config.json");
         _config = ObserverConfig.Load(_configPath);
+        _uiInvoker.CreateControl();
+        _desktopRuntime = new DesktopActionRuntime(_automation, _uiInvoker);
         ImportLocalSecretsIfPresent();
         NormalizeServerUrl();
         NormalizeObsidianConfig();
@@ -111,7 +116,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.7.1", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.8.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _ = Task.Run(async () =>
         {
             await Task.Delay(1200);
@@ -137,6 +142,7 @@ internal sealed class ObserverContext : ApplicationContext
         _tray.Dispose();
         _http.Dispose();
         _automation.Dispose();
+        _uiInvoker.Dispose();
         base.ExitThreadCore();
     }
 
@@ -287,7 +293,7 @@ internal sealed class ObserverContext : ApplicationContext
                 if (_tradingViewDetected)
                 {
                     _tradingViewDetected = false;
-                    _tray.Text = "Jarvis Trading Observer — standby";
+                    _tray.Text = "JARVIS Local Agent — standby";
                     Log(new { type = "tradingview.closed", at = DateTime.UtcNow });
                 }
                 return;
@@ -297,7 +303,7 @@ internal sealed class ObserverContext : ApplicationContext
             {
                 _tradingViewDetected = true;
                 BeginSession();
-                _tray.Text = "Jarvis Trading Observer — ACTIVE";
+                _tray.Text = "JARVIS Local Agent — ACTIVE";
                 _tray.ShowBalloonTip(2500, "JARVIS TRADING OBSERVER", "TradingView detected. Read-only observation is active.", ToolTipIcon.Info);
                 Log(new { type = "tradingview.detected", at = DateTime.UtcNow });
             }
@@ -496,7 +502,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.7.1",
+            observerVersion = "0.8.0",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -507,7 +513,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.7.1");
+            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -566,7 +572,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.7.1");
+            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -601,17 +607,17 @@ internal sealed class ObserverContext : ApplicationContext
                 await HandleObsidianCommandAsync(obsidianCommandNode);
             }
 
+            if (link.TryGetProperty("desktopCommand", out var desktopCommandNode) &&
+                desktopCommandNode.ValueKind == JsonValueKind.Object)
+            {
+                await HandleDesktopCommandAsync(desktopCommandNode);
+            }
+
             var nextPaused = !string.Equals(command, "WATCH", StringComparison.OrdinalIgnoreCase);
             if (_paused != nextPaused)
             {
                 _paused = nextPaused;
                 Log(new { type = _paused ? "observer.remote_paused" : "observer.remote_watch", at = DateTime.UtcNow });
-            }
-
-            if (link.TryGetProperty("obsidianCommand", out var obsidianCommand) &&
-                obsidianCommand.ValueKind == JsonValueKind.Object)
-            {
-                await HandleObsidianCommandAsync(obsidianCommand);
             }
 
             if (!string.IsNullOrWhiteSpace(_config.PairingCode))
@@ -631,8 +637,8 @@ internal sealed class ObserverContext : ApplicationContext
             }
 
             _tray.Text = _paused
-                ? "Jarvis Trading Observer — paused"
-                : (_tradingViewDetected ? "Jarvis Trading Observer — ACTIVE" : "Jarvis Trading Observer — WATCHING");
+                ? "JARVIS Local Agent — paused"
+                : (_tradingViewDetected ? "JARVIS Local Agent — ACTIVE" : "JARVIS Local Agent — WATCHING");
         }
         catch (Exception ex)
         {
@@ -748,6 +754,120 @@ internal sealed class ObserverContext : ApplicationContext
             error);
     }
 
+    private async Task HandleDesktopCommandAsync(JsonElement commandNode)
+    {
+        var id = commandNode.TryGetProperty("id", out var idNode) ? idNode.GetString() : null;
+        var action = commandNode.TryGetProperty("action", out var actionNode) ? actionNode.GetString() : null;
+        var target = commandNode.TryGetProperty("target", out var targetNode) && targetNode.ValueKind != JsonValueKind.Null
+            ? targetNode.GetString()
+            : null;
+        var text = commandNode.TryGetProperty("text", out var textNode) && textNode.ValueKind != JsonValueKind.Null
+            ? textNode.GetString()
+            : null;
+        var authorization = commandNode.TryGetProperty("authorization", out var authNode)
+            ? authNode.GetString()
+            : "READ_ONLY";
+        var args = commandNode.TryGetProperty("args", out var argsNode) && argsNode.ValueKind == JsonValueKind.Array
+            ? argsNode.EnumerateArray().Select(item => item.GetString() ?? "").ToArray()
+            : Array.Empty<string>();
+
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(action)) return;
+        if (string.Equals(_lastDesktopCommandId, id, StringComparison.Ordinal)) return;
+        _lastDesktopCommandId = id;
+
+        var command = new DesktopActionCommand(
+            id!,
+            action!.ToUpperInvariant(),
+            target,
+            text,
+            args,
+            authorization ?? "READ_ONLY");
+
+        DesktopActionResult result;
+        try
+        {
+            result = await _desktopRuntime.ExecuteAsync(command);
+        }
+        catch (Exception ex)
+        {
+            result = new DesktopActionResult(
+                command.Id,
+                command.Action,
+                false,
+                "Desktop action failed.",
+                null,
+                Array.Empty<string>(),
+                ex.Message,
+                DateTime.UtcNow);
+        }
+
+        Log(new
+        {
+            type = "desktop.command.executed",
+            at = DateTime.UtcNow,
+            id = result.Id,
+            action = result.Action,
+            ok = result.Ok,
+            summary = result.Summary,
+            evidence = result.Evidence,
+            error = result.Error,
+        });
+
+        await PostDesktopCommandResultAsync(result);
+    }
+
+    private async Task PostDesktopCommandResultAsync(DesktopActionResult result)
+    {
+        if (string.IsNullOrWhiteSpace(_config.ServerUrl) ||
+            string.IsNullOrWhiteSpace(_config.DeviceId) ||
+            string.IsNullOrWhiteSpace(_config.DeviceToken)) return;
+
+        var endpoint = _config.ServerUrl.TrimEnd('/') + "/api/desktop/result";
+        var body = JsonSerializer.Serialize(new
+        {
+            id = result.Id,
+            action = result.Action,
+            ok = result.Ok,
+            summary = result.Summary,
+            data = result.Data,
+            evidence = result.Evidence,
+            error = result.Error,
+            completedAt = result.CompletedAt,
+        });
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            ApplyVercelBypassHeaders(req);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
+            req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
+            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
+            req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            using var response = await _http.SendAsync(req, cts.Token);
+
+            Log(new
+            {
+                type = "desktop.command.result",
+                at = DateTime.UtcNow,
+                id = result.Id,
+                action = result.Action,
+                ok = result.Ok,
+                status = (int)response.StatusCode,
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _lastDesktopCommandId = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _lastDesktopCommandId = null;
+            Log(new { type = "desktop.command.result_error", at = DateTime.UtcNow, id = result.Id, error = ex.Message });
+        }
+    }
+
     private static string NormalizeObsidianVaultPath(string? value)
     {
         var path = (value ?? "").Replace('\\', '/').Trim().TrimStart('/');
@@ -800,7 +920,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.6.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
             using var response = await _http.SendAsync(req, cts.Token);
@@ -1429,7 +1549,7 @@ internal sealed class ObserverContext : ApplicationContext
     private void TogglePause()
     {
         _paused = !_paused;
-        _tray.Text = _paused ? "Jarvis Trading Observer — paused" : (_tradingViewDetected ? "Jarvis Trading Observer — ACTIVE" : "Jarvis Trading Observer — standby");
+        _tray.Text = _paused ? "JARVIS Local Agent — paused" : (_tradingViewDetected ? "JARVIS Local Agent — ACTIVE" : "JARVIS Local Agent — standby");
         _tray.ShowBalloonTip(1800, "JARVIS TRADING OBSERVER", _paused ? "Observation paused." : "Observation resumed.", ToolTipIcon.Info);
         Log(new { type = _paused ? "observer.paused" : "observer.resumed", at = DateTime.UtcNow });
     }
