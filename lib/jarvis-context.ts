@@ -80,6 +80,62 @@ function compactTrading(value: Awaited<ReturnType<typeof getTradingState>>) {
   };
 }
 
+function compactWorkforce(value: Awaited<ReturnType<typeof getWorkforceState>>) {
+  if (!value) return null;
+  const tasks = value.tasks ?? [];
+  const operatingSystem = value.operatingSystem;
+  return {
+    asOf: value.lastCycleAt,
+    status: value.status,
+    autonomy: value.autonomy ?? null,
+    executiveSummary: value.executiveSummary,
+    objectives: value.objectives.slice(0, 12),
+    agents: value.agents.map(agent => ({
+      id: agent.id,
+      domain: agent.domain,
+      status: agent.status,
+      permissionCeiling: agent.permissionCeiling,
+      currentWork: agent.currentWork,
+      lastResult: agent.lastResult,
+      lastRanAt: agent.lastRanAt,
+    })),
+    openTasks: tasks
+      .filter(task => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status))
+      .slice(0, 24),
+    recentOutcomes: tasks
+      .filter(task => ["DONE", "FAILED"].includes(task.status))
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 18)
+      .map(task => ({
+        id: task.id,
+        title: task.title,
+        domain: task.domain,
+        assignedTo: task.assignedTo,
+        status: task.status,
+        result: task.result,
+        evidence: task.evidence.slice(0, 8),
+        definitionOfDone: task.definitionOfDone ?? null,
+        governance: task.governance ?? null,
+        verification: task.verification ?? null,
+        updatedAt: task.updatedAt,
+      })),
+    operatingSystem: operatingSystem ? {
+      doctrine: operatingSystem.doctrine,
+      governance: operatingSystem.governance ?? null,
+      truth: operatingSystem.truth ?? null,
+      worldState: operatingSystem.worldState ?? null,
+      decisionMemory: operatingSystem.decisionMemory?.slice(0, 12) ?? [],
+      scenarios: operatingSystem.scenarios ?? [],
+      opportunities: operatingSystem.opportunities ?? [],
+      metrics: operatingSystem.metrics ?? null,
+      capitalDesk: operatingSystem.capitalDesk ?? null,
+      gaps: operatingSystem.gaps.slice(0, 16),
+      chiefOfStaff: operatingSystem.chiefOfStaff,
+      execution: operatingSystem.execution,
+    } : null,
+  };
+}
+
 export async function getJarvisRuntimeContext() {
   const [finance, trading, payouts, assistant, workforce, pulse, events] = await Promise.all([
     safe(() => getFinanceState()),
@@ -98,7 +154,7 @@ export async function getJarvisRuntimeContext() {
     tradingPayouts: payouts.ok ? payouts.value : { unavailable: true, error: payouts.error },
     assistant: assistant.ok ? compactAssistant(assistant.value) : { unavailable: true, error: assistant.error },
     assistantAlerts: assistant.ok ? getAssistantAlerts(assistant.value) : [],
-    workforce: workforce.ok ? workforce.value : { unavailable: true, error: workforce.error },
+    workforce: workforce.ok ? compactWorkforce(workforce.value) : { unavailable: true, error: workforce.error },
     researchPulse: pulse.ok ? pulse.value : { unavailable: true, error: pulse.error },
     recentEvents: events.ok ? events.value.slice(0, 16) : [],
     sourceHealth: {
