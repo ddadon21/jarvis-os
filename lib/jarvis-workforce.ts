@@ -210,12 +210,17 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
         source: task.source,
       }),
     }));
-    const operatingSystem = existing.operatingSystem ?? buildOperatingSystem({
-      previous: existing,
-      agents,
-      tasks,
-      executiveFocus: existing.executiveSummary || "Close the highest-risk open loop before expanding.",
-    });
+    const operatingSystem = existing.operatingSystem
+      ? {
+          ...existing.operatingSystem,
+          governance: existing.operatingSystem.governance ?? BALANCED_GOVERNANCE,
+        }
+      : buildOperatingSystem({
+          previous: existing,
+          agents,
+          tasks,
+          executiveFocus: existing.executiveSummary || "Close the highest-risk open loop before expanding.",
+        });
     const changed =
       agents.length !== existing.agents.length ||
       objectives.length !== existing.objectives.length ||
