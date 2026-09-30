@@ -3,6 +3,7 @@ import { plaidFinanceConfigured, refreshFinanceFromPlaid } from "./plaid-finance
 import { runJarvisPulse } from "./jarvis-pulse";
 import { getTradingState } from "./trading-runtime";
 import { getJarvisIntegrationRegistry } from "./jarvis-integration-registry";
+import { JARVIS_BALANCED_GOVERNANCE, JARVIS_OPERATING_DOCTRINE } from "./jarvis-core-policy";
 import {
   AgentId,
   AgentPermission,
@@ -24,47 +25,8 @@ import {
   shouldRunPulse,
 } from "./jarvis-runtime";
 
-const OPERATING_DOCTRINE = [
-  "See the mission.",
-  "Find the gaps.",
-  "Do the necessary work.",
-  "Close the loop.",
-  "Verify the result.",
-  "Then expand.",
-];
-
-const BORING_WORK = [
-  "Review stale or ownerless tasks",
-  "Verify durable persistence and recovery paths",
-  "Reproduce unresolved bugs before adding features",
-  "Check duplicate workflow / agent logic",
-  "Validate backups, authorization, and security boundaries",
-  "Document fixes so the same failure does not recur",
-];
-
-const BALANCED_GOVERNANCE: NonNullable<WorkforceOperatingSystem["governance"]> = {
-  mode: "BALANCED_AUTONOMY",
-  standard: "Controlled aggression: bias to decisive action inside approved missions, but escalate irreversibility, mission expansion, and weakly-evidenced redesigns.",
-  autoProceed: [
-    "Low- and medium-risk reversible internal work inside an approved objective",
-    "Research, monitoring, testing, validation, documentation, cleanup, retries, recovery, and measured experiments",
-    "Small fixes and tactical optimizations with evidence, rollback paths, and a definition of done",
-    "Cross-agent internal delegation that stays inside the same approved objective and permission ceilings",
-  ],
-  askDwightFirst: [
-    "New mission, major scope expansion, or material architecture redesign",
-    "External communication, spending, production-risk changes, permissions, contracts, or consequential account changes",
-    "A change whose downside is difficult to reverse, whose blast radius is high, or whose evidence is weak",
-  ],
-  neverWithoutExplicitUnlock: [
-    "Live trade execution or unrestricted money movement",
-    "Bypassing approval boundaries, exposing secrets, or silently expanding agent permissions",
-    "Changing the governance rules themselves to gain more authority",
-  ],
-  changeControl: "Observe → reproduce → diagnose → smallest reversible intervention → measure → QA → keep or revert. Redesign is the last resort after repeated evidence.",
-  scopeControl: "Agents may move fast and delegate inside approved objectives. New ideas go to Vision/Backlog; agents may not create a new mission or materially widen scope without Dwight.",
-  exceptionRule: "Dwight can explicitly authorize expansion; hard safety and permission boundaries still remain in force.",
-};
+const OPERATING_DOCTRINE = [...JARVIS_OPERATING_DOCTRINE];
+const BALANCED_GOVERNANCE = JARVIS_BALANCED_GOVERNANCE;
 
 const DEFAULT_AGENTS: AgentState[] = [
   {
