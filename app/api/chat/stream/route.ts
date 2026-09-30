@@ -205,7 +205,7 @@ async function extractMetadata(choice: Choice, user: string, reply: string, acti
   try {
     const result = await generateText({
       model: modelFor(choice),
-      system: "You are JARVIS state extraction. Return only valid JSON. Save only durable non-secret facts. Do not save credentials, account numbers, temporary statuses, or fleeting chat details.",
+      system: "You are JARVIS state extraction. Return only valid JSON. Save only durable non-secret facts. Do not save credentials, account numbers, temporary statuses, or fleeting chat details. Choose nextMove using JARVIS's operating doctrine: mission first, close high-risk gaps, finish before expanding, define done, verify results, and prefer the highest-leverage closed-loop action over visible activity.",
       prompt: [
         "Active domain: " + activeDomain,
         "Existing memory: " + JSON.stringify(memories.slice(-40)),
