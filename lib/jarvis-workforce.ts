@@ -211,6 +211,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
         source: task.source,
       }),
     })));
+    const taskSetChanged = tasks.length !== (existing.tasks?.length ?? 0);
     const needsInstitutionalMigration =
       !existing.operatingSystem?.truth ||
       !existing.operatingSystem?.worldState ||
@@ -220,22 +221,35 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
       !existing.operatingSystem?.metrics ||
       !existing.operatingSystem?.capitalDesk ||
       !existing.operatingSystem?.continuity;
-    const operatingSystem = existing.operatingSystem && !needsInstitutionalMigration
-      ? {
-          ...existing.operatingSystem,
-          governance: existing.operatingSystem.governance ?? BALANCED_GOVERNANCE,
-        }
-      : buildOperatingSystem({
+    const shouldRebuildOperatingPicture = needsInstitutionalMigration || taskSetChanged;
+    const rebuiltOperatingSystem = shouldRebuildOperatingPicture
+      ? buildOperatingSystem({
           previous: existing,
           agents,
           tasks: applyTruthVerification(tasks, new Date().toISOString()),
           executiveFocus: existing.executiveSummary || "Close the highest-risk open loop before expanding.",
-        });
+        })
+      : null;
+    const operatingSystem = existing.operatingSystem && !shouldRebuildOperatingPicture
+      ? {
+          ...existing.operatingSystem,
+          governance: existing.operatingSystem.governance ?? BALANCED_GOVERNANCE,
+        }
+      : existing.operatingSystem && rebuiltOperatingSystem && taskSetChanged && !needsInstitutionalMigration
+        ? {
+            ...rebuiltOperatingSystem,
+            governance: existing.operatingSystem.governance ?? BALANCED_GOVERNANCE,
+            worldState: existing.operatingSystem.worldState,
+            scenarios: existing.operatingSystem.scenarios,
+            opportunities: existing.operatingSystem.opportunities,
+            capitalDesk: existing.operatingSystem.capitalDesk,
+          }
+        : rebuiltOperatingSystem!;
     const changed =
       agents.length !== existing.agents.length ||
       objectives.length !== existing.objectives.length ||
       !Array.isArray(existing.tasks) ||
-      tasks.length !== (existing.tasks?.length ?? 0) ||
+      taskSetChanged ||
       !existing.operatingSystem ||
       needsInstitutionalMigration ||
       tasks.some((task, index) =>
