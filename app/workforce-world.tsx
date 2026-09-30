@@ -45,6 +45,7 @@ type Task = {
   result: string | null;
   evidence: string[];
   blockedReason: string | null;
+  definitionOfDone?: string;
 };
 type RuntimeEvent = {
   id: string;
@@ -57,12 +58,53 @@ type RuntimeEvent = {
   summary: string;
 };
 
+type Objective = {
+  id: string;
+  title: string;
+  domain: string;
+  status: "ACTIVE" | "BLOCKED" | "DONE" | "PAUSED";
+  successDefinition: string;
+  currentFocus: string;
+};
+
+type Gap = {
+  id: string;
+  title: string;
+  risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  owner: string;
+  status: "ACTIVE" | "PLANNED" | "RESOLVED";
+  definitionOfDone: string;
+  source: string;
+  updatedAt: string;
+};
+
+type OperatingSystem = {
+  doctrine: string[];
+  gaps: Gap[];
+  boringQueue: string[];
+  chiefOfStaff: {
+    meaningfulTasks: number;
+    blockedTasks: number;
+    killCandidates: number;
+    waitingOnDwight: number;
+    highestLeverage: string;
+    whatAvoiding: string;
+  };
+  execution: {
+    expansionGate: boolean;
+    currentFocus: string;
+    nextAction: string;
+  };
+};
+
 type Workforce = {
   status: string;
   lastCycleAt: string | null;
   executiveSummary: string;
   agents: Agent[];
+  objectives?: Objective[];
   tasks?: Task[];
+  operatingSystem?: OperatingSystem;
   autonomy?: {
     enabled: boolean;
     runId: string | null;
@@ -204,6 +246,12 @@ function timeAgo(value: string | null) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return hours + "H AGO";
   return Math.floor(hours / 24) + "D AGO";
+}
+
+function quickEvent(summary: string) {
+  const compact = summary.replace(/\s+/g, " ").trim();
+  const first = compact.split(/(?<=[.!?])\s+/)[0] || compact;
+  return first.length > 96 ? first.slice(0, 93).trimEnd() + "…" : first;
 }
 
 export default function WorkforceWorld() {
@@ -409,7 +457,20 @@ export default function WorkforceWorld() {
 
   const workforce = payload?.workforce;
   const agents = workforce?.agents ?? [];
+  const objectives = workforce?.objectives ?? [];
   const tasks = workforce?.tasks ?? [];
+  const operatingSystem = workforce?.operatingSystem;
+  const gaps = operatingSystem?.gaps ?? [];
+  const activeGaps = gaps.filter((gap) => gap.status !== "RESOLVED").slice(0, 6);
+  const boringQueue = operatingSystem?.boringQueue ?? [];
+  const doctrine = operatingSystem?.doctrine ?? [
+    "See the mission.",
+    "Find the gaps.",
+    "Do the necessary work.",
+    "Close the loop.",
+    "Verify the result.",
+    "Then expand.",
+  ];
   const selected = agents.find((agent) => agent.id === selectedId) ?? agents[0] ?? null;
   const selectedProfile = selected ? profiles[selected.id] : null;
   const selectedTasks = useMemo(
@@ -728,160 +789,163 @@ export default function WorkforceWorld() {
         </div>
       </section>
 
-      <section className={styles.opsProof}>
-        <div className={styles.opsProofHead}>
-          <div>
-            <span>HJV OPERATIONS COMMS</span>
-            <strong>{floorActive ? "TEAM ONLINE · COLLABORATING" : "TEAM OFF DUTY · READY BAY"}</strong>
+      <section className={styles.commandDeck}>
+        <div className={styles.commandMain}>
+          <div className={styles.lowerGrid}>
+            <div className={styles.detailPanel}>
+              <div className={styles.panelTitle}><TerminalSquare size={14} /><span>EMPLOYEE TERMINAL</span><small>{selectedProfile?.station ?? "SELECT AGENT"}</small></div>
+              {selected && selectedProfile ? (
+                <>
+                  <div className={styles.employeeHead}>
+                    <div className={styles.employeeBadge}>{selectedProfile.name.slice(0, 2)}</div>
+                    <div>
+                      <strong>{selectedProfile.name}</strong>
+                      <span>{selectedProfile.role}</span>
+                      <small>{selected.domain} · PERMISSION {selected.permissionCeiling}</small>
+                    </div>
+                    <div className={styles.employeeStatus}><CircleDot size={11} /> {selected.status}</div>
+                  </div>
+                  <div className={styles.employeeWork}>
+                    <label>CURRENT OUTCOME</label>
+                    <p>{selected.currentWork}</p>
+                    <label>LAST VERIFIED RESULT · {timeAgo(selected.lastRanAt)}</label>
+                    <p>{selected.lastResult}</p>
+                  </div>
+                  <form className={styles.assign} onSubmit={assignTask}>
+                    <input
+                      value={taskText}
+                      onChange={(event) => setTaskText(event.target.value)}
+                      placeholder={"Assign outcome to " + selectedProfile.name + "..."}
+                    />
+                    <button disabled={busy || !taskText.trim()}>ASSIGN</button>
+                  </form>
+                </>
+              ) : <div className={styles.empty}>WAITING FOR WORKFORCE STATE</div>}
+            </div>
+
+            <div className={styles.queuePanel}>
+              <div className={styles.panelTitle}><Activity size={14} /><span>OUTCOME QUEUE</span><small>{openTasks.length} OPEN</small></div>
+              <div className={styles.queue}>
+                {queueTasks.map((task) => (
+                  <div className={styles.task} key={task.id}>
+                    <i className={styles["task" + task.status]} />
+                    <div>
+                      <strong>{task.title}</strong>
+                      <span>{task.assignedTo} · {task.priority} · {task.domain}</span>
+                      {task.definitionOfDone ? <em>DONE WHEN: {task.definitionOfDone}</em> : null}
+                      {task.result ? <small>{task.result}</small> : task.blockedReason ? <small>{task.blockedReason}</small> : null}
+                    </div>
+                    <b>{task.status}</b>
+                  </div>
+                ))}
+                {!tasks.length ? <div className={styles.empty}>NO TASK HISTORY YET · RUN THE FIRST WORKFORCE CYCLE</div> : null}
+              </div>
+            </div>
           </div>
-          <div className={styles.opsProofStatus}>
-            <i className={floorActive ? styles.opsLive : styles.opsQuiet} />
-            <b>{floorActive ? "CONTINUES UNTIL YOU PAUSE" : "PAUSED"}</b>
+
+          <div className={styles.missionGrid}>
+            <div className={styles.missionPanel}>
+              <div className={styles.panelTitle}><BrainCircuit size={14} /><span>OPERATING DOCTRINE</span><small>MISSION FIRST</small></div>
+              <div className={styles.doctrineFlow}>
+                {doctrine.map((line, index) => (
+                  <div key={line}><b>{String(index + 1).padStart(2, "0")}</b><span>{line}</span></div>
+                ))}
+              </div>
+              <div className={styles.executionMode}>
+                <span>EXECUTION MODE</span>
+                <strong>{operatingSystem?.execution.expansionGate ? "CLOSE GAPS BEFORE EXPANSION" : "ADVANCE HIGHEST-LEVERAGE OBJECTIVE"}</strong>
+                <p>{operatingSystem?.execution.currentFocus ?? "Complete the current mission, verify it, then expand."}</p>
+              </div>
+            </div>
+
+            <div className={styles.gapPanel}>
+              <div className={styles.panelTitle}><Search size={14} /><span>GAP LEDGER</span><small>{activeGaps.length} OPEN</small></div>
+              <div className={styles.gapList}>
+                {activeGaps.map((gap) => (
+                  <div className={styles.gapRow} key={gap.id}>
+                    <i className={styles["risk" + gap.risk]} />
+                    <div><strong>{gap.title}</strong><span>{gap.owner} · {gap.risk} · {gap.status}</span></div>
+                  </div>
+                ))}
+                {!activeGaps.length ? <div className={styles.empty}>NO ACTIVE GAPS DETECTED FROM CURRENT WORKFORCE EVIDENCE</div> : null}
+              </div>
+            </div>
+
+            <div className={styles.boringPanel}>
+              <div className={styles.panelTitle}><ShieldCheck size={14} /><span>UNGLAMOROUS BUT NECESSARY</span><small>CLOSE LOOPS</small></div>
+              <div className={styles.boringList}>
+                {boringQueue.slice(0, 6).map((item) => <div key={item}><CircleDot size={8} /><span>{item}</span></div>)}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className={styles.opsProofGrid}>
-          <div className={styles.commsPanel}>
-            <div className={styles.opsPanelTitle}>
-              <Network size={12} />
-              <span>TEAM HANDOFFS</span>
-              <small>{teamComms.length ? "LIVE" : "WAITING"}</small>
+        <aside className={styles.rightRail}>
+          <div className={styles.execPanel}>
+            <div className={styles.panelTitle}><BriefcaseBusiness size={14} /><span>CHIEF OF STAFF</span><small>{workforce?.status ?? "STARTING"}</small></div>
+            <p>{workforce?.executiveSummary ?? "JARVIS is preparing the workforce operating picture."}</p>
+            <div className={styles.cosNumbers}>
+              <div><span>MEANINGFUL</span><strong>{operatingSystem?.chiefOfStaff.meaningfulTasks ?? 0}</strong></div>
+              <div><span>BLOCKED</span><strong>{operatingSystem?.chiefOfStaff.blockedTasks ?? 0}</strong></div>
+              <div><span>KILL / REVIEW</span><strong>{operatingSystem?.chiefOfStaff.killCandidates ?? 0}</strong></div>
+              <div><span>WAITING ON YOU</span><strong>{operatingSystem?.chiefOfStaff.waitingOnDwight ?? 0}</strong></div>
             </div>
-            <div className={styles.opsStream}>
-              {(teamComms.length ? teamComms : [{
-                id: "no-handoffs",
-                type: "workforce.handoff",
-                domain: "CORE",
-                source: "jarvis.handoff",
-                importance: "BACKGROUND",
-                occurredAt: new Date(0).toISOString(),
-                receivedAt: new Date(0).toISOString(),
-                summary: floorActive
-                  ? "Agents are online. Handoffs will appear here as specialist work moves between departments."
-                  : "Start the workforce to begin live department handoffs.",
-              }]).map((event) => (
-                <div className={styles.opsLine} key={event.id}>
-                  <i />
-                  <div>
-                    <b>{event.summary.includes(":") ? event.summary.split(":")[0] : event.domain}</b>
-                    <span>{event.summary.includes(":") ? event.summary.slice(event.summary.indexOf(":") + 1).trim() : event.summary}</span>
-                  </div>
-                  <small>{event.id === "no-handoffs" ? "—" : timeAgo(event.occurredAt)}</small>
-                </div>
-              ))}
+            <div className={styles.cosFocus}>
+              <span>HIGHEST LEVERAGE</span>
+              <strong>{operatingSystem?.chiefOfStaff.highestLeverage ?? "Close the highest-risk open loop."}</strong>
+            </div>
+            <div className={styles.avoidance}>
+              <span>WHAT ARE WE AVOIDING?</span>
+              <p>{operatingSystem?.chiefOfStaff.whatAvoiding ?? "No critical avoidance signal detected yet."}</p>
             </div>
           </div>
 
-          <div className={styles.commsPanel}>
-            <div className={styles.opsPanelTitle}>
-              <Activity size={12} />
-              <span>PROOF OF WORK</span>
-              <small>{workProof.length ? "ACTIVITY" : "STANDBY"}</small>
-            </div>
-            <div className={styles.opsStream}>
-              {(workProof.length ? workProof : [{
-                id: "no-proof",
+          <div className={styles.eventPanel}>
+            <div className={styles.panelTitle}><Activity size={14} /><span>EVENT BRIEFINGS</span><small>QUICK</small></div>
+            <div className={styles.eventBriefs}>
+              {(recentEvents.length ? recentEvents.slice(0, 9) : [{
+                id: "no-events",
                 type: "workforce.waiting",
                 domain: "CORE",
-                source: "jarvis.workforce",
+                source: "jarvis",
                 importance: "BACKGROUND",
                 occurredAt: new Date(0).toISOString(),
                 receivedAt: new Date(0).toISOString(),
-                summary: "No new completed work has been recorded yet.",
+                summary: "No new operations events yet.",
               }]).map((event) => (
-                <div className={styles.opsLine} key={event.id}>
+                <div key={event.id}>
                   <i />
                   <div>
                     <b>{event.type.replace(/[._]/g, " ").toUpperCase()}</b>
-                    <span>{event.summary}</span>
+                    <span>{quickEvent(event.summary)}</span>
                   </div>
-                  <small>{event.id === "no-proof" ? "—" : timeAgo(event.occurredAt)}</small>
+                  <small>{event.id === "no-events" ? "—" : timeAgo(event.occurredAt)}</small>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className={styles.indicatorLabPanel}>
-            <div className={styles.opsPanelTitle}>
-              <Eye size={12} />
-              <span>TRADING LEARNING LOOP</span>
-              <small>{indicatorEvidence ? "EVIDENCE IN" : "ARMED"}</small>
-            </div>
-            <div className={styles.indicatorFlow}>
-              <div><b>01</b><span>OBSERVER</span><small>live execution evidence</small></div>
-              <i>→</i>
-              <div><b>02</b><span>JOURNAL VISION</span><small>pictures + notes</small></div>
-              <i>→</i>
-              <div><b>03</b><span>BUILDER + QA</span><small>test indicator hypotheses</small></div>
+          <div className={styles.indicatorRail}>
+            <div className={styles.panelTitle}><Eye size={14} /><span>TRADING LEARNING LOOP</span><small>{indicatorEvidence ? "EVIDENCE IN" : "ARMED"}</small></div>
+            <div className={styles.indicatorRailFlow}>
+              <span>OBSERVER</span><i>→</i><span>PICTURES + NOTES</span><i>→</i><span>BUILDER + QA</span>
             </div>
             <p>{indicatorEvidence
-              ? indicatorEvidence.summary
-              : "The indicator baseline stays unchanged until real trading evidence arrives. New trade pictures and notes are now routed into the same learning loop as Observer evidence."}</p>
-            <small className={styles.baselineLock}>BASELINE LOCKED · NEW CODE MUST BE VERSIONED + EVIDENCE-BACKED</small>
+              ? quickEvent(indicatorEvidence.summary)
+              : "Waiting for enough trading evidence to justify a testable indicator change."}</p>
+            <small>BASELINE LOCKED · VERSION CHANGES ONLY AFTER EVIDENCE + QA</small>
           </div>
-        </div>
-      </section>
 
-      <section className={styles.lowerGrid}>
-        <div className={styles.detailPanel}>
-          <div className={styles.panelTitle}><TerminalSquare size={13} /><span>EMPLOYEE TERMINAL</span><small>{selectedProfile?.station ?? "SELECT AGENT"}</small></div>
-          {selected && selectedProfile ? (
-            <>
-              <div className={styles.employeeHead}>
-                <div className={styles.employeeBadge}>{selectedProfile.name.slice(0, 2)}</div>
-                <div>
-                  <strong>{selectedProfile.name}</strong>
-                  <span>{selectedProfile.role}</span>
-                  <small>{selected.domain} · PERMISSION {selected.permissionCeiling}</small>
-                </div>
-                <div className={styles.employeeStatus}><CircleDot size={10} /> {selected.status}</div>
-              </div>
-              <div className={styles.employeeWork}>
-                <label>CURRENT WORK</label>
-                <p>{selected.currentWork}</p>
-                <label>LAST RESULT · {timeAgo(selected.lastRanAt)}</label>
-                <p>{selected.lastResult}</p>
-              </div>
-              <form className={styles.assign} onSubmit={assignTask}>
-                <input
-                  value={taskText}
-                  onChange={(event) => setTaskText(event.target.value)}
-                  placeholder={"Assign work to " + selectedProfile.name + "..."}
-                />
-                <button disabled={busy || !taskText.trim()}>ASSIGN</button>
-              </form>
-            </>
-          ) : <div className={styles.empty}>WAITING FOR WORKFORCE STATE</div>}
-        </div>
-
-        <div className={styles.queuePanel}>
-          <div className={styles.panelTitle}><Activity size={13} /><span>WORK QUEUE</span><small>{openTasks.length} OPEN</small></div>
-          <div className={styles.queue}>
-            {queueTasks.map((task) => (
-              <div className={styles.task} key={task.id}>
-                <i className={styles["task" + task.status]} />
-                <div>
-                  <strong>{task.title}</strong>
-                  <span>{task.assignedTo} · {task.priority} · {task.domain}</span>
-                  {task.result ? <small>{task.result}</small> : task.blockedReason ? <small>{task.blockedReason}</small> : null}
-                </div>
-                <b>{task.status}</b>
+          <div className={styles.objectivesPanel}>
+            <div className={styles.panelTitle}><Landmark size={14} /><span>ACTIVE MISSIONS</span><small>{objectives.filter((item) => item.status === "ACTIVE").length}</small></div>
+            {objectives.filter((item) => item.status === "ACTIVE").slice(0, 4).map((objective) => (
+              <div className={styles.objectiveMini} key={objective.id}>
+                <strong>{objective.title}</strong>
+                <span>{objective.currentFocus}</span>
               </div>
             ))}
-            {!tasks.length ? <div className={styles.empty}>NO TASK HISTORY YET · RUN THE FIRST WORKFORCE CYCLE</div> : null}
           </div>
-        </div>
-
-        <div className={styles.execPanel}>
-          <div className={styles.panelTitle}><BriefcaseBusiness size={13} /><span>EXECUTIVE BRIEF</span><small>{workforce?.status ?? "STARTING"}</small></div>
-          <p>{workforce?.executiveSummary ?? "JARVIS is preparing the workforce operating picture."}</p>
-          <div className={styles.protocols}>
-            <div><span>EXTERNAL ACTIONS</span><strong>APPROVAL-GATED</strong></div>
-            <div><span>TRADING EXECUTION</span><strong>DISABLED</strong></div>
-            <div><span>QA REVIEW</span><strong>MANDATORY</strong></div>
-            <div><span>STATE</span><strong>SUPABASE</strong></div>
-          </div>
-        </div>
+        </aside>
       </section>
     </main>
   );
