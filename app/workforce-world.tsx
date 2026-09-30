@@ -46,6 +46,13 @@ type Task = {
   evidence: string[];
   blockedReason: string | null;
   definitionOfDone?: string;
+  governance?: {
+    risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    scope: "MAINTAIN" | "EXECUTE" | "EXPAND";
+    action: "AUTO_PROCEED" | "USER_AUTHORIZED" | "WAIT_FOR_DWIGHT" | "BLOCKED";
+    reason: string;
+    evaluatedAt: string;
+  };
 };
 type RuntimeEvent = {
   id: string;
@@ -82,6 +89,16 @@ type OperatingSystem = {
   doctrine: string[];
   gaps: Gap[];
   boringQueue: string[];
+  governance?: {
+    mode: "BALANCED_AUTONOMY";
+    standard: string;
+    autoProceed: string[];
+    askDwightFirst: string[];
+    neverWithoutExplicitUnlock: string[];
+    changeControl: string;
+    scopeControl: string;
+    exceptionRule: string;
+  };
   chiefOfStaff: {
     meaningfulTasks: number;
     blockedTasks: number;
@@ -492,6 +509,40 @@ export default function WorkforceWorld() {
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     return [...active, ...complete, ...failedHistory].slice(0, 8);
   }, [selectedTasks, tasks]);
+  const workNow = useMemo(() => {
+    const statusRank: Record<Task["status"], number> = {
+      RUNNING: 0,
+      QUEUED: 1,
+      BLOCKED: 2,
+      WAITING_APPROVAL: 3,
+      DONE: 4,
+      FAILED: 5,
+    };
+    return agents.map((agent) => {
+      const activeTask = tasks
+        .filter((task) =>
+          task.assignedTo === agent.id &&
+          ["RUNNING", "QUEUED", "BLOCKED", "WAITING_APPROVAL"].includes(task.status)
+        )
+        .sort((a, b) => statusRank[a.status] - statusRank[b.status] || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0] ?? null;
+      return { agent, activeTask };
+    });
+  }, [agents, tasks]);
+  const completedWork = useMemo(
+    () => tasks
+      .filter((task) => task.status === "DONE")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 8),
+    [tasks],
+  );
+  const recentFailures = useMemo(
+    () => tasks
+      .filter((task) => task.status === "FAILED")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 3),
+    [tasks],
+  );
+  const governance = operatingSystem?.governance;
   const recentEvents = payload?.recentEvents ?? [];
   const teamComms = recentEvents
     .filter((event) => event.type === "workforce.handoff")
@@ -789,6 +840,74 @@ export default function WorkforceWorld() {
         </div>
       </section>
 
+      <section className={styles.workVisibility}>
+        <div className={styles.workVisibilityHead}>
+          <div>
+            <span>EXECUTION VISIBILITY</span>
+            <strong>WHAT THE TEAM IS DOING // WHAT THE TEAM FINISHED</strong>
+          </div>
+          <small>{floorActive ? "LIVE COMPANY VIEW" : "PAUSED · LAST KNOWN STATE"}</small>
+        </div>
+
+        <div className={styles.workVisibilityGrid}>
+          <div className={styles.nowPanel}>
+            <div className={styles.panelTitle}><Activity size={14} /><span>WORKING NOW</span><small>{workNow.length} AGENTS</small></div>
+            <div className={styles.nowList}>
+              {workNow.map(({ agent, activeTask }) => {
+                const profile = profiles[agent.id] ?? { name: agent.id };
+                const displayStatus = !floorActive
+                  ? "OFF DUTY"
+                  : activeTask?.status === "RUNNING"
+                    ? "RUNNING"
+                    : activeTask?.status === "BLOCKED"
+                      ? "BLOCKED"
+                      : activeTask?.status === "WAITING_APPROVAL"
+                        ? "WAITING ON DWIGHT"
+                        : activeTask?.status === "QUEUED"
+                          ? "NEXT UP"
+                          : agent.status === "ERROR"
+                            ? "INCIDENT"
+                            : "MONITORING";
+                return (
+                  <button className={styles.nowRow} key={agent.id} onClick={() => setSelectedId(agent.id)}>
+                    <i style={{ "--agent-accent": profiles[agent.id]?.accent ?? "#94a3b8" } as CSSProperties} />
+                    <div>
+                      <strong>{profile.name}</strong>
+                      <span>{activeTask?.title ?? agent.currentWork}</span>
+                    </div>
+                    <b>{displayStatus}</b>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className={styles.donePanel}>
+            <div className={styles.panelTitle}><ShieldCheck size={14} /><span>COMPLETED WORK</span><small>{completedWork.length} RECENT</small></div>
+            <div className={styles.doneList}>
+              {completedWork.map((task) => (
+                <div className={styles.doneRow} key={task.id}>
+                  <i />
+                  <div>
+                    <strong>{task.title}</strong>
+                    <span>{task.assignedTo} · {timeAgo(task.updatedAt)} · {task.evidence.length} EVIDENCE</span>
+                    <small>{quickEvent(task.result ?? "Completed outcome recorded.")}</small>
+                  </div>
+                  <b>DONE</b>
+                </div>
+              ))}
+              {!completedWork.length ? <div className={styles.empty}>NO COMPLETED OUTCOMES RECORDED YET</div> : null}
+            </div>
+            {recentFailures.length ? (
+              <div className={styles.failureStrip}>
+                <span>RECENT FAILED WORK</span>
+                <b>{recentFailures.map((task) => task.title).join(" · ")}</b>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
       <section className={styles.commandDeck}>
         <div className={styles.commandMain}>
           <div className={styles.lowerGrid}>
@@ -832,6 +951,11 @@ export default function WorkforceWorld() {
                     <div>
                       <strong>{task.title}</strong>
                       <span>{task.assignedTo} · {task.priority} · {task.domain}</span>
+                      {task.governance ? (
+                        <mark className={styles.governanceTag}>
+                          {task.governance.action.replace(/_/g, " ")} · {task.governance.scope} · {task.governance.risk}
+                        </mark>
+                      ) : null}
                       {task.definitionOfDone ? <em>DONE WHEN: {task.definitionOfDone}</em> : null}
                       {task.result ? <small>{task.result}</small> : task.blockedReason ? <small>{task.blockedReason}</small> : null}
                     </div>
@@ -876,6 +1000,41 @@ export default function WorkforceWorld() {
               <div className={styles.boringList}>
                 {boringQueue.slice(0, 6).map((item) => <div key={item}><CircleDot size={8} /><span>{item}</span></div>)}
               </div>
+            </div>
+          </div>
+
+          <div className={styles.governancePanel}>
+            <div className={styles.panelTitle}><ShieldCheck size={14} /><span>AUTONOMY CHARTER</span><small>{governance?.mode ?? "BALANCED_AUTONOMY"}</small></div>
+            <div className={styles.governanceStandard}>
+              <strong>{governance?.standard ?? "Autonomous enough to continue the mission; restrained enough not to invent a new mission."}</strong>
+              <span>{governance?.changeControl ?? "Reproduce → diagnose → smallest effective change → test → QA → observe."}</span>
+            </div>
+            <div className={styles.governanceColumns}>
+              <div className={styles.governanceAllow}>
+                <b>AUTO-PROCEED</b>
+                {(governance?.autoProceed ?? [
+                  "Low-risk reversible work inside approved objectives",
+                  "Testing, research, monitoring, cleanup, validation, documentation",
+                ]).map((item) => <span key={item}>{item}</span>)}
+              </div>
+              <div className={styles.governanceAsk}>
+                <b>ASK DWIGHT FIRST</b>
+                {(governance?.askDwightFirst ?? [
+                  "Major scope expansion or redesign",
+                  "External, financial, production-risk, or permission changes",
+                ]).map((item) => <span key={item}>{item}</span>)}
+              </div>
+              <div className={styles.governanceNever}>
+                <b>HARD LIMIT</b>
+                {(governance?.neverWithoutExplicitUnlock ?? [
+                  "Live trade execution or unrestricted money movement",
+                  "Bypassing approvals, exposing secrets, or self-expanding permissions",
+                ]).map((item) => <span key={item}>{item}</span>)}
+              </div>
+            </div>
+            <div className={styles.governanceFooter}>
+              <span>SCOPE: {governance?.scopeControl ?? "Vision can expand; autonomous execution stays inside approved missions."}</span>
+              <span>EXCEPTION: {governance?.exceptionRule ?? "Dwight may explicitly authorize expansion; hard permission boundaries remain."}</span>
             </div>
           </div>
         </div>
