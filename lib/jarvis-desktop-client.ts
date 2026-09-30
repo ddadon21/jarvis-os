@@ -40,10 +40,13 @@ export function parseDesktopIntent(raw: string): DesktopIntent | null {
   const text = stripJarvis(raw);
   const lower = text.toLowerCase();
 
-  if (/^(?:what(?:'s| is) on my screen|what do you see|what(?:'s| is) open|desktop context|computer context)\??$/.test(lower)) {
+  if (/^(?:what(?:'s| is) on my screen|what do you see(?: on my screen)?|look at my screen)\??$/.test(lower)) {
+    return { action: "SCREEN_CAPTURE" };
+  }
+  if (/^(?:what(?:'s| is) open|desktop context|computer context)\??$/.test(lower)) {
     return { action: "GET_CONTEXT" };
   }
-  if (/^(?:take (?:a )?screenshot|capture (?:my|the) screen|screenshot my screen|look at my screen)$/.test(lower)) {
+  if (/^(?:take (?:a )?screenshot|capture (?:my|the) screen|screenshot my screen)$/.test(lower)) {
     return { action: "SCREEN_CAPTURE" };
   }
   if (/^(?:read|what(?:'s| is) on) (?:my )?clipboard\??$/.test(lower)) {
@@ -105,6 +108,21 @@ function explainContext(data: string | null, fallback: string) {
     ].filter(Boolean).join(" ");
   } catch {
     return fallback;
+  }
+}
+
+async function analyzeScreen(image: string) {
+  try {
+    const response = await fetch("/api/desktop/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image }),
+    });
+    if (!response.ok) return null;
+    const body = await response.json() as { analysis?: string };
+    return body.analysis?.trim() || null;
+  } catch {
+    return null;
   }
 }
 
@@ -186,10 +204,16 @@ export async function executeDesktopIntent(intent: DesktopIntent) {
     };
   }
 
+  let message = formatResult(result);
+  if (result.ok && result.action === "SCREEN_CAPTURE" && result.data?.startsWith("data:image/jpeg;base64,")) {
+    const analysis = await analyzeScreen(result.data);
+    if (analysis) message = analysis;
+  }
+
   return {
     handled: true,
     ok: result.ok,
-    message: formatResult(result),
+    message,
     result,
   };
 }
