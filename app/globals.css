@@ -38,3 +38,61 @@
 .core-workforce-panel .panel-body{
   padding-top:10px;
 }
+
+
+/* Jarvis Core workforce visibility */
+.workforce-panel{display:grid;gap:10px}
+.workforce-toolbar{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+}
+.workforce-toolbar>div:first-child{display:grid;gap:2px;min-width:0}
+.workforce-toolbar span{font-size:8px;color:#2c7b84;letter-spacing:.1em}
+.workforce-toolbar strong{font-size:10px;color:#8be9f1;letter-spacing:.05em}
+.workforce-toolbar small{font-size:8px;color:#4b7d84}
+.workforce-toolbar-actions{display:flex;gap:6px;align-items:center}
+.workforce-toolbar-actions a,.workforce-toolbar-actions button{
+  min-height:27px;padding:0 8px;
+  border:1px solid rgba(0,229,255,.16);
+  background:#041117;color:#59c9d4;
+  font-size:7px;letter-spacing:.07em;text-decoration:none;
+  display:flex;align-items:center;gap:5px;cursor:pointer
+}
+.workforce-toolbar-actions button:disabled{opacity:.45;cursor:default}
+.workforce-state-line{
+  display:grid;grid-template-columns:auto auto 1fr;gap:8px;align-items:center;
+  padding:7px 8px;border:1px solid rgba(0,229,255,.07);background:rgba(0,229,255,.018)
+}
+.workforce-state-line span{font-size:7px;color:#58d6df;letter-spacing:.08em}
+.workforce-state-line b{font-size:7px;color:#8aaeb2}
+.workforce-state-line small{font-size:7px;color:#3d6870;text-align:right}
+.workforce-live-section,.workforce-done-section{
+  border-top:1px solid rgba(0,229,255,.07);
+  padding-top:8px;display:grid;gap:5px
+}
+.workforce-queue-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.workforce-queue-head span{font-size:8px;color:#63d7e2;letter-spacing:.09em}
+.workforce-queue-head small{font-size:7px;color:#35636a}
+.workforce-task{
+  display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:7px;align-items:flex-start;
+  padding:7px 8px;border:1px solid rgba(0,229,255,.05);background:rgba(2,16,21,.42)
+}
+.workforce-task.live{border-color:rgba(0,229,255,.07)}
+.workforce-task.done{border-color:rgba(84,216,164,.09);background:rgba(84,216,164,.018)}
+.workforce-task>div{display:grid;gap:2px;min-width:0}
+.workforce-task>div>strong{font-size:7.5px;color:#a9dce1;line-height:1.35}
+.workforce-task>div>span{font-size:7.2px;color:#678f95;line-height:1.4}
+.workforce-task>div>small{
+  font-size:6.8px;color:#4e767c;line-height:1.35;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical
+}
+.workforce-task>b{font-size:6.6px;color:#4faab4;letter-spacing:.07em;white-space:nowrap}
+.workforce-task.done>b{color:#54d8a4}
+.workforce-task.done>svg{color:#54d8a4;margin-top:2px}
+.workforce-task-dot{
+  width:6px;height:6px;margin-top:4px;border-radius:50%;
+  background:#00cfe4;box-shadow:0 0 7px rgba(0,229,255,.4)
+}
+.workforce-empty{
+  padding:8px;border:1px dashed rgba(0,229,255,.07);
+  font-size:7px;line-height:1.4;color:#37666d
+}
