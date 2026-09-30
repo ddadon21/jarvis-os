@@ -198,7 +198,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
           status: "IDLE" as const,
         }));
     const objectives = mergeMissingObjectives(existing.objectives);
-    const tasks = (Array.isArray(existing.tasks) ? existing.tasks : []).map((task) => ({
+    const tasks = pruneTasks((Array.isArray(existing.tasks) ? existing.tasks : []).map((task) => ({
       ...task,
       definitionOfDone: task.definitionOfDone?.trim() || defaultDefinitionOfDone(task),
       governance: task.governance ?? classifyTaskGovernance({
@@ -210,7 +210,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
         objectiveId: task.objectiveId,
         source: task.source,
       }),
-    }));
+    })));
     const needsInstitutionalMigration =
       !existing.operatingSystem?.truth ||
       !existing.operatingSystem?.worldState ||
@@ -235,6 +235,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
       agents.length !== existing.agents.length ||
       objectives.length !== existing.objectives.length ||
       !Array.isArray(existing.tasks) ||
+      tasks.length !== (existing.tasks?.length ?? 0) ||
       !existing.operatingSystem ||
       needsInstitutionalMigration ||
       tasks.some((task, index) =>
@@ -690,6 +691,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   });
   const hasErrors = agents.some((agent) => agent.status === "ERROR");
   const hasBlockers = agents.some((agent) => agent.status === "BLOCKED");
+  tasks = pruneTasks(tasks);
   const executiveFocus = chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title, tasks);
   const operatingSystem = buildOperatingSystem({
     previous,
@@ -716,7 +718,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     status: hasErrors || hasBlockers ? "DEGRADED" : "ACTIVE",
     agents,
     objectives: previous.objectives,
-    tasks: pruneTasks(tasks),
+    tasks,
     executiveSummary,
     operatingSystem,
   };
@@ -870,7 +872,7 @@ function ensureTask(tasks: AgentTask[], seed: TaskSeed) {
   const existing = tasks.find((task) =>
     task.title === seed.title &&
     task.assignedTo === seed.assignedTo &&
-    ["QUEUED", "RUNNING"].includes(task.status),
+    ["QUEUED", "RUNNING", "BLOCKED"].includes(task.status),
   );
   if (existing) return { tasks, task: existing };
 
@@ -903,9 +905,20 @@ function updateTask(tasks: AgentTask[], id: string, patch: Partial<AgentTask>) {
 }
 
 function pruneTasks(tasks: AgentTask[]) {
-  const open = tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
+  const openStatuses: AgentTask["status"][] = ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"];
+  const recurringKeys = new Set<string>();
+  const open = [...tasks]
+    .filter((task) => openStatuses.includes(task.status))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .filter((task) => {
+      if (task.source !== "workforce.cycle") return true;
+      const key = [task.source, task.assignedTo, task.domain, task.title].join("|");
+      if (recurringKeys.has(key)) return false;
+      recurringKeys.add(key);
+      return true;
+    });
   const closed = tasks
-    .filter((task) => !["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status))
+    .filter((task) => !openStatuses.includes(task.status))
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
     .slice(0, 70);
   return [...open, ...closed].slice(0, 100);
