@@ -7,6 +7,7 @@ import { JARVIS_AUTHORITY_CLASSES, JARVIS_BALANCED_GOVERNANCE, JARVIS_OPERATING_
 import { getLatestPulse, getRecentEvents, type RuntimeDomain, type TruthState } from "./jarvis-runtime";
 import { getOrSeedWorkforceState } from "./jarvis-workforce";
 import { getTradingState } from "./trading-runtime";
+import { getLocalAgentPresence } from "./trading-device-link";
 
 export type JarvisCoreTruthState = TruthState | "UNKNOWN";
 export type JarvisCoreHealth = "HEALTHY" | "DEGRADED" | "BLOCKED" | "UNKNOWN";
@@ -152,11 +153,12 @@ export type JarvisCoreInputs = {
   pulse: Awaited<ReturnType<typeof getLatestPulse>>;
   events: Awaited<ReturnType<typeof getRecentEvents>>;
   integrations: Awaited<ReturnType<typeof getJarvisIntegrationRegistry>>;
+  localAgent: Awaited<ReturnType<typeof getLocalAgentPresence>>;
 };
 
 export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
   const generatedAt = new Date().toISOString();
-  const { workforce, finance, trading, assistant, pulse, events, integrations } = input;
+  const { workforce, finance, trading, assistant, pulse, events, integrations, localAgent } = input;
 
   const operating = workforce.operatingSystem;
   const truth = operating?.truth;
@@ -247,10 +249,22 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
   tools.push({
     id: "DESKTOP_ACTION_RUNTIME",
     label: "Windows Desktop Actions",
-    state: "NOT_CONNECTED",
+    state: localAgent?.online && localAgent.desktopRuntime ? "CONNECTED" : localAgent?.online ? "DEGRADED" : "NOT_CONNECTED",
     authority: "EXTERNAL_APPROVAL",
-    capabilities: ["Open/focus applications", "Window UI automation", "Clipboard", "Approved local commands", "Browser handoff"],
-    note: "The current Local Agent can observe TradingView and bridge Obsidian, but general Windows action execution is not implemented yet.",
+    capabilities: [
+      "Desktop context",
+      "On-demand screen capture",
+      "Open/focus applications",
+      "Window UI automation",
+      "Clipboard read/write",
+      "Open files and HTTPS URLs",
+      "Approved local diagnostics",
+    ],
+    note: localAgent?.online && localAgent.desktopRuntime
+      ? `JARVIS Desktop Runtime ${localAgent.observerVersion ?? "0.8+"} is online on ${localAgent.deviceName ?? "the paired Windows PC"}.`
+      : localAgent?.online
+        ? `The Local Agent is online, but version ${localAgent.observerVersion ?? "unknown"} predates the Desktop Action Runtime. Update the Windows agent to 0.8.0 or newer.`
+        : "The Windows Local Agent is not currently online, so JARVIS must not claim computer-control capability.",
   });
   tools.push({
     id: "CODING_EXECUTORS",
@@ -353,8 +367,10 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
         note: "Realtime WebRTC voice is available when configured; browser speech remains the fallback and is not the target premium voice path.",
       },
       desktop: {
-        state: "PARTIAL",
-        note: "Screen observation and Obsidian bridging exist through the Windows Local Agent. General computer actions are Step 2.",
+        state: localAgent?.online && localAgent.desktopRuntime ? "PARTIAL" : "PARTIAL",
+        note: localAgent?.online && localAgent.desktopRuntime
+          ? "Desktop Runtime is online with first-pass hands/eyes capabilities. Browser-native automation and coding executors remain separate later steps."
+          : "The Desktop Runtime code exists, but the paired Windows agent must be updated and online before JARVIS can use it.",
       },
       obsidian: {
         state: obsidian?.state === "CONNECTED" ? "CONNECTED" : obsidian?.state === "DEGRADED" ? "DEGRADED" : "UNKNOWN",
@@ -366,7 +382,7 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
 
 
 export async function getJarvisCoreState(): Promise<JarvisCoreState> {
-  const [workforce, finance, trading, assistant, pulse, events, integrations] = await Promise.all([
+  const [workforce, finance, trading, assistant, pulse, events, integrations, localAgent] = await Promise.all([
     getOrSeedWorkforceState(),
     getOrSeedFinanceState(),
     getTradingState(),
@@ -374,6 +390,7 @@ export async function getJarvisCoreState(): Promise<JarvisCoreState> {
     getLatestPulse(),
     getRecentEvents(),
     getJarvisIntegrationRegistry(),
+    getLocalAgentPresence(),
   ]);
-  return buildJarvisCoreState({ workforce, finance, trading, assistant, pulse, events, integrations });
+  return buildJarvisCoreState({ workforce, finance, trading, assistant, pulse, events, integrations, localAgent });
 }
