@@ -36,6 +36,7 @@ import {
   mergeMemories,
   saveJarvisState,
 } from "../lib/jarvis-state";
+import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
 
 type RuntimeEvent = {
   id: string;
@@ -263,6 +264,31 @@ export default function WorkV2() {
     setStreamStarted(false);
     setFirstTokenMs(null);
     setResponseMs(null);
+
+    const desktopStartedAt = performance.now();
+    try {
+      const desktop = await tryExecuteDesktopText(text);
+      if (desktop) {
+        const elapsed = Math.max(1, Math.round(performance.now() - desktopStartedAt));
+        setActiveProvider("WINDOWS LOCAL AGENT");
+        setActiveModel("DESKTOP RUNTIME");
+        setActiveRoute("FAST");
+        setFirstTokenMs(elapsed);
+        setResponseMs(elapsed);
+        setStreamStarted(true);
+        setMessages((previous) => [
+          ...previous,
+          { role: "assistant", content: desktop.message, createdAt: assistantStamp },
+        ]);
+        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
+        setBusy(false);
+        window.setTimeout(() => setStreamStarted(false), 120);
+        return;
+      }
+    } catch {
+      // If a local action path fails before producing a structured result,
+      // fall through to the normal Jarvis reasoning stream.
+    }
 
     const applyEvent = (eventName: string, payload: StreamMeta) => {
       if (eventName === "meta") {
