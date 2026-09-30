@@ -129,6 +129,7 @@ function compactWorkforce(value: Awaited<ReturnType<typeof getWorkforceState>>) 
       opportunities: operatingSystem.opportunities ?? [],
       metrics: operatingSystem.metrics ?? null,
       capitalDesk: operatingSystem.capitalDesk ?? null,
+      continuity: operatingSystem.continuity ?? null,
       gaps: operatingSystem.gaps.slice(0, 16),
       chiefOfStaff: operatingSystem.chiefOfStaff,
       execution: operatingSystem.execution,
