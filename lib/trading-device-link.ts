@@ -85,6 +85,7 @@ type PendingPair = {
 
 const PAIR_TTL_SECONDS = 10 * 60;
 const DEVICE_TTL_SECONDS = 60 * 60 * 24 * 90;
+const LOCAL_AGENT_PRESENCE_KEY = "jarvis:local-agent:presence:v1";
 
 function pairKey(code: string) { return `jarvis:trading:pair:${normalizeCode(code)}`; }
 function deviceKey(deviceId: string) { return `jarvis:trading:device:${deviceId}`; }
@@ -204,7 +205,16 @@ export async function pollObserverControl(deviceId: string, deviceToken: string,
     lastHeartbeatAt: new Date().toISOString(),
     observerVersion: observerVersion ? String(observerVersion).slice(0, 30) : link.observerVersion,
   };
-  await getCache().set(deviceKey(deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
+  await Promise.all([
+    getCache().set(deviceKey(deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
+    getCache().set(LOCAL_AGENT_PRESENCE_KEY, {
+      deviceId: next.deviceId,
+      deviceName: next.deviceName,
+      lastHeartbeatAt: next.lastHeartbeatAt,
+      lastFrameAt: next.lastFrameAt,
+      observerVersion: next.observerVersion,
+    }, { ttl: 60 * 60 * 24, tags: ["jarvis-local-agent"] }),
+  ]);
   return {
     ...safeLink(next),
     obsidianCommand: next.obsidianCommand ?? null,
@@ -396,6 +406,35 @@ export async function getDesktopCommandResult(controllerToken: string, commandId
     return { pending: Boolean(link.desktopCommand?.id === commandId), result: null, link: safeLink(link) };
   }
   return { pending: Boolean(link.desktopCommand), result, link: safeLink(link) };
+}
+
+export async function getLocalAgentPresence() {
+  const presence = await getCache().get(LOCAL_AGENT_PRESENCE_KEY) as {
+    deviceId?: string;
+    deviceName?: string;
+    lastHeartbeatAt?: string | null;
+    lastFrameAt?: string | null;
+    observerVersion?: string | null;
+  } | null;
+  if (!presence) return null;
+  const heartbeatAge = presence.lastHeartbeatAt ? Date.now() - Date.parse(presence.lastHeartbeatAt) : Number.POSITIVE_INFINITY;
+  return {
+    ...presence,
+    online: heartbeatAge < 15_000,
+    desktopRuntime: versionAtLeast(presence.observerVersion, 0, 8, 0),
+  };
+}
+
+function versionAtLeast(value: string | null | undefined, major: number, minor: number, patch: number) {
+  const parts = String(value ?? "").split(".").map(part => Number.parseInt(part, 10));
+  if (parts.some(Number.isNaN)) return false;
+  const current = [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  const required = [major, minor, patch];
+  for (let index = 0; index < required.length; index += 1) {
+    if (current[index] > required[index]) return true;
+    if (current[index] < required[index]) return false;
+  }
+  return true;
 }
 
 export async function getObserverLinkStatus(controllerToken: string) {
