@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { loadJarvisState, saveJarvisState } from "../lib/jarvis-state";
+import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
 
 export type JarvisVoiceState = "STANDBY" | "LISTENING" | "THINKING" | "SPEAKING" | "ERROR";
 
@@ -626,6 +627,24 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }
 
     fallbackArmedRef.current = true;
+
+    try {
+      const desktop = await tryExecuteDesktopText(command);
+      if (desktop) {
+        appendMessage("user", command);
+        stopWakeRecognition();
+        fallbackPendingSpeechRef.current = 0;
+        fallbackStreamDoneRef.current = true;
+        fallbackSpeechBufferRef.current = "";
+        window.speechSynthesis?.cancel();
+        appendMessage("assistant", desktop.message);
+        queueFallbackSpeech(desktop.message);
+        return;
+      }
+    } catch {
+      // Fall through to the intelligence path if local desktop routing fails.
+    }
+
     await askFallback(command);
   }
 
