@@ -25,6 +25,13 @@ type Task = {
   updatedAt: string;
   result: string | null;
   blockedReason: string | null;
+  evidence?: string[];
+  governance?: {
+    action: "AUTO_PROCEED" | "USER_AUTHORIZED" | "WAIT_FOR_DWIGHT" | "BLOCKED";
+    scope: "MAINTAIN" | "EXECUTE" | "EXPAND";
+    risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    reason: string;
+  };
 };
 
 type WorkforcePayload = {
@@ -35,6 +42,10 @@ type WorkforcePayload = {
     executiveSummary: string;
     agents: Agent[];
     tasks?: Task[];
+    autonomy?: {
+      enabled: boolean;
+      cadenceMinutes: number;
+    };
   };
   counts?: {
     agents: number;
@@ -109,9 +120,39 @@ export default function WorkforcePanel() {
   const agents = data?.workforce?.agents ?? [];
   const tasks = data?.workforce?.tasks ?? [];
   const openTasks = useMemo(
-    () => tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status)).slice(0, 4),
+    () => tasks
+      .filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status))
+      .sort((a, b) => {
+        const rank: Record<Task["status"], number> = {
+          RUNNING: 0,
+          QUEUED: 1,
+          BLOCKED: 2,
+          WAITING_APPROVAL: 3,
+          DONE: 4,
+          FAILED: 5,
+        };
+        return rank[a.status] - rank[b.status] || Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+      })
+      .slice(0, 5),
     [tasks],
   );
+  const completedTasks = useMemo(
+    () => tasks
+      .filter((task) => task.status === "DONE")
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 4),
+    [tasks],
+  );
+
+  function ago(value: string) {
+    const ms = Math.max(0, Date.now() - Date.parse(value));
+    const minutes = Math.floor(ms / 60_000);
+    if (minutes < 1) return "NOW";
+    if (minutes < 60) return minutes + "M";
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + "H";
+    return Math.floor(hours / 24) + "D";
+  }
 
   return (
     <div className="workforce-panel">
@@ -129,35 +170,49 @@ export default function WorkforcePanel() {
         </div>
       </div>
 
-      <div className="workforce-agent-grid">
-        {agents.map((agent) => (
-          <div className={`workforce-agent ${agent.status.toLowerCase()}`} key={agent.id} title={agent.currentWork}>
-            <Bot size={11} />
-            <div>
-              <span>{agentLabels[agent.id] ?? agent.id}</span>
-              <small>{agent.domain} · {agent.permissionCeiling}</small>
-            </div>
-            <strong>{agent.status}</strong>
-          </div>
-        ))}
+      <div className="workforce-state-line">
+        <span>{data?.workforce?.autonomy?.enabled ? "24/7 ACTIVE" : "MANUAL / PAUSED"}</span>
+        <b>{agents.length || 9} AGENTS</b>
+        <small>{data?.workforce?.autonomy?.enabled ? `${data.workforce.autonomy.cadenceMinutes ?? 15}M CYCLE` : "OPEN FLOOR FOR FULL DETAIL"}</small>
       </div>
 
-      <div className="workforce-queue">
+      <div className="workforce-live-section">
         <div className="workforce-queue-head">
-          <span>WORK QUEUE</span>
-          <small>{data?.counts?.queuedTasks ?? 0} QUEUED · {data?.counts?.blockedTasks ?? 0} BLOCKED</small>
+          <span>WORKING NOW</span>
+          <small>{openTasks.length} ACTIVE / NEXT</small>
         </div>
         {openTasks.length ? openTasks.map((task) => (
-          <div className="workforce-task" key={task.id}>
-            <ShieldCheck size={10} />
+          <div className="workforce-task live" key={task.id}>
+            <span className="workforce-task-dot" />
             <div>
+              <strong>{agentLabels[task.assignedTo] ?? task.assignedTo}</strong>
               <span>{task.title}</span>
-              <small>{task.assignedTo} · {task.priority}</small>
+              {task.governance?.action === "WAIT_FOR_DWIGHT" ? <small>WAITING ON DWIGHT · {task.governance.reason}</small> : null}
             </div>
-            <strong>{task.status}</strong>
+            <b>{task.status}</b>
           </div>
         )) : (
-          <div className="workforce-empty">NO OPEN TASKS · AGENTS STANDING BY</div>
+          <div className="workforce-empty">NO OPEN OUTCOMES · TEAM MONITORING CURRENT MISSIONS</div>
+        )}
+      </div>
+
+      <div className="workforce-done-section">
+        <div className="workforce-queue-head">
+          <span>RECENTLY DONE</span>
+          <small>{completedTasks.length} SHOWN</small>
+        </div>
+        {completedTasks.length ? completedTasks.map((task) => (
+          <div className="workforce-task done" key={task.id}>
+            <ShieldCheck size={10} />
+            <div>
+              <strong>{task.title}</strong>
+              <span>{agentLabels[task.assignedTo] ?? task.assignedTo} · {ago(task.updatedAt)} AGO</span>
+              {task.result ? <small>{task.result.length > 96 ? task.result.slice(0, 93) + "…" : task.result}</small> : null}
+            </div>
+            <b>DONE</b>
+          </div>
+        )) : (
+          <div className="workforce-empty">NO COMPLETED OUTCOMES RECORDED YET</div>
         )}
       </div>
     </div>
