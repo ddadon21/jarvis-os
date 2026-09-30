@@ -4,11 +4,13 @@ import { plaidFinanceConfigured } from "../../../../lib/plaid-finance";
 import { getLatestPulse, getRecentEvents } from "../../../../lib/jarvis-runtime";
 import { getTradingState } from "../../../../lib/trading-runtime";
 import { getAssistantRuntimeState, getAssistantAlerts } from "../../../../lib/jarvis-assistant-runtime";
+import { getJarvisCoreState } from "../../../../lib/jarvis-core";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const [pulse, events, workforce, finance, trading, assistant] = await Promise.all([
+  const [core, pulse, events, workforce, finance, trading, assistant] = await Promise.all([
+    getJarvisCoreState(),
     getLatestPulse(),
     getRecentEvents(),
     getOrSeedWorkforceState(),
@@ -25,6 +27,7 @@ export async function GET() {
   return Response.json({
     online: true,
     mode: degraded ? "DEGRADED" : "ACTIVE",
+    core,
     workforce: {
       enabled: true,
       status: workforce.status,
