@@ -26,3 +26,15 @@
 .core-event-list .event i{
   width:4px;height:4px;
 }
+
+
+/* Jarvis Core right rail spacing */
+.core-events-panel{
+  margin-top:14px;
+}
+.panel.core-workforce-panel{
+  min-height:0;
+}
+.core-workforce-panel .panel-body{
+  padding-top:10px;
+}
