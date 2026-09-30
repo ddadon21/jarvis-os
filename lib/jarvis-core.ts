@@ -210,7 +210,7 @@ export async function getJarvisCoreState(): Promise<JarvisCoreState> {
     source: "life.client-state",
   };
   const assistantConnected = Object.values(assistant.sources).some(value => value === "CONNECTED");
-  const assistantDegraded = assistantAlerts.some(alert => alert.severity === "CRITICAL");
+  const assistantDegraded = assistantAlerts.some(alert => alert.priority === "CRITICAL");
   const assistantSource: JarvisCoreSource = {
     id: "assistant",
     domain: "CORE",
