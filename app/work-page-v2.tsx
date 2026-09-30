@@ -131,6 +131,12 @@ const sectors = [
   { id: "LIFE" as const, icon: Target, title: "LIFE", signal: "ALIGN" },
 ];
 
+function quickCoreEvent(summary: string) {
+  const compact = summary.replace(/\s+/g, " ").trim();
+  const first = compact.split(/(?<=[.!?])\s+/)[0] || compact;
+  return first.length > 88 ? first.slice(0, 85).trimEnd() + "…" : first;
+}
+
 export default function WorkV2() {
   const { voiceEnabled, voiceState, caption, toggleVoice } = useJarvisVoice();
   const [time, setTime] = useState("--:--:--");
@@ -401,13 +407,6 @@ export default function WorkV2() {
           <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
-          <Panel title="EVENTS" corner="LIVE">
-            <div className="event-list">
-              {runtimeEvents.length > 0 ? runtimeEvents.slice(0, 5).map((event) => (
-                <Event key={event.id} text={event.summary} time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)} />
-              )) : <><Event text="Jarvis core online" time="NOW" /><Event text="Autonomous workforce ready" time="AI" /><Event text="Finance accounts connected" time="FIN" /></>}
-            </div>
-          </Panel>
           <Panel title="AI WORKFORCE" corner={systemStatus?.workforce?.status ?? "STARTING"}>
             <WorkforcePanel />
           </Panel>
@@ -464,6 +463,22 @@ export default function WorkV2() {
                 <span>{domain} MODE</span>
                 <small>{activeProvider} · {activeModel} · {activeRoute}</small>
               </div>
+            </div>
+          </Panel>
+
+          <Panel title="EVENTS" corner="BRIEF" className="core-events-panel">
+            <div className="event-list core-event-list">
+              {runtimeEvents.length > 0 ? runtimeEvents.slice(0, 7).map((event) => (
+                <Event
+                  key={event.id}
+                  text={quickCoreEvent(event.summary)}
+                  time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)}
+                />
+              )) : <>
+                <Event text="Jarvis core online" time="NOW" />
+                <Event text="Autonomous workforce ready" time="AI" />
+                <Event text="Finance state connected" time="FIN" />
+              </>}
             </div>
           </Panel>
 
