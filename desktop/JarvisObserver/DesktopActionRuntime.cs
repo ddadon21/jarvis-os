@@ -227,6 +227,16 @@ internal sealed class DesktopActionRuntime
         if (!File.Exists(full) && !Directory.Exists(full))
             throw new FileNotFoundException("The requested local path does not exist.", full);
 
+        if (File.Exists(full))
+        {
+            var blockedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".exe", ".bat", ".cmd", ".ps1", ".msi", ".com", ".scr", ".lnk",
+            };
+            if (blockedExtensions.Contains(Path.GetExtension(full)))
+                throw new InvalidOperationException("Executable and script paths must use a dedicated approved action, not OPEN_PATH.");
+        }
+
         Process.Start(new ProcessStartInfo(full) { UseShellExecute = true });
         return Ok(command, $"Opened {full}.", null, new[] { $"path={full}" });
     }
@@ -363,7 +373,7 @@ internal sealed class DesktopActionRuntime
             "git-status" => ("git", new[] { "status", "--short", "--branch" }),
             "git-diff-stat" => ("git", new[] { "diff", "--stat" }),
             "node-version" => ("node", new[] { "--version" }),
-            "npm-version" => ("npm", new[] { "--version" }),
+            "npm-version" => ("npm.cmd", new[] { "--version" }),
             "dotnet-info" => ("dotnet", new[] { "--info" }),
             "python-version" => ("python", new[] { "--version" }),
             _ => throw new InvalidOperationException($"'{name}' is not in the JARVIS approved local-command allowlist."),
