@@ -226,6 +226,24 @@ export type WorkforceOperatingSystem = {
     constraint: string;
     nextMove: string;
   };
+  continuity: {
+    unattendedReady: boolean;
+    blockingReasons: string[];
+    last7Days: {
+      closed: number;
+      failed: number;
+      verified: number;
+      autonomous: number;
+      escalations: number;
+    };
+    executiveExceptions: Array<{
+      type: "APPROVAL" | "CRITICAL_GAP" | "FAILED_WORK" | "STALE_WORK";
+      title: string;
+      owner: AgentId;
+      reason: string;
+    }>;
+    whileAwayBrief: string;
+  };
   chiefOfStaff: {
     meaningfulTasks: number;
     blockedTasks: number;
