@@ -91,6 +91,37 @@ export type AgentTask = {
   result: string | null;
   evidence: string[];
   blockedReason: string | null;
+  definitionOfDone?: string;
+};
+
+export type WorkforceGap = {
+  id: string;
+  title: string;
+  risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  owner: AgentId;
+  status: "ACTIVE" | "PLANNED" | "RESOLVED";
+  definitionOfDone: string;
+  source: string;
+  updatedAt: string;
+};
+
+export type WorkforceOperatingSystem = {
+  doctrine: string[];
+  gaps: WorkforceGap[];
+  boringQueue: string[];
+  chiefOfStaff: {
+    meaningfulTasks: number;
+    blockedTasks: number;
+    killCandidates: number;
+    waitingOnDwight: number;
+    highestLeverage: string;
+    whatAvoiding: string;
+  };
+  execution: {
+    expansionGate: boolean;
+    currentFocus: string;
+    nextAction: string;
+  };
 };
 
 export type WorkforceObjective = {
@@ -121,6 +152,7 @@ export type WorkforceState = {
     loopToken?: string | null;
   };
   executiveSummary: string;
+  operatingSystem?: WorkforceOperatingSystem;
 };
 
 export type FinanceAccountState = {
