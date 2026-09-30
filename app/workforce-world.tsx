@@ -180,6 +180,24 @@ type OperatingSystem = {
     constraint: string;
     nextMove: string;
   };
+  continuity?: {
+    unattendedReady: boolean;
+    blockingReasons: string[];
+    last7Days: {
+      closed: number;
+      failed: number;
+      verified: number;
+      autonomous: number;
+      escalations: number;
+    };
+    executiveExceptions: Array<{
+      type: "APPROVAL" | "CRITICAL_GAP" | "FAILED_WORK" | "STALE_WORK";
+      title: string;
+      owner: string;
+      reason: string;
+    }>;
+    whileAwayBrief: string;
+  };
   chiefOfStaff: {
     meaningfulTasks: number;
     blockedTasks: number;
@@ -631,6 +649,7 @@ export default function WorkforceWorld() {
   const opportunities = operatingSystem?.opportunities ?? [];
   const decisionMemory = operatingSystem?.decisionMemory ?? [];
   const capitalDesk = operatingSystem?.capitalDesk;
+  const continuity = operatingSystem?.continuity;
   const recentEvents = payload?.recentEvents ?? [];
   const teamComms = recentEvents
     .filter((event) => event.type === "workforce.handoff")
@@ -1143,6 +1162,21 @@ export default function WorkforceWorld() {
                 {capitalDesk ? (
                   <div><CircleDot size={8} /><span>CAPITAL DESK · {capitalDesk.mode} · LIQUIDITY {capitalDesk.liquidity.toFixed(2)} · DEBT {capitalDesk.personalDebt.toFixed(2)} — {quickEvent(capitalDesk.nextMove)}</span></div>
                 ) : null}
+              </div>
+            </div>
+
+            <div className={styles.missionPanel}>
+              <div className={styles.panelTitle}><BriefcaseBusiness size={14} /><span>OWNER ABSENCE</span><small>{continuity?.unattendedReady ? "UNATTENDED READY" : "EXCEPTIONS OPEN"}</small></div>
+              <div className={styles.executionMode}>
+                <span>7-DAY CONTINUITY</span>
+                <strong>{continuity?.last7Days.closed ?? 0} CLOSED · {continuity?.last7Days.verified ?? 0} VERIFIED · {continuity?.last7Days.autonomous ?? 0} AUTONOMOUS</strong>
+                <p>{continuity?.whileAwayBrief ?? "Continuity evidence will populate after the next workforce cycle."}</p>
+              </div>
+              <div className={styles.doctrineFlow}>
+                {(continuity?.executiveExceptions ?? []).slice(0, 3).map((item, index) => (
+                  <div key={item.type + item.title}><b>{String(index + 1).padStart(2, "0")}</b><span>{item.type} · {item.title}</span></div>
+                ))}
+                {continuity && !continuity.executiveExceptions.length ? <div><b>OK</b><span>NO EXECUTIVE EXCEPTIONS IN THE CURRENT OPERATING PICTURE</span></div> : null}
               </div>
             </div>
           </div>
