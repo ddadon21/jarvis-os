@@ -27,6 +27,14 @@ import {
 
 const OPERATING_DOCTRINE = [...JARVIS_OPERATING_DOCTRINE];
 const BALANCED_GOVERNANCE = JARVIS_BALANCED_GOVERNANCE;
+const BORING_WORK = [
+  "Review stale or ownerless tasks",
+  "Verify durable persistence and recovery paths",
+  "Reproduce unresolved bugs before adding features",
+  "Check duplicate workflow / agent logic",
+  "Validate backups, authorization, and security boundaries",
+  "Document fixes so the same failure does not recur",
+];
 
 const DEFAULT_AGENTS: AgentState[] = [
   {
