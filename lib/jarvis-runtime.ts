@@ -1,4 +1,5 @@
 import { getCache } from "@vercel/functions";
+import type { JarvisGovernancePolicy } from "./jarvis-core-policy";
 import { createClient } from "@supabase/supabase-js";
 
 export type RuntimeDomain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE" | "CORE";
@@ -182,16 +183,7 @@ export type WorkforceOperatingSystem = {
   doctrine: string[];
   gaps: WorkforceGap[];
   boringQueue: string[];
-  governance?: {
-    mode: "BALANCED_AUTONOMY";
-    standard: string;
-    autoProceed: string[];
-    askDwightFirst: string[];
-    neverWithoutExplicitUnlock: string[];
-    changeControl: string;
-    scopeControl: string;
-    exceptionRule: string;
-  };
+  governance?: JarvisGovernancePolicy;
   truth: {
     verified: number;
     observed: number;
