@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { Bot, Play, ShieldCheck } from "lucide-react";
+import { Play, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type Agent = {
@@ -159,7 +159,7 @@ export default function WorkforcePanel() {
       <div className="workforce-toolbar">
         <div>
           <span>AI EMPLOYEES</span>
-          <strong>{agents.length || 6} ONLINE ROSTER</strong>
+          <strong>{agents.length || 9} ONLINE ROSTER</strong>
           <small>{detail}</small>
         </div>
         <div className="workforce-toolbar-actions">
