@@ -46,6 +46,13 @@ type Task = {
   evidence: string[];
   blockedReason: string | null;
   definitionOfDone?: string;
+  verification?: {
+    state: "CLAIMED" | "OBSERVED" | "VERIFIED" | "DISPUTED";
+    checkedBy: string | null;
+    checkedAt: string | null;
+    rationale: string;
+    evidenceCount: number;
+  };
   governance?: {
     risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
     scope: "MAINTAIN" | "EXECUTE" | "EXPAND";
@@ -98,6 +105,80 @@ type OperatingSystem = {
     changeControl: string;
     scopeControl: string;
     exceptionRule: string;
+  };
+  truth?: {
+    verified: number;
+    observed: number;
+    claimed: number;
+    disputed: number;
+    verificationRate: number;
+    recent: Array<{
+      taskId: string;
+      title: string;
+      state: "CLAIMED" | "OBSERVED" | "VERIFIED" | "DISPUTED";
+      checkedBy: string | null;
+      rationale: string;
+      evidenceCount: number;
+      updatedAt: string;
+    }>;
+  };
+  worldState?: {
+    asOf: string;
+    mission: string;
+    domains: Array<{
+      domain: string;
+      status: "HEALTHY" | "DEGRADED" | "BLOCKED" | "UNKNOWN";
+      truth: "CLAIMED" | "OBSERVED" | "VERIFIED" | "DISPUTED";
+      summary: string;
+      source: string;
+      asOf: string;
+    }>;
+  };
+  decisionMemory?: Array<{
+    id: string;
+    at: string;
+    decision: string;
+    reason: string;
+    expectedOutcome: string;
+    evidence: string[];
+  }>;
+  scenarios?: Array<{
+    id: string;
+    title: string;
+    trigger: string;
+    impact: string;
+    response: string;
+    owner: string;
+    status: "WATCH" | "ACTIVE" | "RESOLVED";
+  }>;
+  opportunities?: Array<{
+    id: string;
+    title: string;
+    priority: "LOW" | "MEDIUM" | "HIGH";
+    status: "WATCH" | "VALIDATE" | "READY" | "REJECTED";
+    whyItMatters: string;
+    evidence: string;
+    nextAction: string;
+    updatedAt: string;
+  }>;
+  metrics?: {
+    verificationRate: number;
+    autonomousCompletionRate: number;
+    openLoops: number;
+    staleOpenTasks: number;
+    waitingOnDwight: number;
+    closedLast24h: number;
+    activeGaps: number;
+    activeOpportunities: number;
+  };
+  capitalDesk?: {
+    asOf: string;
+    mode: "CONTROLLED_AGGRESSION";
+    liquidity: number;
+    personalDebt: number;
+    currentStage: string;
+    constraint: string;
+    nextMove: string;
   };
   chiefOfStaff: {
     meaningfulTasks: number;
@@ -543,6 +624,13 @@ export default function WorkforceWorld() {
     [tasks],
   );
   const governance = operatingSystem?.governance;
+  const truth = operatingSystem?.truth;
+  const worldState = operatingSystem?.worldState;
+  const metrics = operatingSystem?.metrics;
+  const scenarios = operatingSystem?.scenarios ?? [];
+  const opportunities = operatingSystem?.opportunities ?? [];
+  const decisionMemory = operatingSystem?.decisionMemory ?? [];
+  const capitalDesk = operatingSystem?.capitalDesk;
   const recentEvents = payload?.recentEvents ?? [];
   const teamComms = recentEvents
     .filter((event) => event.type === "workforce.handoff")
@@ -893,7 +981,7 @@ export default function WorkforceWorld() {
                     <span>{task.assignedTo} · {timeAgo(task.updatedAt)} · {task.evidence.length} EVIDENCE</span>
                     <small>{quickEvent(task.result ?? "Completed outcome recorded.")}</small>
                   </div>
-                  <b>DONE</b>
+                  <b>{task.verification?.state ?? "CLAIMED"}</b>
                 </div>
               ))}
               {!completedWork.length ? <div className={styles.empty}>NO COMPLETED OUTCOMES RECORDED YET</div> : null}
@@ -927,7 +1015,7 @@ export default function WorkforceWorld() {
                   <div className={styles.employeeWork}>
                     <label>CURRENT OUTCOME</label>
                     <p>{selected.currentWork}</p>
-                    <label>LAST VERIFIED RESULT · {timeAgo(selected.lastRanAt)}</label>
+                    <label>LAST REPORTED RESULT · {timeAgo(selected.lastRanAt)}</label>
                     <p>{selected.lastResult}</p>
                   </div>
                   <form className={styles.assign} onSubmit={assignTask}>
@@ -999,6 +1087,62 @@ export default function WorkforceWorld() {
               <div className={styles.panelTitle}><ShieldCheck size={14} /><span>UNGLAMOROUS BUT NECESSARY</span><small>CLOSE LOOPS</small></div>
               <div className={styles.boringList}>
                 {boringQueue.slice(0, 6).map((item) => <div key={item}><CircleDot size={8} /><span>{item}</span></div>)}
+              </div>
+            </div>
+
+            <div className={styles.missionPanel}>
+              <div className={styles.panelTitle}><ShieldCheck size={14} /><span>TRUTH LAYER</span><small>{truth?.verificationRate ?? 100}% VERIFIED</small></div>
+              <div className={styles.doctrineFlow}>
+                <div><b>V</b><span>VERIFIED · {truth?.verified ?? 0}</span></div>
+                <div><b>O</b><span>OBSERVED · {truth?.observed ?? 0}</span></div>
+                <div><b>C</b><span>CLAIMED · {truth?.claimed ?? 0}</span></div>
+                <div><b>D</b><span>DISPUTED · {truth?.disputed ?? 0}</span></div>
+              </div>
+              <div className={styles.executionMode}>
+                <span>OPERATING PROOF</span>
+                <strong>{metrics?.openLoops ?? openTasks.length} OPEN LOOPS · {metrics?.closedLast24h ?? 0} CLOSED / 24H</strong>
+                <p>AUTONOMOUS COMPLETION {metrics?.autonomousCompletionRate ?? 0}% · STALE OPEN WORK {metrics?.staleOpenTasks ?? 0}</p>
+              </div>
+            </div>
+
+            <div className={styles.gapPanel}>
+              <div className={styles.panelTitle}><Network size={14} /><span>CANONICAL WORLD STATE</span><small>{worldState?.domains.length ?? 0} DOMAINS</small></div>
+              <div className={styles.gapList}>
+                {(worldState?.domains ?? []).map((item) => (
+                  <div className={styles.gapRow} key={item.domain}>
+                    <i className={
+                      styles[
+                        item.status === "HEALTHY" ? "riskLOW" :
+                        item.status === "DEGRADED" ? "riskHIGH" :
+                        item.status === "BLOCKED" ? "riskCRITICAL" :
+                        "riskMEDIUM"
+                      ]
+                    } />
+                    <div>
+                      <strong>{item.domain} · {item.status}</strong>
+                      <span>{item.truth} · {quickEvent(item.summary)}</span>
+                    </div>
+                  </div>
+                ))}
+                {!worldState?.domains.length ? <div className={styles.empty}>WORLD STATE WILL POPULATE ON THE NEXT WORKFORCE CYCLE</div> : null}
+              </div>
+            </div>
+
+            <div className={styles.boringPanel}>
+              <div className={styles.panelTitle}><BrainCircuit size={14} /><span>STRATEGY ENGINE</span><small>SCENARIO + OFFENSE + MEMORY</small></div>
+              <div className={styles.boringList}>
+                {scenarios.slice(0, 2).map((scenario) => (
+                  <div key={scenario.id}><CircleDot size={8} /><span>SCENARIO [{scenario.status}] · {scenario.title} — {quickEvent(scenario.response)}</span></div>
+                ))}
+                {opportunities.slice(0, 2).map((opportunity) => (
+                  <div key={opportunity.id}><CircleDot size={8} /><span>OPPORTUNITY [{opportunity.priority}/{opportunity.status}] · {opportunity.title} — {quickEvent(opportunity.nextAction)}</span></div>
+                ))}
+                {decisionMemory.slice(0, 1).map((decision) => (
+                  <div key={decision.id}><CircleDot size={8} /><span>DECISION MEMORY · {decision.decision} — {quickEvent(decision.reason)}</span></div>
+                ))}
+                {capitalDesk ? (
+                  <div><CircleDot size={8} /><span>CAPITAL DESK · {capitalDesk.mode} · LIQUIDITY {capitalDesk.liquidity.toFixed(2)} · DEBT {capitalDesk.personalDebt.toFixed(2)} — {quickEvent(capitalDesk.nextMove)}</span></div>
+                ) : null}
               </div>
             </div>
           </div>
