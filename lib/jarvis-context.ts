@@ -1,10 +1,13 @@
 "server-only";
 
 import { getFinanceState, getLatestPulse, getRecentEvents, getWorkforceState } from "./jarvis-runtime";
+import { getOrSeedFinanceState } from "./finance-live";
+import { getOrSeedWorkforceState } from "./jarvis-workforce";
+import { getJarvisIntegrationRegistry } from "./jarvis-integration-registry";
 import { getTradingState } from "./trading-runtime";
 import { getTradingPayoutSummary } from "./trading-payouts";
 import { getAssistantRuntimeState, getAssistantAlerts } from "./jarvis-assistant-runtime";
-import { getJarvisCoreState } from "./jarvis-core";
+import { buildJarvisCoreState } from "./jarvis-core";
 
 type SafeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -139,16 +142,31 @@ function compactWorkforce(value: Awaited<ReturnType<typeof getWorkforceState>>) 
 }
 
 export async function getJarvisRuntimeContext() {
-  const [core, finance, trading, payouts, assistant, workforce, pulse, events] = await Promise.all([
-    safe(() => getJarvisCoreState()),
-    safe(() => getFinanceState()),
+  const [finance, trading, payouts, assistant, workforce, pulse, events, integrations] = await Promise.all([
+    safe(() => getOrSeedFinanceState()),
     safe(() => getTradingState()),
     safe(() => getTradingPayoutSummary("ALL")),
     safe(() => getAssistantRuntimeState()),
-    safe(() => getWorkforceState()),
+    safe(() => getOrSeedWorkforceState()),
     safe(() => getLatestPulse()),
     safe(() => getRecentEvents()),
+    safe(() => getJarvisIntegrationRegistry()),
   ]);
+
+  const core = finance.ok && trading.ok && assistant.ok && workforce.ok && pulse.ok && events.ok && integrations.ok
+    ? { ok: true as const, value: buildJarvisCoreState({
+        finance: finance.value,
+        trading: trading.value,
+        assistant: assistant.value,
+        workforce: workforce.value,
+        pulse: pulse.value,
+        events: events.value,
+        integrations: integrations.value,
+      }) }
+    : {
+        ok: false as const,
+        error: "JARVIS Core could not assemble because one or more required runtime sources were unavailable.",
+      };
 
   return {
     generatedAt: new Date().toISOString(),
@@ -170,6 +188,7 @@ export async function getJarvisRuntimeContext() {
       workforce: workforce.ok,
       research: pulse.ok,
       events: events.ok,
+      integrations: integrations.ok,
     },
   };
 }
