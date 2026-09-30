@@ -1,0 +1,32 @@
+name: Build Jarvis Desktop
+
+on:
+  push:
+    branches:
+      - claude/jarvis-ai-backend-Iw0x3
+      - codex/observer-current-state
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/build-jarvis-desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore desktop/JarvisObserver/JarvisObserver.csproj
+
+      - name: Build Windows Local Agent
+        run: dotnet build desktop/JarvisObserver/JarvisObserver.csproj -c Release --no-restore
