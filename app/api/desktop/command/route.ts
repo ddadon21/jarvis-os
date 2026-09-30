@@ -13,6 +13,7 @@ function bearer(request: Request) {
 
 const ACTIONS: LocalAgentDesktopAction[] = [
   "GET_CONTEXT",
+  "SCREEN_CAPTURE",
   "OPEN_APP",
   "FOCUS_WINDOW",
   "OPEN_PATH",
@@ -24,7 +25,7 @@ const ACTIONS: LocalAgentDesktopAction[] = [
   "RUN_APPROVED_COMMAND",
 ];
 
-const READ_ONLY = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "CLIPBOARD_READ"]);
+const READ_ONLY = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ"]);
 
 export async function POST(request: Request) {
   const controllerToken = bearer(request);
