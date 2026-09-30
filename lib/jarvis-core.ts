@@ -112,8 +112,11 @@ export type JarvisCoreState = {
       lastCycleAt: string | null;
     };
     voice: {
+      primaryProvider: "ELEVENLABS" | "BROWSER_SPEECH";
       realtimeProvider: "OPENAI";
       fallback: "BROWSER_SPEECH";
+      premiumConfigured: boolean;
+      model: string;
       note: string;
     };
     desktop: {
@@ -266,6 +269,17 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
         ? `The Local Agent is online, but version ${localAgent.observerVersion ?? "unknown"} predates the Desktop Action Runtime. Update the Windows agent to 0.8.0 or newer.`
         : "The Windows Local Agent is not currently online, so JARVIS must not claim computer-control capability.",
   });
+  const premiumVoiceConfigured = Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID);
+  tools.push({
+    id: "ELEVENLABS_VOICE",
+    label: "Jarvis Premium Voice",
+    state: premiumVoiceConfigured ? "CONNECTED" : "NOT_CONNECTED",
+    authority: "READ_ONLY",
+    capabilities: ["Premium text-to-speech", "British voice profile", "Streaming audio output"],
+    note: premiumVoiceConfigured
+      ? `ElevenLabs voice is configured using ${process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5"}.`
+      : "Voice code is installed, but ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are still required in the deployment.",
+  });
   tools.push({
     id: "CODING_EXECUTORS",
     label: "Coding Executors",
@@ -362,9 +376,14 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
         lastCycleAt: workforce.lastCycleAt,
       },
       voice: {
+        primaryProvider: premiumVoiceConfigured ? "ELEVENLABS" : "BROWSER_SPEECH",
         realtimeProvider: "OPENAI",
         fallback: "BROWSER_SPEECH",
-        note: "Realtime WebRTC voice is available when configured; browser speech remains the fallback and is not the target premium voice path.",
+        premiumConfigured: premiumVoiceConfigured,
+        model: process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5",
+        note: premiumVoiceConfigured
+          ? "ElevenLabs is the primary spoken-output voice. Browser speech is retained only as an emergency fallback; realtime transport optimization is the next voice step."
+          : "ElevenLabs integration is installed but not configured yet. Browser speech remains active until the API key and voice ID are added.",
       },
       desktop: {
         state: localAgent?.online && localAgent.desktopRuntime ? "PARTIAL" : "PARTIAL",
