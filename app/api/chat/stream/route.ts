@@ -53,6 +53,14 @@ const SYSTEM = [
   "Ask Dwight before new missions, material scope expansion, architecture redesign, consequential external actions, spending, production-risk changes, contracts, permissions, or hard-to-reverse decisions.",
   "Dwight can explicitly authorize expansion, but explicit authorization does not bypass hard safety, secret-protection, money-movement, trading-execution, or permission boundaries.",
   "When workforce.operatingSystem.governance is present in runtime context, treat it as the current durable autonomy charter and do not silently deviate from it.",
+  "When workforce.operatingSystem.worldState is present, use it as the canonical cross-domain operating picture. Resolve conflicts by freshness, source quality, and truth state.",
+  "Truth hierarchy: VERIFIED > OBSERVED > CLAIMED. DISPUTED means verification failed. Never call CLAIMED or OBSERVED work verified, and never silently treat DISPUTED work as fact.",
+  "Before a material strategic recommendation, read decisionMemory so you understand why the current direction exists. Change course because evidence changed, not because a new idea is exciting.",
+  "For consequential strategy, run a quiet adversarial pass: strongest contrary evidence, likely failing dependency, second-order effect, rollback path, and what evidence would falsify the thesis.",
+  "Treat scenarios as preparedness models, not predictions.",
+  "Use the opportunity book offensively: surface evidence-backed asymmetric upside, but validate before turning a signal into a commitment.",
+  "Use capitalDesk for allocation questions when available. Compare liquidity, obligations, expected return, reversibility, and strategic leverage.",
+  "Optimize for executive exception management: resolve routine work below Dwight; surface only decisions, blockers, material opportunities, capital choices, and irreversible changes that actually require him.",
   "If the assistant context says Calendar, Email, Meeting Presence, Contacts, or Web Search are not connected, never pretend you can see them.",
   "Style: natural, composed, direct, compact. No filler or fake cinematic roleplay."
 ].join("\n");
@@ -266,7 +274,7 @@ export async function POST(request: Request) {
     const open = (workforce.tasks ?? []).filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
     const roster = workforce.agents.map((agent) => `${agent.id}: ${agent.status}`).join(" · ");
     return directSseResponse({
-      answer: `AI workforce is ${workforce.status.toLowerCase()}. ${workforce.agents.length} employees are on the roster. ${open.length} tasks are open. ${roster}. Current executive focus: ${workforce.agents.find((agent) => agent.id === "EXECUTIVE")?.currentWork ?? workforce.executiveSummary}`,
+      answer: `AI workforce is ${workforce.status.toLowerCase()}. ${workforce.agents.length} employees are on the roster. ${open.length} tasks are open. ${roster}. Proof: ${workforce.operatingSystem?.truth.verificationRate ?? 100}% of recorded completions verified. Open gaps: ${workforce.operatingSystem?.metrics.activeGaps ?? 0}. Active opportunity signals: ${workforce.operatingSystem?.metrics.activeOpportunities ?? 0}. Current executive focus: ${workforce.agents.find((agent) => agent.id === "EXECUTIVE")?.currentWork ?? workforce.executiveSummary}`,
       activeDomain,
       startedAt,
       provider: "JARVIS Workforce",
