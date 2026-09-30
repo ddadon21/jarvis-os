@@ -7,6 +7,7 @@ export type LocalAgentObsidianAction = "LIST" | "READ" | "WRITE" | "SEARCH";
 
 export type LocalAgentDesktopAction =
   | "GET_CONTEXT"
+  | "SCREEN_CAPTURE"
   | "OPEN_APP"
   | "FOCUS_WINDOW"
   | "OPEN_PATH"
@@ -269,7 +270,7 @@ export async function submitObsidianCommandResult(
     action: result.action,
     ok: Boolean(result.ok),
     path: result.path == null ? null : String(result.path).slice(0, 500),
-    data: result.data == null ? null : String(result.data).slice(0, 200_000),
+    data: result.data == null ? null : String(result.data).slice(0, 1_500_000),
     error: result.error == null ? null : String(result.error).slice(0, 2_000),
     completedAt: result.completedAt && Number.isFinite(Date.parse(result.completedAt))
       ? new Date(result.completedAt).toISOString()
@@ -295,7 +296,7 @@ export async function getObsidianCommandResult(controllerToken: string, commandI
   return { pending: Boolean(link.obsidianCommand), result };
 }
 
-const READ_ONLY_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "CLIPBOARD_READ"]);
+const READ_ONLY_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ"]);
 const USER_AUTHORIZED_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>([
   "OPEN_APP",
   "FOCUS_WINDOW",
