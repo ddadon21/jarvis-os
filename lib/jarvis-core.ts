@@ -144,17 +144,19 @@ function sourceTruth(connected: boolean, degraded = false): JarvisCoreTruthState
   return connected ? "OBSERVED" : "UNKNOWN";
 }
 
-export async function getJarvisCoreState(): Promise<JarvisCoreState> {
+export type JarvisCoreInputs = {
+  workforce: Awaited<ReturnType<typeof getOrSeedWorkforceState>>;
+  finance: Awaited<ReturnType<typeof getOrSeedFinanceState>>;
+  trading: Awaited<ReturnType<typeof getTradingState>>;
+  assistant: Awaited<ReturnType<typeof getAssistantRuntimeState>>;
+  pulse: Awaited<ReturnType<typeof getLatestPulse>>;
+  events: Awaited<ReturnType<typeof getRecentEvents>>;
+  integrations: Awaited<ReturnType<typeof getJarvisIntegrationRegistry>>;
+};
+
+export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
   const generatedAt = new Date().toISOString();
-  const [workforce, finance, trading, assistant, pulse, events, integrations] = await Promise.all([
-    getOrSeedWorkforceState(),
-    getOrSeedFinanceState(),
-    getTradingState(),
-    getAssistantRuntimeState(),
-    getLatestPulse(),
-    getRecentEvents(),
-    getJarvisIntegrationRegistry(),
-  ]);
+  const { workforce, finance, trading, assistant, pulse, events, integrations } = input;
 
   const operating = workforce.operatingSystem;
   const truth = operating?.truth;
@@ -360,4 +362,18 @@ export async function getJarvisCoreState(): Promise<JarvisCoreState> {
       },
     },
   };
+}
+
+
+export async function getJarvisCoreState(): Promise<JarvisCoreState> {
+  const [workforce, finance, trading, assistant, pulse, events, integrations] = await Promise.all([
+    getOrSeedWorkforceState(),
+    getOrSeedFinanceState(),
+    getTradingState(),
+    getAssistantRuntimeState(),
+    getLatestPulse(),
+    getRecentEvents(),
+    getJarvisIntegrationRegistry(),
+  ]);
+  return buildJarvisCoreState({ workforce, finance, trading, assistant, pulse, events, integrations });
 }
