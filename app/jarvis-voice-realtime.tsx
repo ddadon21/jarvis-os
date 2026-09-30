@@ -70,6 +70,9 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const voiceStateRef = useRef<JarvisVoiceState>("STANDBY");
   const fallbackArmedRef = useRef(false);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const elevenAudioRef = useRef<HTMLAudioElement | null>(null);
+  const premiumSpeechChainRef = useRef<Promise<void>>(Promise.resolve());
+  const elevenUnavailableRef = useRef(false);
   const fallbackPendingSpeechRef = useRef(0);
   const fallbackStreamDoneRef = useRef(true);
   const fallbackSpeechBufferRef = useRef("");
@@ -150,6 +153,8 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       stopWakeRecognition();
       closeRealtime(false);
       window.speechSynthesis?.cancel();
+      elevenAudioRef.current?.pause();
+      elevenAudioRef.current = null;
     };
     // Root provider intentionally mounts once so voice survives HOME/WORK route changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -425,27 +430,84 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     restartWakeSoon(120);
   }
 
+  function playBrowserSpeech(spoken: string) {
+    return new Promise<void>((resolve) => {
+      if (!("speechSynthesis" in window)) {
+        resolve();
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(spoken);
+      const preferred = preferredVoiceRef.current;
+      if (preferred) utterance.voice = preferred;
+      utterance.lang = preferred?.lang || "en-GB";
+      utterance.rate = 0.96;
+      utterance.pitch = 0.8;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      window.speechSynthesis.speak(utterance);
+    });
+  }
+
+  async function playElevenLabsSpeech(spoken: string) {
+    if (elevenUnavailableRef.current) return false;
+    try {
+      const response = await fetch("/api/voice/elevenlabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: spoken }),
+      });
+      if (!response.ok) {
+        if (response.status === 503) elevenUnavailableRef.current = true;
+        return false;
+      }
+
+      const blob = await response.blob();
+      if (!blob.size) return false;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      elevenAudioRef.current = audio;
+      audio.preload = "auto";
+      setCaption("JARVIS RESPONDING · ELEVENLABS");
+
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          audio.onended = null;
+          audio.onerror = null;
+          if (elevenAudioRef.current === audio) elevenAudioRef.current = null;
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        audio.onended = done;
+        audio.onerror = done;
+        void audio.play().catch(done);
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function queueFallbackSpeech(text: string) {
     const spoken = cleanForSpeech(text);
-    if (!spoken || !("speechSynthesis" in window)) return;
+    if (!spoken) return;
     fallbackSpeakingRef.current = true;
     setVoice("SPEAKING");
     setCaption("JARVIS RESPONDING");
-
-    const utterance = new SpeechSynthesisUtterance(spoken);
-    const preferred = preferredVoiceRef.current;
-    if (preferred) utterance.voice = preferred;
-    utterance.lang = preferred?.lang || "en-GB";
-    utterance.rate = 0.96;
-    utterance.pitch = 0.8;
     fallbackPendingSpeechRef.current += 1;
-    const done = () => {
-      fallbackPendingSpeechRef.current = Math.max(0, fallbackPendingSpeechRef.current - 1);
-      finishFallbackIfReady();
-    };
-    utterance.onend = done;
-    utterance.onerror = done;
-    window.speechSynthesis.speak(utterance);
+
+    premiumSpeechChainRef.current = premiumSpeechChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const usedElevenLabs = await playElevenLabsSpeech(spoken);
+        if (!usedElevenLabs) {
+          setCaption("JARVIS RESPONDING · FALLBACK VOICE");
+          await playBrowserSpeech(spoken);
+        }
+      })
+      .finally(() => {
+        fallbackPendingSpeechRef.current = Math.max(0, fallbackPendingSpeechRef.current - 1);
+        finishFallbackIfReady();
+      });
   }
 
   function flushFallbackBuffer(force = false) {
@@ -750,6 +812,9 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     stopWakeRecognition();
     closeRealtime(false);
     window.speechSynthesis?.cancel();
+    elevenAudioRef.current?.pause();
+    elevenAudioRef.current = null;
+    premiumSpeechChainRef.current = Promise.resolve();
     setVoice("STANDBY");
     setCaption("VOICE STANDBY");
   }
