@@ -76,6 +76,14 @@ export type AgentTaskStatus =
 
 export type AgentTaskPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
+export type WorkforceGovernanceDecision = {
+  risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  scope: "MAINTAIN" | "EXECUTE" | "EXPAND";
+  action: "AUTO_PROCEED" | "USER_AUTHORIZED" | "WAIT_FOR_DWIGHT" | "BLOCKED";
+  reason: string;
+  evaluatedAt: string;
+};
+
 export type AgentTask = {
   id: string;
   title: string;
@@ -92,6 +100,7 @@ export type AgentTask = {
   evidence: string[];
   blockedReason: string | null;
   definitionOfDone?: string;
+  governance?: WorkforceGovernanceDecision;
 };
 
 export type WorkforceGap = {
@@ -109,6 +118,16 @@ export type WorkforceOperatingSystem = {
   doctrine: string[];
   gaps: WorkforceGap[];
   boringQueue: string[];
+  governance?: {
+    mode: "BALANCED_AUTONOMY";
+    standard: string;
+    autoProceed: string[];
+    askDwightFirst: string[];
+    neverWithoutExplicitUnlock: string[];
+    changeControl: string;
+    scopeControl: string;
+    exceptionRule: string;
+  };
   chiefOfStaff: {
     meaningfulTasks: number;
     blockedTasks: number;
