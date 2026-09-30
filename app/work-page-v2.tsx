@@ -466,6 +466,15 @@ export default function WorkV2() {
             </div>
           </Panel>
 
+          <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
+            <div className="brain-runtime"><span>{activeRoute}</span><strong>{activeProvider}</strong><small>{activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small></div>
+            <div className="chat-log" style={{ height: 210 }}>
+              {messages.slice(-6).map((message, index) => <div key={`${message.role}-${message.createdAt ?? index}`} className={`message ${message.role}`}><div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div><p>{message.content}</p></div>)}
+              {busy && !streamStarted && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Routing intelligence<span>...</span></p></div>}
+              <div ref={endRef} />
+            </div>
+          </Panel>
+
           <Panel title="EVENTS" corner="BRIEF" className="core-events-panel">
             <div className="event-list core-event-list">
               {runtimeEvents.length > 0 ? runtimeEvents.slice(0, 7).map((event) => (
@@ -479,15 +488,6 @@ export default function WorkV2() {
                 <Event text="Autonomous workforce ready" time="AI" />
                 <Event text="Finance state connected" time="FIN" />
               </>}
-            </div>
-          </Panel>
-
-          <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
-            <div className="brain-runtime"><span>{activeRoute}</span><strong>{activeProvider}</strong><small>{activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small></div>
-            <div className="chat-log" style={{ height: 210 }}>
-              {messages.slice(-6).map((message, index) => <div key={`${message.role}-${message.createdAt ?? index}`} className={`message ${message.role}`}><div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div><p>{message.content}</p></div>)}
-              {busy && !streamStarted && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Routing intelligence<span>...</span></p></div>}
-              <div ref={endRef} />
             </div>
           </Panel>
 
