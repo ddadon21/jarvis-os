@@ -218,7 +218,8 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
       !existing.operatingSystem?.scenarios ||
       !existing.operatingSystem?.opportunities ||
       !existing.operatingSystem?.metrics ||
-      !existing.operatingSystem?.capitalDesk;
+      !existing.operatingSystem?.capitalDesk ||
+      !existing.operatingSystem?.continuity;
     const operatingSystem = existing.operatingSystem && !needsInstitutionalMigration
       ? {
           ...existing.operatingSystem,
@@ -1299,6 +1300,84 @@ function buildDecisionMemory(input: {
   return [record, ...input.previous].slice(0, 40);
 }
 
+function buildContinuity(input: {
+  previous: WorkforceState | null;
+  agents: AgentState[];
+  tasks: AgentTask[];
+  gaps: WorkforceGap[];
+  truthRate: number;
+}): WorkforceOperatingSystem["continuity"] {
+  const now = Date.now();
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  const recent = input.tasks.filter(task =>
+    Number.isFinite(Date.parse(task.updatedAt)) &&
+    now - Date.parse(task.updatedAt) <= sevenDays
+  );
+  const open = input.tasks.filter(task => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
+  const stale = open.filter(task =>
+    Number.isFinite(Date.parse(task.updatedAt)) &&
+    now - Date.parse(task.updatedAt) > 24 * 60 * 60 * 1000
+  );
+  const criticalGaps = input.gaps.filter(gap => gap.status !== "RESOLVED" && gap.risk === "CRITICAL");
+  const failed = recent.filter(task => task.status === "FAILED");
+  const approvals = open.filter(task => task.status === "WAITING_APPROVAL");
+  const agentErrors = input.agents.filter(agent => agent.status === "ERROR");
+
+  const executiveExceptions: WorkforceOperatingSystem["continuity"]["executiveExceptions"] = [
+    ...approvals.slice(0, 5).map(task => ({
+      type: "APPROVAL" as const,
+      title: task.title,
+      owner: "EXECUTIVE" as const,
+      reason: task.blockedReason ?? "This action is approval-gated.",
+    })),
+    ...criticalGaps.slice(0, 5).map(gap => ({
+      type: "CRITICAL_GAP" as const,
+      title: gap.title,
+      owner: gap.owner,
+      reason: gap.definitionOfDone,
+    })),
+    ...failed.slice(0, 5).map(task => ({
+      type: "FAILED_WORK" as const,
+      title: task.title,
+      owner: task.assignedTo,
+      reason: task.blockedReason ?? task.result ?? "The task failed and requires recovery.",
+    })),
+    ...stale.slice(0, 5).map(task => ({
+      type: "STALE_WORK" as const,
+      title: task.title,
+      owner: task.assignedTo,
+      reason: "Open work has not moved for more than 24 hours.",
+    })),
+  ].slice(0, 12);
+
+  const blockingReasons: string[] = [];
+  if (!input.previous?.autonomy?.enabled) blockingReasons.push("Durable 24/7 workforce is not currently enabled.");
+  if (agentErrors.length) blockingReasons.push(`${agentErrors.length} agent error${agentErrors.length === 1 ? "" : "s"} remain unresolved.`);
+  if (criticalGaps.length) blockingReasons.push(`${criticalGaps.length} critical gap${criticalGaps.length === 1 ? "" : "s"} remain open.`);
+  if (stale.length) blockingReasons.push(`${stale.length} open task${stale.length === 1 ? "" : "s"} have been stale for more than 24 hours.`);
+  if (input.truthRate < 90) blockingReasons.push(`Completion verification is ${input.truthRate}%; unattended operation requires at least 90% of recorded completions to be independently verified.`);
+
+  const closed = recent.filter(task => ["DONE", "FAILED"].includes(task.status)).length;
+  const verified = recent.filter(task => task.status === "DONE" && task.verification?.state === "VERIFIED").length;
+  const autonomous = recent.filter(task => task.status === "DONE" && task.governance?.action === "AUTO_PROCEED").length;
+
+  return {
+    unattendedReady: blockingReasons.length === 0,
+    blockingReasons,
+    last7Days: {
+      closed,
+      failed: failed.length,
+      verified,
+      autonomous,
+      escalations: approvals.length,
+    },
+    executiveExceptions,
+    whileAwayBrief: blockingReasons.length
+      ? `Unattended operation is not yet clean: ${blockingReasons.join(" ")} Routine work may continue within the autonomy charter, but these exceptions should remain visible to Dwight.`
+      : `Unattended operation is structurally ready from the current workforce evidence. In the last 7 days JARVIS closed ${closed} outcomes, independently verified ${verified}, completed ${autonomous} autonomously, and has ${approvals.length} approval exception${approvals.length === 1 ? "" : "s"} waiting on Dwight.`,
+  };
+}
+
 function buildOperatingSystem(input: {
   previous: WorkforceState | null;
   agents: AgentState[];
@@ -1397,6 +1476,13 @@ function buildOperatingSystem(input: {
   });
   const financeLiquidity = input.finance?.metrics.liquidity ?? 0;
   const financeDebt = input.finance?.metrics.personalDebt ?? 0;
+  const continuity = buildContinuity({
+    previous: input.previous,
+    agents: input.agents,
+    tasks: input.tasks,
+    gaps: gapList,
+    truthRate: truth.verificationRate,
+  });
 
   return {
     doctrine: OPERATING_DOCTRINE,
@@ -1422,6 +1508,7 @@ function buildOperatingSystem(input: {
         : "Live finance state is not loaded in this bootstrap state; do not invent deployable capital.",
       nextMove: input.finance ? financeDirective(input.finance) : "Load the finance runtime before making a capital-allocation call.",
     },
+    continuity,
     chiefOfStaff: {
       meaningfulTasks: meaningful.length,
       blockedTasks: blocked.length,
