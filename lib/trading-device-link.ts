@@ -5,6 +5,39 @@ export type ObserverCommand = "WATCH" | "PAUSE";
 
 export type LocalAgentObsidianAction = "LIST" | "READ" | "WRITE" | "SEARCH";
 
+export type LocalAgentDesktopAction =
+  | "GET_CONTEXT"
+  | "OPEN_APP"
+  | "FOCUS_WINDOW"
+  | "OPEN_PATH"
+  | "OPEN_URI"
+  | "CLIPBOARD_READ"
+  | "CLIPBOARD_WRITE"
+  | "UI_CLICK_TEXT"
+  | "UI_TYPE_TEXT"
+  | "RUN_APPROVED_COMMAND";
+
+export type LocalAgentDesktopCommand = {
+  id: string;
+  action: LocalAgentDesktopAction;
+  target: string | null;
+  text: string | null;
+  args: string[];
+  createdAt: string;
+  authorization: "READ_ONLY" | "USER_AUTHORIZED";
+};
+
+export type LocalAgentDesktopResult = {
+  id: string;
+  action: LocalAgentDesktopAction;
+  ok: boolean;
+  summary: string;
+  data: string | null;
+  evidence: string[];
+  error: string | null;
+  completedAt: string;
+};
+
 export type LocalAgentObsidianCommand = {
   id: string;
   action: LocalAgentObsidianAction;
@@ -37,6 +70,8 @@ export type ObserverDeviceLink = {
   observerVersion: string | null;
   obsidianCommand?: LocalAgentObsidianCommand | null;
   obsidianResult?: LocalAgentObsidianResult | null;
+  desktopCommand?: LocalAgentDesktopCommand | null;
+  desktopResult?: LocalAgentDesktopResult | null;
 };
 
 type PendingPair = {
@@ -113,6 +148,8 @@ export async function confirmObserverPairing(code: string) {
     observerVersion: null,
     obsidianCommand: null,
     obsidianResult: null,
+    desktopCommand: null,
+    desktopResult: null,
   };
 
   await Promise.all([
@@ -167,7 +204,11 @@ export async function pollObserverControl(deviceId: string, deviceToken: string,
     observerVersion: observerVersion ? String(observerVersion).slice(0, 30) : link.observerVersion,
   };
   await getCache().set(deviceKey(deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
-  return { ...safeLink(next), obsidianCommand: next.obsidianCommand ?? null };
+  return {
+    ...safeLink(next),
+    obsidianCommand: next.obsidianCommand ?? null,
+    desktopCommand: next.desktopCommand ?? null,
+  };
 }
 
 export async function setObserverCommand(controllerToken: string, command: ObserverCommand) {
@@ -252,6 +293,108 @@ export async function getObsidianCommandResult(controllerToken: string, commandI
   const result = link.obsidianResult ?? null;
   if (commandId && result?.id !== commandId) return { pending: Boolean(link.obsidianCommand?.id === commandId), result: null };
   return { pending: Boolean(link.obsidianCommand), result };
+}
+
+const READ_ONLY_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "CLIPBOARD_READ"]);
+const USER_AUTHORIZED_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>([
+  "OPEN_APP",
+  "FOCUS_WINDOW",
+  "OPEN_PATH",
+  "OPEN_URI",
+  "CLIPBOARD_WRITE",
+  "UI_CLICK_TEXT",
+  "UI_TYPE_TEXT",
+  "RUN_APPROVED_COMMAND",
+]);
+
+export async function enqueueDesktopCommand(
+  controllerToken: string,
+  input: {
+    action: LocalAgentDesktopAction;
+    target?: string | null;
+    text?: string | null;
+    args?: string[] | null;
+    authorization?: "READ_ONLY" | "USER_AUTHORIZED";
+  },
+) {
+  const link = await resolveController(controllerToken);
+  if (!link) return null;
+
+  const action = input.action;
+  if (!READ_ONLY_DESKTOP_ACTIONS.has(action) && !USER_AUTHORIZED_DESKTOP_ACTIONS.has(action)) return null;
+
+  const authorization = input.authorization === "USER_AUTHORIZED" ? "USER_AUTHORIZED" : "READ_ONLY";
+  if (USER_AUTHORIZED_DESKTOP_ACTIONS.has(action) && authorization !== "USER_AUTHORIZED") return null;
+
+  const target = input.target == null ? null : String(input.target).trim().slice(0, 1000);
+  const text = input.text == null ? null : String(input.text).slice(0, 20_000);
+  const args = Array.isArray(input.args)
+    ? input.args.map(item => String(item).slice(0, 1000)).slice(0, 20)
+    : [];
+
+  if (["OPEN_APP", "FOCUS_WINDOW", "OPEN_PATH", "OPEN_URI", "UI_CLICK_TEXT", "RUN_APPROVED_COMMAND"].includes(action) && !target) {
+    return null;
+  }
+  if (["CLIPBOARD_WRITE", "UI_TYPE_TEXT"].includes(action) && text == null) return null;
+
+  const command: LocalAgentDesktopCommand = {
+    id: `desk_${token(12)}`,
+    action,
+    target,
+    text,
+    args,
+    createdAt: new Date().toISOString(),
+    authorization,
+  };
+
+  const next: ObserverDeviceLink = { ...link, desktopCommand: command };
+  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
+  return command;
+}
+
+export async function submitDesktopCommandResult(
+  deviceId: string,
+  deviceToken: string,
+  result: LocalAgentDesktopResult,
+) {
+  const link = await authenticateObserverDevice(deviceId, deviceToken);
+  if (!link) return null;
+  if (!result?.id || !result?.action) return null;
+
+  const normalized: LocalAgentDesktopResult = {
+    id: String(result.id).slice(0, 80),
+    action: result.action,
+    ok: Boolean(result.ok),
+    summary: String(result.summary ?? "").slice(0, 2_000),
+    data: result.data == null ? null : String(result.data).slice(0, 200_000),
+    evidence: Array.isArray(result.evidence)
+      ? result.evidence.map(item => String(item).slice(0, 2_000)).slice(0, 20)
+      : [],
+    error: result.error == null ? null : String(result.error).slice(0, 4_000),
+    completedAt: result.completedAt && Number.isFinite(Date.parse(result.completedAt))
+      ? new Date(result.completedAt).toISOString()
+      : new Date().toISOString(),
+  };
+
+  const matching = link.desktopCommand?.id === normalized.id;
+  const next: ObserverDeviceLink = {
+    ...link,
+    desktopCommand: matching ? null : link.desktopCommand ?? null,
+    desktopResult: normalized,
+    lastHeartbeatAt: new Date().toISOString(),
+  };
+  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
+  return normalized;
+}
+
+export async function getDesktopCommandResult(controllerToken: string, commandId?: string | null) {
+  const link = await resolveController(controllerToken);
+  if (!link) return null;
+  const result = link.desktopResult ?? null;
+  if (commandId && result?.id !== commandId) {
+    return { pending: Boolean(link.desktopCommand?.id === commandId), result: null, link: safeLink(link) };
+  }
+  return { pending: Boolean(link.desktopCommand), result, link: safeLink(link) };
 }
 
 export async function getObserverLinkStatus(controllerToken: string) {
