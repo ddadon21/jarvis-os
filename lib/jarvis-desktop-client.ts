@@ -53,8 +53,10 @@ export function parseDesktopIntent(raw: string): DesktopIntent | null {
   const clipboard = text.match(/^(?:put|copy|set)\s+(.+?)\s+(?:on|to|as)\s+(?:my\s+)?clipboard$/i);
   if (clipboard) return { action: "CLIPBOARD_WRITE", text: clipboard[1] };
 
-  const focus = text.match(/^(?:focus|switch to|bring up|bring)\s+(.+?)(?:\s+window)?$/i);
-  if (focus) return { action: "FOCUS_WINDOW", target: focus[1] };
+  const focus = text.match(/^(?:focus(?: the)?|switch to)\s+(.+?)(?:\s+window)?$/i);
+  if (focus && /(?:chrome|edge|vscode|visual studio code|obsidian|terminal|explorer|notepad|calculator|spotify|window)$/i.test(focus[1])) {
+    return { action: "FOCUS_WINDOW", target: focus[1] };
+  }
 
   const openUrl = text.match(/^(?:open|go to|navigate to)\s+(https?:\/\/\S+)$/i);
   if (openUrl) return { action: "OPEN_URI", target: openUrl[1] };
@@ -65,11 +67,14 @@ export function parseDesktopIntent(raw: string): DesktopIntent | null {
   const openPath = text.match(/^(?:open|show)\s+((?:[a-zA-Z]:\\|\\\\|%[^%]+%\\).+)$/);
   if (openPath) return { action: "OPEN_PATH", target: openPath[1] };
 
-  const click = text.match(/^(?:click|press)\s+["']?(.+?)["']?(?:\s+in\s+(.+))?$/i);
+  const click = text.match(/^(?:click|press)\s+(?:the\s+)?(?:button\s+)?["'](.+?)["'](?:\s+in\s+(.+))?$/i);
   if (click) return { action: "UI_CLICK_TEXT", target: click[1], args: click[2] ? [click[2]] : [] };
 
-  const type = text.match(/^(?:type|enter|write)\s+(.+?)(?:\s+in(?:to)?\s+(.+))?$/i);
-  if (type) return { action: "UI_TYPE_TEXT", text: type[1], target: type[2] ?? null };
+  const typeQuoted = text.match(/^(?:type|enter)\s+["']([\s\S]+)["'](?:\s+in(?:to)?\s+(.+))?$/i);
+  if (typeQuoted) return { action: "UI_TYPE_TEXT", text: typeQuoted[1], target: typeQuoted[2] ?? null };
+
+  const typeExplicit = text.match(/^(?:type this|enter this)\s*:\s*([\s\S]+)$/i);
+  if (typeExplicit) return { action: "UI_TYPE_TEXT", text: typeExplicit[1], target: null };
 
   if (/^(?:check\s+)?git status$/i.test(text)) return { action: "RUN_APPROVED_COMMAND", target: "git-status" };
   if (/^(?:check\s+)?git diff(?: stat)?$/i.test(text)) return { action: "RUN_APPROVED_COMMAND", target: "git-diff-stat" };
