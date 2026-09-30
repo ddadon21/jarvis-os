@@ -10,6 +10,7 @@ import {
   AgentTask,
   AgentTaskPriority,
   WorkforceGap,
+  WorkforceGovernanceDecision,
   WorkforceObjective,
   WorkforceOperatingSystem,
   WorkforceState,
@@ -40,6 +41,29 @@ const BORING_WORK = [
   "Validate backups, authorization, and security boundaries",
   "Document fixes so the same failure does not recur",
 ];
+
+const BALANCED_GOVERNANCE: NonNullable<WorkforceOperatingSystem["governance"]> = {
+  mode: "BALANCED_AUTONOMY",
+  standard: "Autonomous enough to continue the mission; restrained enough not to invent a new mission.",
+  autoProceed: [
+    "Low-risk, reversible internal work inside an approved objective",
+    "Research, monitoring, testing, validation, documentation, cleanup, retries, and recovery",
+    "Small fixes with clear evidence, rollback paths, and a definition of done",
+  ],
+  askDwightFirst: [
+    "New mission, major scope expansion, or architecture redesign not already approved",
+    "External communication, spending, production-risk changes, permissions, contracts, or consequential account changes",
+    "A change whose downside is difficult to reverse or whose evidence is weak",
+  ],
+  neverWithoutExplicitUnlock: [
+    "Live trade execution or unrestricted money movement",
+    "Bypassing approval boundaries, exposing secrets, or silently expanding agent permissions",
+    "Changing the governance rules themselves to gain more authority",
+  ],
+  changeControl: "Reproduce → diagnose → smallest effective change → test → QA → observe. Redesign is the last resort.",
+  scopeControl: "New ideas may enter Vision/Backlog, but autonomous execution stays inside approved objectives until Dwight expands the mission.",
+  exceptionRule: "Dwight can explicitly authorize expansion; hard safety and permission boundaries still remain in force.",
+};
 
 const DEFAULT_AGENTS: AgentState[] = [
   {
@@ -176,6 +200,15 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
     const tasks = (Array.isArray(existing.tasks) ? existing.tasks : []).map((task) => ({
       ...task,
       definitionOfDone: task.definitionOfDone?.trim() || defaultDefinitionOfDone(task),
+      governance: task.governance ?? classifyTaskGovernance({
+        title: task.title,
+        domain: task.domain,
+        assignedTo: task.assignedTo,
+        priority: task.priority,
+        permissionRequired: task.permissionRequired,
+        objectiveId: task.objectiveId,
+        source: task.source,
+      }),
     }));
     const operatingSystem = existing.operatingSystem ?? buildOperatingSystem({
       previous: existing,
@@ -188,7 +221,11 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
       objectives.length !== existing.objectives.length ||
       !Array.isArray(existing.tasks) ||
       !existing.operatingSystem ||
-      tasks.some((task, index) => task.definitionOfDone !== existing.tasks?.[index]?.definitionOfDone) ||
+      tasks.some((task, index) =>
+        task.definitionOfDone !== existing.tasks?.[index]?.definitionOfDone ||
+        !existing.tasks?.[index]?.governance
+      ) ||
+      !existing.operatingSystem?.governance ||
       agents.some((agent, index) => agent.status !== existing.agents[index]?.status);
 
     if (!changed) return existing;
@@ -685,28 +722,49 @@ export async function addWorkforceTask(input: {
   const assignedTo = input.assignedTo ?? defaultAgentForDomain(input.domain ?? "CORE");
   const agent = state.agents.find((candidate) => candidate.id === assignedTo);
   const permissionRequired = input.permissionRequired ?? "ANALYZE";
+  const source = input.source?.trim().slice(0, 120) || "jarvis.executive";
   const allowed = permissionWithinCeiling(permissionRequired, agent?.permissionCeiling ?? "READ");
+  const governance = classifyTaskGovernance({
+    title: input.title,
+    domain: input.domain ?? agent?.domain ?? "CORE",
+    assignedTo,
+    priority: input.priority ?? "MEDIUM",
+    permissionRequired,
+    objectiveId: input.objectiveId ?? null,
+    source,
+  });
+  const status: AgentTask["status"] =
+    governance.action === "BLOCKED" ? "BLOCKED" :
+    governance.action === "WAIT_FOR_DWIGHT" || !allowed ? "WAITING_APPROVAL" :
+    "QUEUED";
+  const blockedReason =
+    governance.action === "BLOCKED" || governance.action === "WAIT_FOR_DWIGHT"
+      ? governance.reason
+      : !allowed
+        ? `Task requires ${permissionRequired}, above ${assignedTo}'s ${agent?.permissionCeiling ?? "READ"} permission ceiling.`
+        : null;
 
   const task: AgentTask = {
     id: crypto.randomUUID(),
     title: input.title.trim().slice(0, 220),
     domain: input.domain ?? agent?.domain ?? "CORE",
     assignedTo,
-    status: allowed ? "QUEUED" : "WAITING_APPROVAL",
+    status,
     priority: input.priority ?? "MEDIUM",
     permissionRequired,
     createdAt: now,
     updatedAt: now,
     objectiveId: input.objectiveId ?? null,
-    source: input.source?.trim().slice(0, 120) || "jarvis.executive",
+    source,
     result: null,
     evidence: [],
-    blockedReason: allowed ? null : `Task requires ${permissionRequired}, above ${assignedTo}'s ${agent?.permissionCeiling ?? "READ"} permission ceiling.`,
+    blockedReason,
     definitionOfDone: defaultDefinitionOfDone({
       title: input.title,
       assignedTo,
       domain: input.domain ?? agent?.domain ?? "CORE",
     }),
+    governance,
   };
 
   const next: WorkforceState = {
@@ -721,7 +779,7 @@ export async function addWorkforceTask(input: {
       domain: task.domain,
       source: task.source,
       importance: task.priority === "CRITICAL" ? "CRITICAL" : task.priority === "HIGH" ? "IMPORTANT" : "NORMAL",
-      summary: `${task.assignedTo} assigned: ${task.title}${task.status === "WAITING_APPROVAL" ? " · approval required" : ""}`,
+      summary: `${task.assignedTo} assigned: ${task.title}${task.status === "WAITING_APPROVAL" ? " · approval required" : task.status === "BLOCKED" ? " · blocked by governance" : task.governance?.action === "USER_AUTHORIZED" ? " · Dwight-authorized" : ""}`,
     }),
   );
 
@@ -753,16 +811,24 @@ function ensureTask(tasks: AgentTask[], seed: TaskSeed) {
   if (existing) return { tasks, task: existing };
 
   const now = new Date().toISOString();
+  const governance = classifyTaskGovernance(seed);
   const task: AgentTask = {
     id: crypto.randomUUID(),
     ...seed,
-    status: "QUEUED",
+    status:
+      governance.action === "BLOCKED" ? "BLOCKED" :
+      governance.action === "WAIT_FOR_DWIGHT" ? "WAITING_APPROVAL" :
+      "QUEUED",
     createdAt: now,
     updatedAt: now,
     result: null,
     evidence: [],
-    blockedReason: null,
+    blockedReason:
+      governance.action === "BLOCKED" || governance.action === "WAIT_FOR_DWIGHT"
+        ? governance.reason
+        : null,
     definitionOfDone: seed.definitionOfDone?.trim() || defaultDefinitionOfDone(seed),
+    governance,
   };
   return { tasks: [task, ...tasks], task };
 }
@@ -797,6 +863,81 @@ function permissionWithinCeiling(required: AgentPermission, ceiling: AgentPermis
     REQUIRES_APPROVAL: 4,
   };
   return rank[required] <= rank[ceiling] && required !== "REQUIRES_APPROVAL";
+}
+
+function classifyTaskGovernance(input: {
+  title: string;
+  domain?: AgentTask["domain"];
+  assignedTo?: AgentId;
+  priority?: AgentTaskPriority;
+  permissionRequired?: AgentPermission;
+  objectiveId?: string | null;
+  source?: string;
+}): WorkforceGovernanceDecision {
+  const title = input.title.toLowerCase();
+  const source = (input.source ?? "").toLowerCase();
+  const userAuthorized = source === "jarvis.workforce.ui" || source === "jarvis.chat" || source.startsWith("dwight.");
+  const evaluatedAt = new Date().toISOString();
+
+  const hardLimit = /\b(live trade|place (?:a )?(?:trade|order)|execute (?:a )?trade|unrestricted money movement|transfer (?:money|funds)|bypass (?:an? )?approval|disable (?:a )?guardrail|expose (?:a )?secret|reveal (?:an? )?(?:api key|password|credential)|expand (?:my|its|agent) permissions?|change (?:its|own) governance)\b/i.test(title);
+  if (hardLimit) {
+    return {
+      risk: "CRITICAL",
+      scope: "EXPAND",
+      action: "BLOCKED",
+      reason: "Hard autonomy boundary: this action stays disabled until Dwight deliberately changes the governing capability and its safety controls.",
+      evaluatedAt,
+    };
+  }
+
+  const consequentialExternal =
+    input.permissionRequired === "REQUIRES_APPROVAL" ||
+    input.permissionRequired === "EXTERNAL_LOW_RISK" ||
+    /\b(spend|purchase|pay|contract|sign|publish|contact|email|message|production deploy|deploy to production|delete production|credential|secret|permission change|account change)\b/i.test(title);
+  if (consequentialExternal) {
+    return {
+      risk: input.priority === "CRITICAL" ? "CRITICAL" : "HIGH",
+      scope: "EXECUTE",
+      action: "WAIT_FOR_DWIGHT",
+      reason: "Consequential external, financial, production, or permission-changing action requires Dwight's approval before execution.",
+      evaluatedAt,
+    };
+  }
+
+  const architectureChange = /\b(redesign|rebuild|rearchitect|re-architect|rewrite|replace architecture|migrate architecture|new architecture)\b/i.test(title);
+  const expansion = architectureChange || /\b(new (?:feature|capability|integration|agent|mission)|add (?:a |an )?(?:feature|capability|integration|agent)|expand (?:the )?(?:mission|scope|platform|workforce))\b/i.test(title);
+  if (expansion && !userAuthorized && !input.objectiveId) {
+    return {
+      risk: architectureChange ? "HIGH" : "MEDIUM",
+      scope: "EXPAND",
+      action: "WAIT_FOR_DWIGHT",
+      reason: architectureChange
+        ? "Autonomous redesign is paused. Reproduce the problem and exhaust the smallest effective fix before changing architecture."
+        : "This expands scope outside an approved objective. Preserve it as an idea, but wait for Dwight to authorize execution.",
+      evaluatedAt,
+    };
+  }
+
+  if (userAuthorized) {
+    return {
+      risk: architectureChange ? "HIGH" : expansion ? "MEDIUM" : "LOW",
+      scope: expansion ? "EXPAND" : "EXECUTE",
+      action: "USER_AUTHORIZED",
+      reason: "Dwight directly authorized this internal work. Normal QA, evidence, rollback, and permission boundaries still apply.",
+      evaluatedAt,
+    };
+  }
+
+  const maintenance = /\b(test|verify|validate|monitor|audit|document|cleanup|clean up|reproduce|review|research|analyze|inspect|retry|recover|repair|fix|check|backup)\b/i.test(title);
+  return {
+    risk: maintenance ? "LOW" : input.priority === "CRITICAL" ? "HIGH" : "MEDIUM",
+    scope: maintenance ? "MAINTAIN" : "EXECUTE",
+    action: "AUTO_PROCEED",
+    reason: maintenance
+      ? "Low-risk, reversible mission maintenance may proceed autonomously."
+      : "Work stays inside the current mission and permission ceiling; proceed with definition-of-done and QA checks.",
+    evaluatedAt,
+  };
 }
 
 function defaultDefinitionOfDone(input: { title: string; assignedTo?: string; domain?: string }) {
@@ -884,6 +1025,7 @@ function buildOperatingSystem(input: {
     doctrine: OPERATING_DOCTRINE,
     gaps: gapList,
     boringQueue: BORING_WORK,
+    governance: BALANCED_GOVERNANCE,
     chiefOfStaff: {
       meaningfulTasks: meaningful.length,
       blockedTasks: blocked.length,
@@ -925,6 +1067,10 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
       ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status) &&
       !task.definitionOfDone?.trim(),
   );
+  const governanceViolations = tasks.filter((task) =>
+    (task.governance?.action === "BLOCKED" && !["BLOCKED", "FAILED"].includes(task.status)) ||
+    (task.governance?.action === "WAIT_FOR_DWIGHT" && !["WAITING_APPROVAL", "BLOCKED", "FAILED"].includes(task.status)),
+  );
 
   const evidence = [
     `errors=${failures.length}`,
@@ -932,7 +1078,19 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     `waitingApproval=${waitingApproval.length}`,
     `stillRunning=${running.length}`,
     `missingDefinitionOfDone=${openWithoutDone.length}`,
+    `governanceViolations=${governanceViolations.length}`,
   ];
+
+  if (governanceViolations.length) {
+    return {
+      hasErrors: true,
+      hasBlockers: true,
+      summary: `QA found ${governanceViolations.length} governance violation${governanceViolations.length === 1 ? "" : "s"}. JARVIS stopped the clean-cycle claim because protected work crossed its allowed boundary.`,
+      nextCheck: "Return protected work to WAITING_APPROVAL/BLOCKED, then re-run QA.",
+      evidence,
+      blockedReason: governanceViolations.map((task) => `${task.assignedTo}: ${task.title}`).join(" | "),
+    };
+  }
 
   if (failures.length) {
     return {
