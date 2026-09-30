@@ -44,24 +44,25 @@ const BORING_WORK = [
 
 const BALANCED_GOVERNANCE: NonNullable<WorkforceOperatingSystem["governance"]> = {
   mode: "BALANCED_AUTONOMY",
-  standard: "Autonomous enough to continue the mission; restrained enough not to invent a new mission.",
+  standard: "Controlled aggression: bias to decisive action inside approved missions, but escalate irreversibility, mission expansion, and weakly-evidenced redesigns.",
   autoProceed: [
-    "Low-risk, reversible internal work inside an approved objective",
-    "Research, monitoring, testing, validation, documentation, cleanup, retries, and recovery",
-    "Small fixes with clear evidence, rollback paths, and a definition of done",
+    "Low- and medium-risk reversible internal work inside an approved objective",
+    "Research, monitoring, testing, validation, documentation, cleanup, retries, recovery, and measured experiments",
+    "Small fixes and tactical optimizations with evidence, rollback paths, and a definition of done",
+    "Cross-agent internal delegation that stays inside the same approved objective and permission ceilings",
   ],
   askDwightFirst: [
-    "New mission, major scope expansion, or architecture redesign not already approved",
+    "New mission, major scope expansion, or material architecture redesign",
     "External communication, spending, production-risk changes, permissions, contracts, or consequential account changes",
-    "A change whose downside is difficult to reverse or whose evidence is weak",
+    "A change whose downside is difficult to reverse, whose blast radius is high, or whose evidence is weak",
   ],
   neverWithoutExplicitUnlock: [
     "Live trade execution or unrestricted money movement",
     "Bypassing approval boundaries, exposing secrets, or silently expanding agent permissions",
     "Changing the governance rules themselves to gain more authority",
   ],
-  changeControl: "Reproduce → diagnose → smallest effective change → test → QA → observe. Redesign is the last resort.",
-  scopeControl: "New ideas may enter Vision/Backlog, but autonomous execution stays inside approved objectives until Dwight expands the mission.",
+  changeControl: "Observe → reproduce → diagnose → smallest reversible intervention → measure → QA → keep or revert. Redesign is the last resort after repeated evidence.",
+  scopeControl: "Agents may move fast and delegate inside approved objectives. New ideas go to Vision/Backlog; agents may not create a new mission or materially widen scope without Dwight.",
   exceptionRule: "Dwight can explicitly authorize expansion; hard safety and permission boundaries still remain in force.",
 };
 
@@ -911,14 +912,23 @@ function classifyTaskGovernance(input: {
 
   const architectureChange = /\b(redesign|rebuild|rearchitect|re-architect|rewrite|replace architecture|migrate architecture|new architecture)\b/i.test(title);
   const expansion = architectureChange || /\b(new (?:feature|capability|integration|agent|mission)|add (?:a |an )?(?:feature|capability|integration|agent)|expand (?:the )?(?:mission|scope|platform|workforce))\b/i.test(title);
-  if (expansion && !userAuthorized && !input.objectiveId) {
+
+  if (architectureChange && !userAuthorized) {
     return {
-      risk: architectureChange ? "HIGH" : "MEDIUM",
+      risk: "HIGH",
       scope: "EXPAND",
       action: "WAIT_FOR_DWIGHT",
-      reason: architectureChange
-        ? "Autonomous redesign is paused. Reproduce the problem and exhaust the smallest effective fix before changing architecture."
-        : "This expands scope outside an approved objective. Preserve it as an idea, but wait for Dwight to authorize execution.",
+      reason: "Controlled-aggression boundary: material redesign requires Dwight. First reproduce the problem, prove the current architecture cannot be corrected surgically, and show the expected gain versus blast radius.",
+      evaluatedAt,
+    };
+  }
+
+  if (expansion && !userAuthorized && !input.objectiveId) {
+    return {
+      risk: "MEDIUM",
+      scope: "EXPAND",
+      action: "WAIT_FOR_DWIGHT",
+      reason: "This expands scope outside an approved objective. Preserve the idea, but do not convert vision into execution until Dwight expands the mission.",
       evaluatedAt,
     };
   }
@@ -939,8 +949,8 @@ function classifyTaskGovernance(input: {
     scope: maintenance ? "MAINTAIN" : "EXECUTE",
     action: "AUTO_PROCEED",
     reason: maintenance
-      ? "Low-risk, reversible mission maintenance may proceed autonomously."
-      : "Work stays inside the current mission and permission ceiling; proceed with definition-of-done and QA checks.",
+      ? "Low-risk, reversible mission maintenance may proceed autonomously and should be completed without unnecessary escalation."
+      : "Work stays inside the approved mission and permission ceiling. Execute decisively, use the smallest effective move, measure the result, and require definition-of-done plus QA before claiming success.",
     evaluatedAt,
   };
 }
