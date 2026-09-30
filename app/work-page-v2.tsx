@@ -407,9 +407,6 @@ export default function WorkV2() {
           <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
-          <Panel title="AI WORKFORCE" corner={systemStatus?.workforce?.status ?? "STARTING"}>
-            <WorkforcePanel />
-          </Panel>
           <Panel title="OBSIDIAN" corner="LOCAL">
             <ObsidianBridgePanel />
           </Panel>
@@ -489,6 +486,10 @@ export default function WorkV2() {
                 <Event text="Finance state connected" time="FIN" />
               </>}
             </div>
+          </Panel>
+
+          <Panel title="AI WORKFORCE" corner={systemStatus?.workforce?.status ?? "STARTING"} className="core-workforce-panel">
+            <WorkforcePanel />
           </Panel>
 
           <Panel title="DOMAIN" corner={currentSector.signal}>
