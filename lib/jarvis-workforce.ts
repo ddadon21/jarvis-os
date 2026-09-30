@@ -9,7 +9,9 @@ import {
   AgentState,
   AgentTask,
   AgentTaskPriority,
+  WorkforceGap,
   WorkforceObjective,
+  WorkforceOperatingSystem,
   WorkforceState,
   appendRuntimeEvent,
   createRuntimeEvent,
@@ -20,6 +22,24 @@ import {
   setWorkforceState,
   shouldRunPulse,
 } from "./jarvis-runtime";
+
+const OPERATING_DOCTRINE = [
+  "See the mission.",
+  "Find the gaps.",
+  "Do the necessary work.",
+  "Close the loop.",
+  "Verify the result.",
+  "Then expand.",
+];
+
+const BORING_WORK = [
+  "Review stale or ownerless tasks",
+  "Verify durable persistence and recovery paths",
+  "Reproduce unresolved bugs before adding features",
+  "Check duplicate workflow / agent logic",
+  "Validate backups, authorization, and security boundaries",
+  "Document fixes so the same failure does not recur",
+];
 
 const DEFAULT_AGENTS: AgentState[] = [
   {
@@ -138,6 +158,7 @@ type TaskSeed = {
   permissionRequired: AgentPermission;
   objectiveId: string | null;
   source: string;
+  definitionOfDone?: string;
 };
 
 export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
@@ -152,16 +173,27 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
           status: "IDLE" as const,
         }));
     const objectives = mergeMissingObjectives(existing.objectives);
-    const tasks = Array.isArray(existing.tasks) ? existing.tasks : [];
+    const tasks = (Array.isArray(existing.tasks) ? existing.tasks : []).map((task) => ({
+      ...task,
+      definitionOfDone: task.definitionOfDone?.trim() || defaultDefinitionOfDone(task),
+    }));
+    const operatingSystem = existing.operatingSystem ?? buildOperatingSystem({
+      previous: existing,
+      agents,
+      tasks,
+      executiveFocus: existing.executiveSummary || "Close the highest-risk open loop before expanding.",
+    });
     const changed =
       agents.length !== existing.agents.length ||
       objectives.length !== existing.objectives.length ||
       !Array.isArray(existing.tasks) ||
+      !existing.operatingSystem ||
+      tasks.some((task, index) => task.definitionOfDone !== existing.tasks?.[index]?.definitionOfDone) ||
       agents.some((agent, index) => agent.status !== existing.agents[index]?.status);
 
     if (!changed) return existing;
 
-    const migrated: WorkforceState = { ...existing, agents, objectives, tasks };
+    const migrated: WorkforceState = { ...existing, agents, objectives, tasks, operatingSystem };
     await setWorkforceState(migrated);
     return migrated;
   }
@@ -175,6 +207,12 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
     objectives: DEFAULT_OBJECTIVES,
     tasks: [],
     executiveSummary: "JARVIS workforce is initialized and waiting for its first autonomous cycle.",
+    operatingSystem: buildOperatingSystem({
+      previous: null,
+      agents: DEFAULT_AGENTS,
+      tasks: [],
+      executiveFocus: "Establish the operating picture, then close the highest-risk gap.",
+    }),
   };
   await setWorkforceState(initial);
   return initial;
@@ -555,12 +593,19 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   });
   const hasErrors = agents.some((agent) => agent.status === "ERROR");
   const hasBlockers = agents.some((agent) => agent.status === "BLOCKED");
+  const executiveFocus = chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title, tasks);
+  const operatingSystem = buildOperatingSystem({
+    previous,
+    agents,
+    tasks,
+    executiveFocus,
+  });
 
   agents = setAgent(agents, "EXECUTIVE", {
     status: hasErrors ? "ERROR" : "DONE",
     lastRanAt: now,
     lastResult: executiveSummary,
-    currentWork: chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title, tasks),
+    currentWork: operatingSystem.chiefOfStaff.highestLeverage,
   });
 
   const next: WorkforceState = {
@@ -572,6 +617,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     objectives: previous.objectives,
     tasks: pruneTasks(tasks),
     executiveSummary,
+    operatingSystem,
   };
 
   await setWorkforceState(next);
@@ -656,6 +702,11 @@ export async function addWorkforceTask(input: {
     result: null,
     evidence: [],
     blockedReason: allowed ? null : `Task requires ${permissionRequired}, above ${assignedTo}'s ${agent?.permissionCeiling ?? "READ"} permission ceiling.`,
+    definitionOfDone: defaultDefinitionOfDone({
+      title: input.title,
+      assignedTo,
+      domain: input.domain ?? agent?.domain ?? "CORE",
+    }),
   };
 
   const next: WorkforceState = {
@@ -711,6 +762,7 @@ function ensureTask(tasks: AgentTask[], seed: TaskSeed) {
     result: null,
     evidence: [],
     blockedReason: null,
+    definitionOfDone: seed.definitionOfDone?.trim() || defaultDefinitionOfDone(seed),
   };
   return { tasks: [task, ...tasks], task };
 }
@@ -747,6 +799,113 @@ function permissionWithinCeiling(required: AgentPermission, ceiling: AgentPermis
   return rank[required] <= rank[ceiling] && required !== "REQUIRES_APPROVAL";
 }
 
+function defaultDefinitionOfDone(input: { title: string; assignedTo?: string; domain?: string }) {
+  const title = input.title.trim().replace(/\.$/, "");
+  return [
+    title + " is complete only when the intended outcome is observable",
+    "supporting evidence is attached or referenced",
+    "known blockers are resolved or explicitly escalated",
+    "and QA can independently verify the result without relying on the agent's claim.",
+  ].join(", ") + ".";
+}
+
+function riskRank(value: WorkforceGap["risk"]) {
+  return value === "CRITICAL" ? 4 : value === "HIGH" ? 3 : value === "MEDIUM" ? 2 : 1;
+}
+
+function buildOperatingSystem(input: {
+  previous: WorkforceState | null;
+  agents: AgentState[];
+  tasks: AgentTask[];
+  executiveFocus: string;
+}): WorkforceOperatingSystem {
+  const now = new Date().toISOString();
+  const prior = input.previous?.operatingSystem?.gaps ?? [];
+  const gaps = new Map<string, WorkforceGap>();
+
+  for (const gap of prior) {
+    if (gap.status === "RESOLVED") gaps.set(gap.id, gap);
+  }
+
+  for (const agent of input.agents) {
+    if (agent.status !== "ERROR" && agent.status !== "BLOCKED") continue;
+    const id = `agent:${agent.id.toLowerCase()}`;
+    gaps.set(id, {
+      id,
+      title: `${agent.id} operational gap: ${agent.currentWork}`.slice(0, 220),
+      risk: agent.status === "ERROR" ? "HIGH" : "MEDIUM",
+      owner: agent.id,
+      status: "ACTIVE",
+      definitionOfDone: `${agent.id} returns to a verified non-error state and QA confirms the dependency or failure path is closed.`,
+      source: "agent-health",
+      updatedAt: now,
+    });
+  }
+
+  for (const task of input.tasks) {
+    if (!["BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status)) continue;
+    const owner = task.status === "WAITING_APPROVAL" ? "EXECUTIVE" : task.assignedTo;
+    const id = `task:${task.id}`;
+    gaps.set(id, {
+      id,
+      title: task.title,
+      risk: task.priority === "CRITICAL" ? "CRITICAL" : task.priority === "HIGH" ? "HIGH" : "MEDIUM",
+      owner,
+      status: "ACTIVE",
+      definitionOfDone: task.definitionOfDone?.trim() || defaultDefinitionOfDone(task),
+      source: task.status === "WAITING_APPROVAL" ? "approval" : "task",
+      updatedAt: task.updatedAt || now,
+    });
+  }
+
+  const gapList = [...gaps.values()]
+    .sort((a, b) => riskRank(b.risk) - riskRank(a.risk) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, 24);
+
+  const open = input.tasks.filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status));
+  const meaningful = open.filter((task) =>
+    task.priority === "HIGH" ||
+    task.priority === "CRITICAL" ||
+    Boolean(task.objectiveId),
+  );
+  const blocked = open.filter((task) => task.status === "BLOCKED");
+  const waiting = open.filter((task) => task.status === "WAITING_APPROVAL");
+  const killCandidates = open.filter((task) =>
+    !task.objectiveId &&
+    (task.priority === "LOW" || task.priority === "MEDIUM") &&
+    Number.isFinite(Date.parse(task.updatedAt)) &&
+    Date.now() - Date.parse(task.updatedAt) > 24 * 60 * 60 * 1000,
+  );
+  const unresolved = gapList.filter((gap) => gap.status !== "RESOLVED");
+  const expansionGate = unresolved.some((gap) => gap.risk === "CRITICAL" || gap.risk === "HIGH");
+  const avoidanceGap = unresolved[0];
+
+  return {
+    doctrine: OPERATING_DOCTRINE,
+    gaps: gapList,
+    boringQueue: BORING_WORK,
+    chiefOfStaff: {
+      meaningfulTasks: meaningful.length,
+      blockedTasks: blocked.length,
+      killCandidates: killCandidates.length,
+      waitingOnDwight: waiting.length,
+      highestLeverage: expansionGate && avoidanceGap
+        ? `Close ${avoidanceGap.risk.toLowerCase()} gap first: ${avoidanceGap.title}`
+        : input.executiveFocus,
+      whatAvoiding: avoidanceGap
+        ? `Unclosed loop: ${avoidanceGap.title}`
+        : "No critical avoidance signal detected from current workforce evidence.",
+    },
+    execution: {
+      expansionGate,
+      currentFocus: expansionGate && avoidanceGap ? avoidanceGap.title : input.executiveFocus,
+      nextAction: expansionGate && avoidanceGap
+        ? avoidanceGap.definitionOfDone
+        : "Advance the highest-leverage objective, then verify the result before adding scope.",
+    },
+  };
+}
+
 function buildPlanForObjective(objective: WorkforceObjective) {
   return [
     `Objective: ${objective.title}.`,
@@ -761,12 +920,18 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
   const blockers = agents.filter((agent) => agent.status === "BLOCKED");
   const waitingApproval = tasks.filter((task) => task.status === "WAITING_APPROVAL");
   const running = tasks.filter((task) => task.status === "RUNNING");
+  const openWithoutDone = tasks.filter(
+    (task) =>
+      ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"].includes(task.status) &&
+      !task.definitionOfDone?.trim(),
+  );
 
   const evidence = [
     `errors=${failures.length}`,
     `blockedAgents=${blockers.length}`,
     `waitingApproval=${waitingApproval.length}`,
     `stillRunning=${running.length}`,
+    `missingDefinitionOfDone=${openWithoutDone.length}`,
   ];
 
   if (failures.length) {
@@ -780,14 +945,16 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[]) {
     };
   }
 
-  if (blockers.length || waitingApproval.length) {
+  if (blockers.length || waitingApproval.length || openWithoutDone.length) {
     return {
       hasErrors: false,
       hasBlockers: true,
-      summary: `QA found no agent errors, but ${blockers.length} agent${blockers.length === 1 ? "" : "s"} are blocked and ${waitingApproval.length} task${waitingApproval.length === 1 ? "" : "s"} await approval.`,
+      summary: `QA found no agent errors, but ${blockers.length} agent${blockers.length === 1 ? "" : "s"} are blocked, ${waitingApproval.length} task${waitingApproval.length === 1 ? "" : "s"} await approval, and ${openWithoutDone.length} open task${openWithoutDone.length === 1 ? "" : "s"} lack a definition of done.`,
       nextCheck: "Watch blocked dependencies and surface approval requests without bypassing them.",
       evidence,
-      blockedReason: blockers.map((agent) => `${agent.id}: ${agent.lastResult}`).join(" | ") || "Approval-gated work is waiting.",
+      blockedReason:
+        blockers.map((agent) => `${agent.id}: ${agent.lastResult}`).join(" | ") ||
+        (openWithoutDone.length ? "Open work is missing a definition of done." : "Approval-gated work is waiting."),
     };
   }
 
