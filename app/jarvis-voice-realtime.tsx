@@ -173,14 +173,29 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       const body = await response.json() as {
         configured?: boolean;
         voiceVerified?: boolean;
+        runtimeState?: {
+          status?: "UNKNOWN" | "CONNECTED" | "PLAN_REQUIRED" | "AUTH_ERROR" | "DEGRADED";
+        };
       };
       const configured = body.configured === true;
-      elevenVerifiedRef.current = configured;
+      const runtimeStatus = body.runtimeState?.status ?? "UNKNOWN";
+      elevenVerifiedRef.current = runtimeStatus === "CONNECTED";
       elevenUnavailableRef.current = !configured;
-      if (configured) {
-        setCaption("ELEVENLABS ONLINE");
+
+      if (!configured) {
+        setCaption("ELEVENLABS NOT CONFIGURED");
+        return false;
       }
-      return configured;
+
+      if (runtimeStatus === "CONNECTED") setCaption("ELEVENLABS ONLINE");
+      else if (runtimeStatus === "PLAN_REQUIRED") setCaption("ELEVENLABS PLAN REQUIRED");
+      else if (runtimeStatus === "AUTH_ERROR") setCaption("ELEVENLABS AUTH ERROR");
+      else if (runtimeStatus === "DEGRADED") setCaption("ELEVENLABS DEGRADED");
+      else setCaption("ELEVENLABS READY");
+
+      // Configuration is enough to keep the TTS path eligible for a fresh retry.
+      // The actual POST / TTS result decides whether speech succeeds.
+      return true;
     } catch {
       elevenVerifiedRef.current = false;
       elevenUnavailableRef.current = true;
