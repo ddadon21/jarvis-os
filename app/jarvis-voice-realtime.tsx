@@ -73,6 +73,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const elevenAudioRef = useRef<HTMLAudioElement | null>(null);
   const premiumSpeechChainRef = useRef<Promise<void>>(Promise.resolve());
   const elevenUnavailableRef = useRef(false);
+  const elevenVerifiedRef = useRef(false);
   const fallbackPendingSpeechRef = useRef(0);
   const fallbackStreamDoneRef = useRef(true);
   const fallbackSpeechBufferRef = useRef("");
@@ -159,6 +160,34 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     // Root provider intentionally mounts once so voice survives HOME/WORK route changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function verifyPremiumVoice() {
+    try {
+      const response = await fetch("/api/voice/elevenlabs", { cache: "no-store" });
+      if (!response.ok) {
+        elevenVerifiedRef.current = false;
+        elevenUnavailableRef.current = true;
+        return false;
+      }
+      const body = await response.json() as {
+        configured?: boolean;
+        voiceVerified?: boolean;
+        voice?: { name?: string | null; accent?: string | null } | null;
+      };
+      const verified = body.configured === true && body.voiceVerified === true;
+      elevenVerifiedRef.current = verified;
+      elevenUnavailableRef.current = !verified;
+      if (verified) {
+        const name = body.voice?.name?.trim();
+        setCaption(name ? `ELEVENLABS VOICE ONLINE · ${name.toUpperCase()}` : "ELEVENLABS VOICE ONLINE");
+      }
+      return verified;
+    } catch {
+      elevenVerifiedRef.current = false;
+      elevenUnavailableRef.current = true;
+      return false;
+    }
+  }
 
   function stopWakeRecognition() {
     try {
@@ -787,7 +816,19 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }
 
     setVoice("LISTENING");
-    setCaption("VOICE ONLINE · TALK NORMALLY");
+    setCaption("CHECKING PREMIUM VOICE");
+    void verifyPremiumVoice().then((verified) => {
+      if (!voiceEnabledRef.current) return;
+      if (verified) {
+        window.setTimeout(() => {
+          if (voiceEnabledRef.current && voiceStateRef.current === "LISTENING") {
+            setCaption("VOICE ONLINE · ELEVENLABS");
+          }
+        }, 900);
+      } else {
+        setCaption("VOICE ONLINE · FALLBACK VOICE");
+      }
+    });
 
     try {
       recognitionRef.current.start();
