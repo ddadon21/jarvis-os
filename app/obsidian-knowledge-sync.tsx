@@ -341,6 +341,242 @@ function nextMoveNote(core: CoreState) {
   return lines.join("\n");
 }
 
+function decisionLogNote(status: SystemStatus) {
+  const decisions = status.core?.memory?.decisions ?? [];
+  const lines = [
+    "---", "domain: decisions", "type: institutional-log", "---", "",
+    "# JARVIS Decision Log", "",
+    "> Durable decision memory. Decisions are preserved with reason, expected outcome, and evidence rather than reduced to the latest next move.", ""
+  ];
+  if (!decisions.length) lines.push("_No durable Core decisions are recorded yet._");
+  for (const decision of decisions) {
+    lines.push(
+      "## " + (decision.decision || "Decision"),
+      "- **At:** " + when(decision.at),
+      "- **Reason:** " + (decision.reason || "Not recorded"),
+      "- **Expected outcome:** " + (decision.expectedOutcome || "Not recorded"),
+      "- **Source:** " + (decision.source || "JARVIS Core"),
+    );
+    if (decision.evidence?.length) {
+      lines.push("- **Evidence:**");
+      for (const evidence of decision.evidence.slice(0, 12)) lines.push("  - " + evidence);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function decisionHistoryNote(item: {
+  id?: string;
+  at?: string;
+  decision?: string;
+  reason?: string;
+  expectedOutcome?: string;
+  evidence?: string[];
+  source?: string;
+}) {
+  const lines = [
+    "---",
+    "domain: decisions",
+    "type: decision",
+    "decision_id: " + (item.id || "unknown"),
+    "date: " + isoDay(item.at),
+    "---", "",
+    "# " + (item.decision || "Decision"), "",
+    "- **At:** " + when(item.at),
+    "- **Reason:** " + (item.reason || "Not recorded"),
+    "- **Expected outcome:** " + (item.expectedOutcome || "Not recorded"),
+    "- **Source:** " + (item.source || "JARVIS Core"),
+    "", "## Evidence",
+  ];
+  if (!item.evidence?.length) lines.push("_No evidence attached._");
+  for (const evidence of item.evidence || []) lines.push("- " + evidence);
+  return lines.join("\n");
+}
+
+function projectsNote(status: SystemStatus) {
+  const objectives = status.core?.memory?.objectives ?? [];
+  const lines = [
+    "---", "domain: projects", "type: active-projects", "---", "",
+    "# Active Projects & Objectives", "",
+    "- **Mission:** " + (status.core?.worldState?.mission || status.workforce?.executiveSummary || "Not recorded"),
+    "- **As of:** " + when(status.core?.worldState?.asOf || status.core?.generatedAt), "",
+  ];
+  if (!objectives.length) lines.push("_No Core objectives are currently recorded._");
+  for (const objective of objectives) {
+    lines.push(
+      "## " + (objective.title || "Untitled objective"),
+      "- **Domain:** " + (objective.domain || "CORE"),
+      "- **Status:** " + (objective.status || "UNKNOWN"),
+      "- **Current focus:** " + (objective.currentFocus || "Not recorded"),
+      "- **Definition of done:** " + (objective.successDefinition || "Not recorded"),
+      "",
+    );
+  }
+  return lines.join("\n");
+}
+
+function systemCapabilityNote(status: SystemStatus) {
+  const core = status.core;
+  const tools = core?.tools ?? [];
+  const permissions = core?.permissions;
+  const lines = [
+    "---", "domain: system", "type: capability-registry", "---", "",
+    "# JARVIS Capability Registry", "",
+    "- **Generated:** " + when(core?.generatedAt),
+    "- **Operating posture:** " + (permissions?.defaultPosture || "Unknown"), "",
+    "## Tools",
+  ];
+  if (!tools.length) lines.push("_No Core tool registry available._");
+  for (const tool of tools) {
+    lines.push(
+      "### " + (tool.label || tool.id || "Tool"),
+      "- **State:** " + (tool.state || "UNKNOWN"),
+      "- **Authority:** " + (tool.authority || "UNKNOWN"),
+      "- **Capabilities:** " + (tool.capabilities?.join(" · ") || "None recorded"),
+      "- **Note:** " + (tool.note || "None"),
+      "",
+    );
+  }
+  lines.push("## Permission Boundaries");
+  lines.push("### Auto-proceed");
+  for (const item of permissions?.autoProceed ?? []) lines.push("- " + item);
+  lines.push("", "### Ask Dwight first");
+  for (const item of permissions?.askDwightFirst ?? []) lines.push("- " + item);
+  lines.push("", "### Hard limits");
+  for (const item of permissions?.hardLimits ?? []) lines.push("- " + item);
+  return lines.join("\n");
+}
+
+function meetingsNote(assistant: AssistantState | null) {
+  const events = [...(assistant?.calendar?.events ?? [])]
+    .filter(event => event.status !== "CANCELLED" && event.startAt && Number.isFinite(Date.parse(event.startAt)))
+    .sort((a, b) => Date.parse(a.startAt || "") - Date.parse(b.startAt || ""))
+    .slice(0, 30);
+  const lines = [
+    "---", "domain: meetings", "type: upcoming", "---", "",
+    "# Upcoming Meetings", "",
+    "- **Calendar source:** " + (assistant?.sources?.calendar || "NOT CONNECTED"),
+    "- **As of:** " + when(assistant?.calendar?.asOf || assistant?.updatedAt), "",
+  ];
+  if (!events.length) lines.push("_No upcoming connected-calendar events are available._");
+  for (const event of events) {
+    lines.push(
+      "## " + (event.title || "Untitled event"),
+      "- **Start:** " + when(event.startAt),
+      "- **End:** " + when(event.endAt),
+      "- **Status:** " + (event.status || "UNKNOWN"),
+      "- **Organizer:** " + (event.organizer || "Not recorded"),
+      "- **Location:** " + (event.location || "Not recorded"),
+    );
+    if (event.attendees?.length) {
+      lines.push("- **Attendees:** " + event.attendees.slice(0, 20).map(person => person.name || person.email || "Unknown").join(" · "));
+    }
+    if (event.joinUrl) lines.push("- **Join:** " + event.joinUrl);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function peopleNote(assistant: AssistantState | null) {
+  const people = new Map<string, { name: string; email: string | null; context: Set<string>; lastSeen: string | null }>();
+
+  for (const event of assistant?.calendar?.events ?? []) {
+    for (const attendee of event.attendees ?? []) {
+      const email = attendee.email?.trim() || null;
+      const name = attendee.name?.trim() || email || "Unknown";
+      const key = (email || name).toLowerCase();
+      if (!key || key === "unknown") continue;
+      const current = people.get(key) ?? { name, email, context: new Set<string>(), lastSeen: null };
+      if (event.title) current.context.add("Meeting: " + event.title);
+      if (event.startAt && (!current.lastSeen || Date.parse(event.startAt) > Date.parse(current.lastSeen))) current.lastSeen = event.startAt;
+      people.set(key, current);
+    }
+  }
+
+  for (const signal of assistant?.communications?.recent ?? []) {
+    const raw = signal.from?.trim();
+    if (!raw) continue;
+    const emailMatch = raw.match(/<([^>]+@[^>]+)>/) || raw.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+    const email = emailMatch?.[1] || null;
+    const name = raw.replace(/<[^>]+>/g, "").replace(/^["']|["']$/g, "").trim() || email || raw;
+    const key = (email || name).toLowerCase();
+    const current = people.get(key) ?? { name, email, context: new Set<string>(), lastSeen: null };
+    if (signal.subject) current.context.add("Email: " + signal.subject);
+    if (signal.receivedAt && (!current.lastSeen || Date.parse(signal.receivedAt) > Date.parse(current.lastSeen))) current.lastSeen = signal.receivedAt;
+    people.set(key, current);
+  }
+
+  const ordered = [...people.values()]
+    .sort((a, b) => Date.parse(b.lastSeen || "1970-01-01") - Date.parse(a.lastSeen || "1970-01-01"))
+    .slice(0, 30);
+
+  const lines = [
+    "---", "domain: people", "type: relationship-context", "---", "",
+    "# Recent People & Relationship Context", "",
+    "> Built only from connected meeting attendees and recent communication metadata. It is context, not a CRM judgment.", "",
+  ];
+  if (!ordered.length) lines.push("_No connected people context is available yet._");
+  for (const person of ordered) {
+    lines.push(
+      "## " + person.name,
+      "- **Email:** " + (person.email || "Not recorded"),
+      "- **Last seen in connected context:** " + when(person.lastSeen),
+      "- **Recent context:** " + ([...person.context].slice(0, 6).join(" · ") || "Not recorded"),
+      "",
+    );
+  }
+  return lines.join("\n");
+}
+
+function codingIndexNote(history: CodingResult[]) {
+  const recent = [...history]
+    .sort((a, b) => Date.parse(b.completedAt || "1970-01-01") - Date.parse(a.completedAt || "1970-01-01"))
+    .slice(0, 30);
+  const lines = [
+    "---", "domain: coding", "type: executor-index", "---", "",
+    "# Coding Executor Outcomes", "",
+    "> This keeps outcome-level history from approved Codex/Claude Code jobs. Full noisy terminal output is intentionally not mirrored.", "",
+  ];
+  if (!recent.length) lines.push("_No coding executor jobs have completed through JARVIS yet._");
+  for (const item of recent) {
+    lines.push(
+      "- " + when(item.completedAt) +
+      " · **" + (item.provider || "CODING AGENT") + "**" +
+      " · " + (item.ok ? "VERIFIED COMPLETE" : "FAILED") +
+      " · " + (item.task || item.summary || "Untitled coding task"),
+    );
+  }
+  return lines.join("\n");
+}
+
+function codingHistoryNote(item: CodingResult) {
+  const lines = [
+    "---",
+    "domain: coding",
+    "type: executor-result",
+    "executor_id: " + (item.id || "unknown"),
+    "provider: " + (item.provider || "unknown"),
+    "date: " + isoDay(item.completedAt),
+    "verified: " + (item.ok ? "true" : "false"),
+    "---", "",
+    "# " + (item.provider || "Coding Agent") + " — " + (item.task || "Coding Task"), "",
+    "- **Completed:** " + when(item.completedAt),
+    "- **Result:** " + (item.ok ? "SUCCESS" : "FAILED"),
+    "- **Workspace:** " + (item.workspace || "Default approved workspace"),
+    "- **Summary:** " + (item.summary || "No summary recorded"),
+  ];
+  if (item.error) lines.push("- **Error:** " + item.error);
+  if (item.evidence?.length) {
+    lines.push("", "## Evidence");
+    for (const evidence of item.evidence.slice(0, 16)) lines.push("- " + evidence);
+  }
+  if (item.outputExcerpt) {
+    lines.push("", "## Result Excerpt", item.outputExcerpt.slice(0, 1800));
+  }
+  return lines.join("\n");
+}
+
 function knowledgeMap(dayKey: string) {
   return [
     "# JARVIS Knowledge Map", "",
@@ -354,7 +590,13 @@ function knowledgeMap(dayKey: string) {
     "- [[04 Life/Weekly/7D Review - " + dayKey + "|Life 7-Day Review]]",
     "- [[05 SentryOps/Current Operating State|SentryOps]]",
     "- [[06 Decisions/Current Next Move|Decisions / Next Move]]",
-    "- [[08 Research/SentryOps Research Pulse|Research]]", "",
+    "- [[06 Decisions/Decision Log|Decision Log]]",
+    "- [[08 Research/SentryOps Research Pulse|Research]]",
+    "- [[09 Projects/Active Projects|Projects]]",
+    "- [[10 System/JARVIS Capability Registry|System / Capabilities]]",
+    "- [[11 Meetings/Upcoming Meetings|Meetings]]",
+    "- [[12 People/Recent Contacts|People]]",
+    "- [[13 Coding/Executor Outcomes|Coding Outcomes]]", "",
     "## Storage Model",
     "- **Supabase:** structured source of truth",
     "- **Obsidian:** readable long-term knowledge and reflection",
@@ -375,7 +617,12 @@ function dailyNote(dayKey: string, core: CoreState) {
     "- [[03 Finance/Current Capital Snapshot|Finance]]",
     "- [[05 SentryOps/Current Operating State|SentryOps]]",
     "- [[08 Research/SentryOps Research Pulse|Research]]",
-    "- [[06 Decisions/Current Next Move|Current Next Move]]", "",
+    "- [[06 Decisions/Current Next Move|Current Next Move]]",
+    "- [[06 Decisions/Decision Log|Decision Log]]",
+    "- [[09 Projects/Active Projects|Projects]]",
+    "- [[10 System/JARVIS Capability Registry|System]]",
+    "- [[11 Meetings/Upcoming Meetings|Meetings]]",
+    "- [[13 Coding/Executor Outcomes|Coding Outcomes]]", "",
     "## Trading",
     "Trading reviews are written from the Trading Day Journal into 02 Trading/Daily when a day is saved.", ""
   ].join("\n");
