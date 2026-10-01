@@ -70,6 +70,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const voiceEnabledRef = useRef(false);
   const voiceStateRef = useRef<JarvisVoiceState>("STANDBY");
   const fallbackArmedRef = useRef(false);
+  const fallbackArmTimerRef = useRef<number | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const elevenAudioRef = useRef<HTMLAudioElement | null>(null);
   const premiumSpeechChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -466,9 +467,9 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     if (!fallbackStreamDoneRef.current || fallbackPendingSpeechRef.current > 0) return;
     fallbackSpeakingRef.current = false;
     if (!voiceEnabledRef.current) return;
-    fallbackArmedRef.current = true;
+    clearFallbackArm();
     setVoice("LISTENING");
-    setCaption("VOICE ONLINE · TALK NORMALLY");
+    setCaption("VOICE ONLINE · SAY JARVIS");
     restartWakeSoon(70);
   }
 
@@ -753,6 +754,27 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }
   }
 
+  function clearFallbackArm() {
+    fallbackArmedRef.current = false;
+    if (fallbackArmTimerRef.current !== null) {
+      window.clearTimeout(fallbackArmTimerRef.current);
+      fallbackArmTimerRef.current = null;
+    }
+  }
+
+  function armFallbackCommandWindow(ms = 6500) {
+    fallbackArmedRef.current = true;
+    if (fallbackArmTimerRef.current !== null) window.clearTimeout(fallbackArmTimerRef.current);
+    fallbackArmTimerRef.current = window.setTimeout(() => {
+      fallbackArmedRef.current = false;
+      fallbackArmTimerRef.current = null;
+      if (voiceEnabledRef.current && !fallbackSpeakingRef.current && !realtimeActiveRef.current) {
+        setVoice("LISTENING");
+        setCaption("VOICE ONLINE · SAY JARVIS");
+      }
+    }, ms);
+  }
+
   function interruptFallbackSpeech() {
     speechGenerationRef.current += 1;
     try {
@@ -775,26 +797,33 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     if (!transcript || realtimeActiveRef.current || !voiceEnabledRef.current) return;
 
     const wakeMatch = transcript.match(/(?:^|\b)(?:(?:hey|okay|ok|yo)\s+)?jarvis\b[\s,:-]*(.*)$/i);
-    const command = wakeMatch ? (wakeMatch[1]?.trim() ?? "") : transcript;
+    const wakeCommand = wakeMatch ? (wakeMatch[1]?.trim() ?? "") : "";
+    const command = wakeMatch ? wakeCommand : fallbackArmedRef.current ? transcript : "";
+
+    // Background-media guard: when JARVIS is not explicitly armed, speech without
+    // the wake word is ignored. Music, Netflix, podcasts, and nearby conversation
+    // may reach transcription but cannot become commands.
+    if (!wakeMatch && !fallbackArmedRef.current) return;
 
     if (fallbackSpeakingRef.current) {
       // While JARVIS speaks, only an explicit wake-word interruption is accepted.
-      // This prevents his own speaker output from recursively triggering commands.
       if (!wakeMatch) return;
       interruptFallbackSpeech();
-      if (!command || /^(?:stop|wait|hold on|quiet|cancel|never mind|nevermind)\b/i.test(command)) {
+      if (!wakeCommand || /^(?:stop|wait|hold on|quiet|cancel|never mind|nevermind)\b/i.test(wakeCommand)) {
+        clearFallbackArm();
         return;
       }
     }
 
-    if (!command) {
-      fallbackArmedRef.current = true;
+    if (wakeMatch && !wakeCommand) {
+      armFallbackCommandWindow();
       setVoice("LISTENING");
-      setCaption("LISTENING");
+      setCaption("LISTENING · COMMAND WINDOW");
       return;
     }
 
-    fallbackArmedRef.current = true;
+    if (!command) return;
+    clearFallbackArm();
 
     try {
       const desktop = await tryExecuteDesktopText(command);
@@ -854,9 +883,17 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         }, 280);
       }
 
-      if (interim.trim() && !fallbackSpeakingRef.current && !realtimeActiveRef.current && voiceStateRef.current !== "THINKING") {
+      const interimText = interim.trim();
+      const interimHasWake = /(?:^|\b)(?:(?:hey|okay|ok|yo)\s+)?jarvis\b/i.test(interimText);
+      if (
+        interimText &&
+        (fallbackArmedRef.current || interimHasWake) &&
+        !fallbackSpeakingRef.current &&
+        !realtimeActiveRef.current &&
+        voiceStateRef.current !== "THINKING"
+      ) {
         setVoice("LISTENING");
-        setCaption(interim.trim());
+        setCaption(interimHasWake ? "JARVIS HEARD · KEEP TALKING" : interimText);
       }
     };
     recognition.onerror = (event: any) => {
@@ -882,7 +919,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
     voiceEnabledRef.current = true;
     setVoiceEnabled(true);
-    fallbackArmedRef.current = true;
+    clearFallbackArm();
     fallbackStreamDoneRef.current = true;
     window.localStorage.setItem(VOICE_STORAGE_KEY, "true");
 
@@ -922,7 +959,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     pendingTranscriptRef.current = "";
     voiceEnabledRef.current = false;
     setVoiceEnabled(false);
-    fallbackArmedRef.current = false;
+    clearFallbackArm();
     fallbackSpeakingRef.current = false;
     fallbackStreamDoneRef.current = true;
     fallbackPendingSpeechRef.current = 0;
