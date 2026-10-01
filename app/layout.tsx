@@ -5,6 +5,7 @@ import "./theme-tuning.css";
 import "./compact.css";
 import "./jarvis-shell-controls.css";
 import "./jarvis-presence.css";
+import "./performance.css";
 import PwaRegister from "./pwa-register";
 import JarvisVoiceProvider from "./jarvis-voice";
 import JarvisCloudBridge from "./jarvis-cloud-bridge";
