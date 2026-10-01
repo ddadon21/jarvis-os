@@ -558,6 +558,8 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     setVoice("SPEAKING");
     setCaption("JARVIS RESPONDING");
     fallbackPendingSpeechRef.current += 1;
+    // Keep recognition alive for explicit "Jarvis ..." barge-in commands.
+    restartWakeSoon(120, true);
 
     premiumSpeechChainRef.current = premiumSpeechChainRef.current
       .catch(() => undefined)
@@ -751,12 +753,39 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }
   }
 
+  function interruptFallbackSpeech() {
+    speechGenerationRef.current += 1;
+    try {
+      elevenAudioRef.current?.pause();
+    } catch {}
+    elevenAudioRef.current = null;
+    window.speechSynthesis?.cancel();
+    premiumSpeechChainRef.current = Promise.resolve();
+    fallbackPendingSpeechRef.current = 0;
+    fallbackSpeechBufferRef.current = "";
+    fallbackStreamDoneRef.current = true;
+    fallbackSpeakingRef.current = false;
+    fallbackArmedRef.current = true;
+    setVoice("LISTENING");
+    setCaption("LISTENING");
+  }
+
   async function handleWakeTranscript(raw: string) {
     const transcript = raw.trim();
     if (!transcript || realtimeActiveRef.current || !voiceEnabledRef.current) return;
 
     const wakeMatch = transcript.match(/(?:^|\b)(?:(?:hey|okay|ok|yo)\s+)?jarvis\b[\s,:-]*(.*)$/i);
     const command = wakeMatch ? (wakeMatch[1]?.trim() ?? "") : transcript;
+
+    if (fallbackSpeakingRef.current) {
+      // While JARVIS speaks, only an explicit wake-word interruption is accepted.
+      // This prevents his own speaker output from recursively triggering commands.
+      if (!wakeMatch) return;
+      interruptFallbackSpeech();
+      if (!command || /^(?:stop|wait|hold on|quiet|cancel|never mind|nevermind)\b/i.test(command)) {
+        return;
+      }
+    }
 
     if (!command) {
       fallbackArmedRef.current = true;
@@ -825,7 +854,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         }, 280);
       }
 
-      if (interim.trim() && !realtimeActiveRef.current && voiceStateRef.current !== "THINKING") {
+      if (interim.trim() && !fallbackSpeakingRef.current && !realtimeActiveRef.current && voiceStateRef.current !== "THINKING") {
         setVoice("LISTENING");
         setCaption(interim.trim());
       }
@@ -872,7 +901,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
           if (voiceEnabledRef.current && voiceStateRef.current === "LISTENING") {
             setCaption("VOICE ONLINE · ELEVENLABS");
           }
-        }, 900);
+        }, 100);
       } else {
         setCaption("VOICE ONLINE · FALLBACK VOICE");
       }
