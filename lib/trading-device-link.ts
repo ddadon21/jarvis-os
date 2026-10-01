@@ -74,6 +74,7 @@ export type ObserverDeviceLink = {
   lastFrameAt: string | null;
   command: ObserverCommand;
   observerVersion: string | null;
+  agentCapabilities?: string[];
   obsidianCommand?: LocalAgentObsidianCommand | null;
   obsidianResult?: LocalAgentObsidianResult | null;
   desktopCommand?: LocalAgentDesktopCommand | null;
@@ -153,6 +154,7 @@ export async function confirmObserverPairing(code: string) {
     lastFrameAt: null,
     command: "PAUSE",
     observerVersion: null,
+    agentCapabilities: [],
     obsidianCommand: null,
     obsidianResult: null,
     desktopCommand: null,
@@ -202,13 +204,21 @@ async function resolveController(controllerToken: string | null) {
   return link;
 }
 
-export async function pollObserverControl(deviceId: string, deviceToken: string, observerVersion?: string | null) {
+export async function pollObserverControl(
+  deviceId: string,
+  deviceToken: string,
+  observerVersion?: string | null,
+  agentCapabilities?: string[] | null,
+) {
   const link = await authenticateObserverDevice(deviceId, deviceToken);
   if (!link) return null;
   const next: ObserverDeviceLink = {
     ...link,
     lastHeartbeatAt: new Date().toISOString(),
     observerVersion: observerVersion ? String(observerVersion).slice(0, 30) : link.observerVersion,
+    agentCapabilities: Array.isArray(agentCapabilities)
+      ? agentCapabilities.map(item => String(item).trim().toUpperCase()).filter(Boolean).slice(0, 20)
+      : link.agentCapabilities ?? [],
   };
   await Promise.all([
     getCache().set(deviceKey(deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
@@ -218,6 +228,7 @@ export async function pollObserverControl(deviceId: string, deviceToken: string,
       lastHeartbeatAt: next.lastHeartbeatAt,
       lastFrameAt: next.lastFrameAt,
       observerVersion: next.observerVersion,
+      agentCapabilities: next.agentCapabilities ?? [],
     }, { ttl: 60 * 60 * 24, tags: ["jarvis-local-agent"] }),
   ]);
   return {
@@ -424,15 +435,19 @@ export async function getLocalAgentPresence() {
     lastHeartbeatAt?: string | null;
     lastFrameAt?: string | null;
     observerVersion?: string | null;
+    agentCapabilities?: string[];
   } | null;
   if (!presence) return null;
   const heartbeatAge = presence.lastHeartbeatAt ? Date.now() - Date.parse(presence.lastHeartbeatAt) : Number.POSITIVE_INFINITY;
+  const capabilities = new Set((presence.agentCapabilities ?? []).map(item => item.toUpperCase()));
   return {
     ...presence,
     online: heartbeatAge < 15_000,
     desktopRuntime: versionAtLeast(presence.observerVersion, 0, 8, 0),
-    browserRuntime: versionAtLeast(presence.observerVersion, 0, 9, 0),
+    browserRuntime: versionAtLeast(presence.observerVersion, 0, 9, 0) && capabilities.has("BROWSER"),
     codingRuntime: versionAtLeast(presence.observerVersion, 0, 9, 0),
+    codexCli: capabilities.has("CODEX"),
+    claudeCli: capabilities.has("CLAUDE"),
   };
 }
 
@@ -477,6 +492,7 @@ function safeLink(link: ObserverDeviceLink) {
     lastFrameAt: link.lastFrameAt,
     command: link.command,
     observerVersion: link.observerVersion,
+    agentCapabilities: link.agentCapabilities ?? [],
     online: heartbeatAge < 15_000,
   };
 }
