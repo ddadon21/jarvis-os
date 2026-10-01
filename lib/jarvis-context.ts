@@ -9,6 +9,7 @@ import { getTradingState } from "./trading-runtime";
 import { getTradingPayoutSummary } from "./trading-payouts";
 import { getAssistantRuntimeState, getAssistantAlerts } from "./jarvis-assistant-runtime";
 import { buildJarvisCoreState } from "./jarvis-core";
+import { getElevenLabsRuntimeState } from "./jarvis-voice-runtime";
 
 type SafeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -143,7 +144,7 @@ function compactWorkforce(value: Awaited<ReturnType<typeof getWorkforceState>>) 
 }
 
 export async function getJarvisRuntimeContext() {
-  const [finance, trading, payouts, assistant, workforce, pulse, events, integrations, localAgent] = await Promise.all([
+  const [finance, trading, payouts, assistant, workforce, pulse, events, integrations, localAgent, premiumVoice] = await Promise.all([
     safe(() => getOrSeedFinanceState()),
     safe(() => getTradingState()),
     safe(() => getTradingPayoutSummary("ALL")),
@@ -153,9 +154,10 @@ export async function getJarvisRuntimeContext() {
     safe(() => getRecentEvents()),
     safe(() => getJarvisIntegrationRegistry()),
     safe(() => getLocalAgentPresence()),
+    safe(() => getElevenLabsRuntimeState()),
   ]);
 
-  const core = finance.ok && trading.ok && assistant.ok && workforce.ok && pulse.ok && events.ok && integrations.ok && localAgent.ok
+  const core = finance.ok && trading.ok && assistant.ok && workforce.ok && pulse.ok && events.ok && integrations.ok && localAgent.ok && premiumVoice.ok
     ? { ok: true as const, value: buildJarvisCoreState({
         finance: finance.value,
         trading: trading.value,
@@ -165,6 +167,7 @@ export async function getJarvisRuntimeContext() {
         events: events.value,
         integrations: integrations.value,
         localAgent: localAgent.value,
+        premiumVoice: premiumVoice.value,
       }) }
     : {
         ok: false as const,
@@ -193,6 +196,7 @@ export async function getJarvisRuntimeContext() {
       events: events.ok,
       integrations: integrations.ok,
       localAgent: localAgent.ok,
+      premiumVoice: premiumVoice.ok,
     },
   };
 }
