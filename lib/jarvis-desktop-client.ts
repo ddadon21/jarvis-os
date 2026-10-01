@@ -59,8 +59,14 @@ export function parseDesktopIntent(raw: string): DesktopIntent | null {
   }
 
   if (/^(?:read|inspect|summarize|what(?:'s| is) on) (?:this|the current) (?:web )?page\??$/i.test(text)) {
-    return { action: "BROWSER_READ_PAGE" };
+    return { action: "BROWSER_READ_PAGE", text };
   }
+
+  const pageQuestion = text.match(/^(?:on|from|using) (?:this|the current) (?:web )?page[,,:]?\s+(.+)$/i);
+  if (pageQuestion) return { action: "BROWSER_READ_PAGE", text: pageQuestion[1].trim() };
+
+  const findOnPage = text.match(/^(?:find|tell me|what)\s+(.+?)\s+(?:on|from)\s+(?:this|the current)\s+(?:web\s+)?page\??$/i);
+  if (findOnPage) return { action: "BROWSER_READ_PAGE", text: findOnPage[1].trim() };
 
   const webSearch = text.match(/^(?:search|google|search the web for|look up)\s+(.+)$/i);
   if (webSearch) return { action: "BROWSER_SEARCH", target: webSearch[1].trim() };
@@ -143,6 +149,21 @@ function explainContext(data: string | null, fallback: string) {
     ].filter(Boolean).join(" ");
   } catch {
     return fallback;
+  }
+}
+
+async function analyzeBrowserPage(pageText: string, question?: string | null) {
+  try {
+    const response = await fetch("/api/desktop/browser/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pageText, question: question || undefined }),
+    });
+    if (!response.ok) return null;
+    const body = await response.json() as { analysis?: string };
+    return body.analysis?.trim() || null;
+  } catch {
+    return null;
   }
 }
 
@@ -280,6 +301,10 @@ export async function executeDesktopIntent(intent: DesktopIntent) {
   let message = formatResult(result);
   if (result.ok && result.action === "SCREEN_CAPTURE" && result.data?.startsWith("data:image/jpeg;base64,")) {
     const analysis = await analyzeScreen(result.data);
+    if (analysis) message = analysis;
+  }
+  if (result.ok && result.action === "BROWSER_READ_PAGE" && result.data?.trim()) {
+    const analysis = await analyzeBrowserPage(result.data, intent.text);
     if (analysis) message = analysis;
   }
 
