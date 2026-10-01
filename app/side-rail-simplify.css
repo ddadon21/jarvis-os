@@ -8,16 +8,8 @@
   isolation:isolate;
   overflow:hidden;
 }
-.jarvis-right-orb::before{
-  content:"";
-  position:absolute;
-  inset:10% 4%;
-  background:radial-gradient(circle at center,rgba(183,31,38,.09),transparent 64%);
-  pointer-events:none;
-  z-index:0;
-}
-.jarvis-right-orb .jarvis-presence-core{
-  width:min(100%,290px);
+.jarvis-right-orb .jarvis-presence-hero{
+  width:min(100%,310px);
   z-index:1;
 }
 
@@ -81,8 +73,8 @@
   .jarvis-right-orb{
     min-height:230px;
   }
-  .jarvis-right-orb .jarvis-presence-core{
-    width:min(80vw,220px);
+  .jarvis-right-orb .jarvis-presence-hero{
+    width:min(80vw,240px);
   }
 }
 /* deployment-head: jarvis-side-rail-and-capital-path */
