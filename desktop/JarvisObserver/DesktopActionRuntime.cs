@@ -72,6 +72,11 @@ internal sealed class DesktopActionRuntime
                 "CLIPBOARD_WRITE" => await ClipboardWriteAsync(command),
                 "UI_CLICK_TEXT" => ClickText(command),
                 "UI_TYPE_TEXT" => await TypeTextAsync(command),
+                "BROWSER_READ_PAGE" => BrowserReadPage(command),
+                "BROWSER_NAVIGATE" => await BrowserNavigateAsync(command, Required(command.Target, "BROWSER_NAVIGATE requires a URL.")),
+                "BROWSER_SEARCH" => await BrowserNavigateAsync(command, "https://www.google.com/search?q=" + Uri.EscapeDataString(Required(command.Target, "BROWSER_SEARCH requires a query."))),
+                "BROWSER_BACK" => await BrowserBackAsync(command),
+                "RUN_CODING_AGENT" => await RunCodingAgentAsync(command),
                 "RUN_APPROVED_COMMAND" => await RunApprovedCommandAsync(command),
                 _ => Fail(command, "Unsupported desktop action."),
             };
@@ -321,6 +326,230 @@ internal sealed class DesktopActionRuntime
 
         return Ok(command, "Typed text into the focused control.", null, new[] { $"characters={text.Length}", $"window={WindowTitle(GetForegroundWindow())}" });
     }
+
+    private DesktopActionResult BrowserReadPage(DesktopActionCommand command)
+    {
+        var hwnd = BrowserWindow();
+        var root = _automation.FromHandle(hwnd);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lines = new List<string>();
+        foreach (var element in root.FindAllDescendants())
+        {
+            string name;
+            try { name = element.Name?.Trim() ?? ""; } catch { continue; }
+            if (name.Length < 2 || name.Length > 600 || !seen.Add(name)) continue;
+            lines.Add(name);
+            if (lines.Count >= 350) break;
+        }
+
+        var text = string.Join(Environment.NewLine, lines);
+        if (text.Length > 30_000) text = text[..30_000];
+        var title = WindowTitle(hwnd);
+        return Ok(command,
+            $"Read accessible browser content from {title}.",
+            text,
+            new[] { $"window={title}", $"accessibleLines={lines.Count}", $"characters={text.Length}" });
+    }
+
+    private async Task<DesktopActionResult> BrowserNavigateAsync(DesktopActionCommand command, string rawUrl)
+    {
+        RequireAuthorized(command);
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            throw new InvalidOperationException("Browser navigation only allows HTTP or HTTPS URLs.");
+
+        var hwnd = BrowserWindow();
+        if (IsIconic(hwnd)) ShowWindowAsync(hwnd, 9);
+        ShowWindowAsync(hwnd, 5);
+        SetForegroundWindow(hwnd);
+        await Task.Delay(70);
+
+        await OnUiAsync(() =>
+        {
+            var hadText = Clipboard.ContainsText();
+            var previous = hadText ? Clipboard.GetText() : null;
+            SendKeys.SendWait("^l");
+            Clipboard.SetText(uri.AbsoluteUri);
+            SendKeys.SendWait("^v");
+            SendKeys.SendWait("{ENTER}");
+            if (previous is not null) Clipboard.SetText(previous);
+            else Clipboard.Clear();
+            return true;
+        });
+
+        return Ok(command, $"Navigated browser to {uri.Host}.", null, new[] { $"uri={uri.AbsoluteUri}", $"window={WindowTitle(hwnd)}" });
+    }
+
+    private async Task<DesktopActionResult> BrowserBackAsync(DesktopActionCommand command)
+    {
+        RequireAuthorized(command);
+        var hwnd = BrowserWindow();
+        if (IsIconic(hwnd)) ShowWindowAsync(hwnd, 9);
+        ShowWindowAsync(hwnd, 5);
+        SetForegroundWindow(hwnd);
+        await Task.Delay(50);
+        await OnUiAsync(() =>
+        {
+            SendKeys.SendWait("%{LEFT}");
+            return true;
+        });
+        return Ok(command, "Navigated browser back one page.", null, new[] { $"window={WindowTitle(hwnd)}" });
+    }
+
+    private async Task<DesktopActionResult> RunCodingAgentAsync(DesktopActionCommand command)
+    {
+        RequireAuthorized(command);
+        var provider = Required(command.Target, "RUN_CODING_AGENT requires CODEX or CLAUDE.").ToUpperInvariant();
+        if (provider is not ("CODEX" or "CLAUDE"))
+            throw new InvalidOperationException("Coding provider must be CODEX or CLAUDE.");
+
+        var prompt = Required(command.Text, "RUN_CODING_AGENT requires a task prompt.");
+        var workspace = ResolveCodingWorkspace(command.Args.FirstOrDefault());
+        if (!Directory.Exists(Path.Combine(workspace, ".git")))
+            throw new InvalidOperationException("Coding agents are restricted to a Git repository workspace.");
+
+        var executable = ResolveExecutable(provider == "CODEX" ? "codex.exe" : "claude.exe");
+        if (executable is null)
+            throw new InvalidOperationException(provider == "CODEX"
+                ? "Codex CLI is not installed as codex.exe on PATH."
+                : "Claude Code is not installed as claude.exe on PATH.");
+
+        var psi = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workspace,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+
+        if (provider == "CODEX")
+        {
+            psi.ArgumentList.Add("exec");
+            psi.ArgumentList.Add("--ephemeral");
+            psi.ArgumentList.Add("--sandbox");
+            psi.ArgumentList.Add("workspace-write");
+            psi.ArgumentList.Add("--config");
+            psi.ArgumentList.Add("approval_policy=\"never\"");
+            psi.ArgumentList.Add(prompt);
+        }
+        else
+        {
+            psi.ArgumentList.Add("-p");
+            psi.ArgumentList.Add("--permission-mode");
+            psi.ArgumentList.Add("acceptEdits");
+            psi.ArgumentList.Add("--allowedTools");
+            foreach (var tool in new[]
+            {
+                "Read", "Grep", "Glob", "Edit", "Write",
+                "Bash(git status:*)", "Bash(git diff:*)",
+                "Bash(npm test:*)", "Bash(npm run build:*)"
+            }) psi.ArgumentList.Add(tool);
+            psi.ArgumentList.Add("--max-turns");
+            psi.ArgumentList.Add("24");
+            psi.ArgumentList.Add("--output-format");
+            psi.ArgumentList.Add("json");
+            psi.ArgumentList.Add(prompt);
+        }
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Windows could not start {provider}.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(15));
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeout.Token);
+        await process.WaitForExitAsync(timeout.Token);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        var output = (stdout + (string.IsNullOrWhiteSpace(stderr) ? "" : Environment.NewLine + stderr)).Trim();
+        if (output.Length > 120_000) output = output[..120_000];
+
+        var ok = process.ExitCode == 0;
+        return new DesktopActionResult(
+            command.Id,
+            command.Action,
+            ok,
+            ok ? $"{provider} coding task completed in the approved workspace." : $"{provider} coding task exited with code {process.ExitCode}.",
+            output,
+            new[] { $"provider={provider}", $"workspace={workspace}", $"exitCode={process.ExitCode}" },
+            ok ? null : $"{provider} exited with code {process.ExitCode}.",
+            DateTime.UtcNow);
+    }
+
+    private static string ResolveCodingWorkspace(string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            var explicitPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(requested));
+            if (!Directory.Exists(explicitPath)) throw new DirectoryNotFoundException(explicitPath);
+            return explicitPath;
+        }
+
+        var configured = Environment.GetEnvironmentVariable("JARVIS_CODE_WORKSPACE");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var configuredPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured));
+            if (Directory.Exists(configuredPath)) return configuredPath;
+        }
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var candidates = new[]
+        {
+            Path.Combine(home, "jarvis-os"),
+            Path.Combine(home, "Documents", "jarvis-os"),
+            Path.Combine(home, "Desktop", "jarvis-os"),
+            Path.Combine(home, "Projects", "jarvis-os"),
+            Path.Combine(home, "repos", "jarvis-os"),
+            Path.Combine(home, "source", "repos", "jarvis-os"),
+        };
+        var match = candidates.FirstOrDefault(path => Directory.Exists(Path.Combine(path, ".git")));
+        if (match is not null) return match;
+
+        throw new InvalidOperationException("No approved coding workspace was found. Set JARVIS_CODE_WORKSPACE to the local Git repository path.");
+    }
+
+    private static string? ResolveExecutable(string fileName)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (var raw in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                var candidate = Path.Combine(raw.Trim(), fileName);
+                if (File.Exists(candidate)) return candidate;
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    private IntPtr BrowserWindow()
+    {
+        var foreground = GetForegroundWindow();
+        if (IsBrowserWindow(foreground)) return foreground;
+
+        var match = Process.GetProcesses()
+            .Select(process =>
+            {
+                try { return new { Process = process, Handle = process.MainWindowHandle }; }
+                catch { return null; }
+            })
+            .FirstOrDefault(item => item is not null && item.Handle != IntPtr.Zero && IsBrowserProcess(item.Process.ProcessName));
+
+        if (match is null) throw new InvalidOperationException("No supported browser window is open. Open Chrome or Edge first.");
+        SetForegroundWindow(match.Handle);
+        return match.Handle;
+    }
+
+    private static bool IsBrowserWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(hwnd, out var pid);
+        if (pid == 0) return false;
+        try { return IsBrowserProcess(Process.GetProcessById((int)pid).ProcessName); } catch { return false; }
+    }
+
+    private static bool IsBrowserProcess(string processName)
+        => processName.Equals("chrome", StringComparison.OrdinalIgnoreCase)
+        || processName.Equals("msedge", StringComparison.OrdinalIgnoreCase);
 
     private async Task<DesktopActionResult> RunApprovedCommandAsync(DesktopActionCommand command)
     {
