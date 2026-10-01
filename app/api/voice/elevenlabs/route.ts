@@ -8,13 +8,57 @@ function configured() {
 }
 
 export async function GET() {
-  return Response.json({
-    ok: true,
-    configured: configured(),
-    provider: "ElevenLabs",
-    voiceIdConfigured: Boolean(process.env.ELEVENLABS_VOICE_ID),
-    model: process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL,
-  }, { headers: { "Cache-Control": "no-store" } });
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  const model = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL;
+
+  if (!apiKey || !voiceId) {
+    return Response.json({
+      ok: true,
+      configured: false,
+      provider: "ElevenLabs",
+      voiceIdConfigured: Boolean(voiceId),
+      model,
+      voiceVerified: false,
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  try {
+    const upstream = await fetch(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}`, {
+      headers: { "xi-api-key": apiKey },
+      cache: "no-store",
+    });
+    const voice = await upstream.json().catch(() => null) as {
+      name?: string;
+      category?: string;
+      labels?: Record<string, string>;
+    } | null;
+
+    return Response.json({
+      ok: true,
+      configured: upstream.ok,
+      provider: "ElevenLabs",
+      voiceIdConfigured: true,
+      model,
+      voiceVerified: upstream.ok,
+      voice: upstream.ok ? {
+        name: voice?.name ?? null,
+        category: voice?.category ?? null,
+        accent: voice?.labels?.accent ?? null,
+      } : null,
+      verificationStatus: upstream.status,
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return Response.json({
+      ok: true,
+      configured: false,
+      provider: "ElevenLabs",
+      voiceIdConfigured: true,
+      model,
+      voiceVerified: false,
+      verificationStatus: 0,
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
 }
 
 export async function POST(request: Request) {
