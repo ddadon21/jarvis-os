@@ -15,14 +15,92 @@ const PLAN_KEY = "jarvis-finance-payout-plan-v1";
 const allocations = { tax: ["TAX RESERVE", "Enter your own reserve amount"], bills: ["BILLS + MINIMUMS", "Required obligations"], reserve: ["CASH RESERVE", "Cash you intend to keep"], debt: ["EXTRA DEBT PAYMENT", "Beyond the minimums above"], business: ["BUSINESS CAPITAL", "Planned operating needs"] } as const;
 type View = "OVERVIEW" | "PAYOUT PLAN" | "ACCOUNTS + DATA";
 
-const CAPITAL_STAGE_DETAILS: Record<(typeof FINANCE_STAGES)[number], string> = {
-  DEBT: "Eliminate personal revolving debt without destabilizing operating cash.",
-  STABILITY: "Cover obligations reliably and make monthly cash flow predictable.",
-  RESERVES: "Build a durable cash floor before expanding lifestyle or risk.",
-  CREDIT: "Strengthen revolving-credit health while keeping balances controlled.",
-  CAPITAL: "Stack deployable cash and business capital for asymmetric opportunities.",
-  INVESTING: "Build long-term ownership through disciplined, repeatable investing.",
-  ASSETS: "Acquire durable assets only when the cash base and leverage can support them.",
+type CapitalStagePlan = {
+  objective: string;
+  gate: string;
+  actions: readonly string[];
+  cta: string;
+  view: View;
+};
+
+const CAPITAL_STAGE_DETAILS: Record<(typeof FINANCE_STAGES)[number], CapitalStagePlan> = {
+  DEBT: {
+    objective: "Clear personal revolving debt while protecting the cash needed for required obligations.",
+    gate: "Move on when personal debt is cleared and the next month is not being funded by new card balances.",
+    actions: [
+      "Confirm each personal card balance, statement minimum, due date, and APR data.",
+      "Use the payout planner before extra debt payments so cash reserves and required bills stay visible.",
+      "Keep authorized-user balances separate from your own payoff decisions.",
+    ],
+    cta: "OPEN PAYOUT PLAN",
+    view: "PAYOUT PLAN",
+  },
+  STABILITY: {
+    objective: "Make the financial base predictable before trying to scale lifestyle or risk.",
+    gate: "Move on when obligations are covered consistently and cash is no longer swinging around one payout.",
+    actions: [
+      "Review available cash versus reported bank balances.",
+      "Confirm the recurring obligations that must be protected before optional spending.",
+      "Build a repeatable monthly cash-flow rhythm instead of reacting transaction by transaction.",
+    ],
+    cta: "REVIEW ACCOUNT DATA",
+    view: "ACCOUNTS + DATA",
+  },
+  RESERVES: {
+    objective: "Build a durable cash floor that protects you from needing debt when income is uneven.",
+    gate: "Move on after the reserve target is actually funded and kept separate from normal spending.",
+    actions: [
+      "Track the $10K cash milestone against current reported liquidity.",
+      "Keep emergency/reserve money separate from spending and business operating cash.",
+      "Refill the reserve before expanding lifestyle after a drawdown.",
+    ],
+    cta: "REVIEW CASH POSITION",
+    view: "OVERVIEW",
+  },
+  CREDIT: {
+    objective: "Keep revolving credit healthy while debt stays controlled.",
+    gate: "Move on when balances, payments, statement timing, and utilization are consistently managed.",
+    actions: [
+      "Review each personal card limit and utilization instead of using one blended number.",
+      "Keep reported due dates and statement information current before making credit decisions.",
+      "Avoid adding new revolving balances just to chase a score outcome.",
+    ],
+    cta: "REVIEW ACCOUNT DATA",
+    view: "ACCOUNTS + DATA",
+  },
+  CAPITAL: {
+    objective: "Stack deployable cash for business, trading leverage, and high-return opportunities without touching the safety floor.",
+    gate: "Move on when deployable capital is distinct from reserves and required operating cash.",
+    actions: [
+      "Separate reserve cash, business operating cash, and deployable opportunity capital.",
+      "Assign new payouts deliberately instead of letting idle cash become lifestyle spending.",
+      "Only scale risk from capital that can be lost without damaging the base.",
+    ],
+    cta: "PLAN NEXT PAYOUT",
+    view: "PAYOUT PLAN",
+  },
+  INVESTING: {
+    objective: "Turn excess capital into long-term ownership without starving near-term obligations.",
+    gate: "Move on when investing is repeatable and does not compete with debt, reserves, or required cash.",
+    actions: [
+      "Review current brokerage and retirement balances before adding new contributions.",
+      "Keep long-term investing separate from short-term trading capital.",
+      "Use repeatable contributions rather than one-off emotional allocation decisions.",
+    ],
+    cta: "REVIEW ACCOUNT DATA",
+    view: "ACCOUNTS + DATA",
+  },
+  ASSETS: {
+    objective: "Acquire larger assets only when ownership strengthens the system instead of draining it.",
+    gate: "This stage stays active only while cash, debt, reserves, and ongoing ownership costs remain supportable.",
+    actions: [
+      "Measure the full ongoing cost of an asset, not only its purchase price.",
+      "Preserve post-purchase cash instead of emptying the reserve for a down payment.",
+      "Treat lifestyle assets as downstream of capital strength, not as proof of it.",
+    ],
+    cta: "REVIEW CAPITAL BASE",
+    view: "OVERVIEW",
+  },
 };
 
 export default function FinanceCockpitV2() {
@@ -68,6 +146,15 @@ export default function FinanceCockpitV2() {
   const asOf = runtime?.asOf ?? FINANCE_IMPORT.asOf;
   const stage = runtime?.currentStage ?? (totals.personalDebt > 0 ? "DEBT" : "STABILITY");
   const capitalStage = (selectedCapitalStage ?? stage) as (typeof FINANCE_STAGES)[number];
+  const capitalPlan = CAPITAL_STAGE_DETAILS[capitalStage];
+  const capitalSnapshot =
+    capitalStage === "DEBT" ? `${money(totals.personalDebt)} personal debt · ${money(totals.availableCash)} available cash` :
+    capitalStage === "STABILITY" ? `${money(totals.availableCash)} available · ${money(totals.personalNetWorth)} adjusted net worth` :
+    capitalStage === "RESERVES" ? `${money(totals.liquidity)} reported bank balances · $10,000 reserve milestone` :
+    capitalStage === "CREDIT" ? `${accounts.filter(a => a.type === "credit" && a.ownership !== "AUTHORIZED_USER").length} personal revolving accounts tracked` :
+    capitalStage === "CAPITAL" ? `${money(totals.availableCash)} available cash · ${money(totals.businessCash)} business balance` :
+    capitalStage === "INVESTING" ? `${money(totals.investmentValue)} reported investment value` :
+    `${money(totals.personalNetWorth)} adjusted net worth · ${money(totals.liquidity)} bank balances`;
   const debts = accounts.filter(a => a.type === "credit" || a.type === "loan");
   const personal = debts.filter(a => a.ownership !== "AUTHORIZED_USER");
   const banks = accounts.filter(a => a.type === "depository");
@@ -152,7 +239,27 @@ export default function FinanceCockpitV2() {
             {t}
           </button>
         ))}</div>
-        <p className={s.stageDetail}><strong>{capitalStage}</strong>{CAPITAL_STAGE_DETAILS[capitalStage]}</p>
+        <div className={s.stagePlan}>
+          <div className={s.stagePlanHead}>
+            <div>
+              <span>{capitalStage === stage ? "CURRENT STAGE" : "PATH PREVIEW"}</span>
+              <strong>{capitalStage}</strong>
+            </div>
+            <small>{capitalSnapshot}</small>
+          </div>
+          <div className={s.stagePlanGrid}>
+            <div><span>OBJECTIVE</span><p>{capitalPlan.objective}</p></div>
+            <div><span>MOVE ON WHEN</span><p>{capitalPlan.gate}</p></div>
+          </div>
+          <div className={s.stageActions}>
+            {capitalPlan.actions.map((action, index) => (
+              <div key={action}><b>0{index + 1}</b><span>{action}</span></div>
+            ))}
+          </div>
+          <button className={s.stageCta} type="button" onClick={() => setView(capitalPlan.view)}>
+            {capitalPlan.cta} <ArrowUpRight size={11} />
+          </button>
+        </div>
         <div className={s.goals}>
           <Goal name="DEBT FREEDOM" value={money(totals.personalDebt)} target="$0" percent={totals.personalDebt <= 0 ? 100 : null} note="Remaining own debt. No invented payoff percentage." />
           <Goal name="$10K CASH" value={money(totals.liquidity)} target="$10,000" percent={totals.liquidity / 100} note="Reported bank balances; available cash shown above." />
