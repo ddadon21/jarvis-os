@@ -317,8 +317,10 @@ export async function POST(request: Request) {
   const candidates = choices(route);
   if (!candidates.length) return new Response("No reasoning provider is connected.", { status: 503 });
 
-  const runtimeContext = await getJarvisRuntimeContext();
-  const assistantContext = await getAssistantRuntimeState();
+  const [runtimeContext, assistantContext] = await Promise.all([
+    getJarvisRuntimeContext(),
+    getAssistantRuntimeState(),
+  ]);
   const directAnswer = resolveDirectAnswer(latestUser, runtimeContext, assistantContext);
   const liveWorldAnswer = needsLiveWorldSearch(latestUser)
     ? await lookupLiveWorldFallback(latestUser)
