@@ -1,6 +1,7 @@
 "server-only";
 
 import { getAssistantRuntimeState } from "./jarvis-assistant-runtime";
+import { getGoogleWorkspaceStatus } from "./google-workspace";
 
 export type JarvisIntegrationId =
   | "GOOGLE_WORKSPACE"
@@ -33,13 +34,16 @@ function has(...keys: string[]) {
 }
 
 export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[]> {
-  const assistant = await getAssistantRuntimeState();
+  const [assistant, google] = await Promise.all([
+    getAssistantRuntimeState(),
+    getGoogleWorkspaceStatus(),
+  ]);
 
-  const googleConnected =
+  const googleFeedsReady =
     assistant.sources.calendar === "CONNECTED" &&
-    assistant.sources.email === "CONNECTED" &&
-    assistant.sources.contacts === "CONNECTED";
-  const googleReady = has("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET");
+    assistant.sources.email === "CONNECTED";
+  const googleConnected = google.connected && googleFeedsReady;
+  const googleReady = google.configured;
 
   const microsoftConnected =
     assistant.sources.meetings === "CONNECTED" &&
@@ -61,11 +65,21 @@ export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[
     {
       id: "GOOGLE_WORKSPACE",
       label: "Google Workspace",
-      state: googleConnected ? "CONNECTED" : googleReady ? "READY_TO_AUTHORIZE" : "NEEDS_APP_SETUP",
-      capabilities: ["Google Calendar", "Gmail", "Google Contacts"],
+      state: googleConnected
+        ? "CONNECTED"
+        : google.connected
+          ? "DEGRADED"
+          : googleReady
+            ? "READY_TO_AUTHORIZE"
+            : "NEEDS_APP_SETUP",
+      capabilities: ["Google Calendar read/write", "Gmail read", "Gmail drafts", "Gmail send with approval"],
       note: googleConnected
-        ? "Calendar, mail, and contacts are available to the assistant runtime."
-        : "One Google OAuth app can authorize Calendar, Gmail, and Contacts for JARVIS.",
+        ? `Google Calendar and Gmail are synchronized for ${google.email ?? "the authorized account"}.`
+        : google.connected
+          ? "Google OAuth is authorized, but the assistant feed has not completed a healthy Calendar + Gmail sync yet."
+          : googleReady
+            ? "Google OAuth credentials are configured. Dwight must authorize Calendar and Gmail once."
+            : "Create a Google OAuth web app and add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to connect Calendar and Gmail.",
     },
     {
       id: "MICROSOFT_365",
