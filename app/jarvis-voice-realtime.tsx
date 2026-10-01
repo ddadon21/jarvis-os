@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { usePathname, useRouter } from "next/navigation";
 import { loadJarvisState, saveJarvisState } from "../lib/jarvis-state";
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
+import JarvisPresence from "./jarvis-presence";
 
 export type JarvisVoiceState = "STANDBY" | "LISTENING" | "THINKING" | "SPEAKING" | "ERROR";
 
@@ -909,6 +910,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       </div>
       {!home && voiceEnabled && (
         <div className={`jarvis-voice-status state-${voiceState.toLowerCase()}`}>
+          <JarvisPresence state={voiceState} variant="mini" label="JARVIS" />
           <span>{voiceState}</span>
           <strong>{caption}</strong>
         </div>
