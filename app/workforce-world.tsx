@@ -380,6 +380,7 @@ export default function WorkforceWorld() {
   const [operatorIntent, setOperatorIntent] = useState<OperatorIntent | null>(null);
   const operatorIntentRef = useRef<OperatorIntent | null>(null);
   const repairingDurableRun = useRef(false);
+  const payloadSignatureRef = useRef("");
   const previousStatuses = useRef<Record<string, AgentStatus>>({});
   const previousFloorActive = useRef<boolean | null>(null);
 
@@ -434,7 +435,11 @@ export default function WorkforceWorld() {
       }
 
       incoming = await repairDurableRunIfNeeded(incoming);
-      setPayload(incoming);
+      const signature = JSON.stringify(incoming);
+      if (signature !== payloadSignatureRef.current) {
+        payloadSignatureRef.current = signature;
+        setPayload(incoming);
+      }
     } catch {
       setNotice("WORKFORCE LINK DEGRADED · OPERATOR INTENT PRESERVED");
     }
