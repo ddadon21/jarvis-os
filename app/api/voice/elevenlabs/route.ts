@@ -112,11 +112,23 @@ export async function POST(request: Request) {
       modelId,
       response: detail.slice(0, 800),
     });
+    const passthroughStatus = [401, 402, 403, 422].includes(upstream.status) ? upstream.status : 502;
+    let reason = "ElevenLabs speech generation failed.";
+    if (upstream.status === 402) reason = "ElevenLabs paid plan required for the selected library voice.";
+    else if (upstream.status === 401 || upstream.status === 403) reason = "ElevenLabs authentication or permission error.";
+    else if (upstream.status === 422) reason = "ElevenLabs rejected the selected voice or speech request.";
+
     return Response.json({
       ok: false,
-      error: "ElevenLabs speech generation failed.",
+      error: reason,
       status: upstream.status,
-    }, { status: 502 });
+    }, {
+      status: passthroughStatus,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Jarvis-Voice-Error": upstream.status === 402 ? "PLAN_REQUIRED" : "PROVIDER_ERROR",
+      },
+    });
   }
 
   return new Response(upstream.body, {
