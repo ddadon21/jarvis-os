@@ -83,7 +83,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null) as { text?: string } | null;
   const text = typeof body?.text === "string"
-    ? body.text.replace(/s+/g, " ").trim().slice(0, 1800)
+    ? body.text.replace(/\s+/g, " ").trim().slice(0, 1800)
     : "";
   if (!text) return Response.json({ ok: false, error: "Missing speech text." }, { status: 400 });
 
@@ -119,11 +119,11 @@ export async function POST(request: Request) {
       response: detail.slice(0, 800),
     });
     if (upstream.status === 402) {
-      await setElevenLabsRuntimeState("PLAN_REQUIRED", "The selected Voice Library voice requires a paid ElevenLabs subscription for API use.", model);
+      await setElevenLabsRuntimeState("PLAN_REQUIRED", "The selected Voice Library voice requires a paid ElevenLabs subscription for API use.", modelId);
     } else if (upstream.status === 401 || upstream.status === 403) {
-      await setElevenLabsRuntimeState("AUTH_ERROR", "ElevenLabs rejected the configured API key or permissions.", model);
+      await setElevenLabsRuntimeState("AUTH_ERROR", "ElevenLabs rejected the configured API key or permissions.", modelId);
     } else {
-      await setElevenLabsRuntimeState("DEGRADED", `ElevenLabs TTS failed with HTTP ${upstream.status}.`, model);
+      await setElevenLabsRuntimeState("DEGRADED", `ElevenLabs TTS failed with HTTP ${upstream.status}.`, modelId);
     }
 
     const passthroughStatus = [401, 402, 403, 422].includes(upstream.status) ? upstream.status : 502;
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
     });
   }
 
-  await setElevenLabsRuntimeState("CONNECTED", "Selected ElevenLabs voice generated TTS audio successfully.", model);
+  await setElevenLabsRuntimeState("CONNECTED", "Selected ElevenLabs voice generated TTS audio successfully.", modelId);
 
   return new Response(upstream.body, {
     status: 200,
