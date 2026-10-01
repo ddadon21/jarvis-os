@@ -36,7 +36,7 @@ export async function GET() {
 
     return Response.json({
       ok: true,
-      configured: upstream.ok,
+      configured: true,
       provider: "ElevenLabs",
       voiceIdConfigured: true,
       model,
@@ -47,6 +47,9 @@ export async function GET() {
         accent: voice?.labels?.accent ?? null,
       } : null,
       verificationStatus: upstream.status,
+      note: upstream.ok
+        ? "Voice metadata verified."
+        : "Voice metadata could not be read, but TTS remains enabled because API key and Voice ID are configured. The TTS request is the authoritative capability check.",
     }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({
