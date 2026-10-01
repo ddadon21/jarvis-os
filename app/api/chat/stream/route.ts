@@ -10,7 +10,7 @@ import type { AgentId, AgentPermission, RuntimeDomain } from "../../../../lib/ja
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const FAST_MODEL = "gpt-5.6-sol";
+const FAST_MODEL = "gpt-5.6-luna";
 const STANDARD_MODEL = "gpt-5.6-sol";
 const DEEP_MODEL = "claude-opus-5";
 
