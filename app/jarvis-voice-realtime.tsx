@@ -172,16 +172,14 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       const body = await response.json() as {
         configured?: boolean;
         voiceVerified?: boolean;
-        voice?: { name?: string | null; accent?: string | null } | null;
       };
-      const verified = body.configured === true && body.voiceVerified === true;
-      elevenVerifiedRef.current = verified;
-      elevenUnavailableRef.current = !verified;
-      if (verified) {
-        const name = body.voice?.name?.trim();
-        setCaption(name ? `ELEVENLABS VOICE ONLINE · ${name.toUpperCase()}` : "ELEVENLABS VOICE ONLINE");
+      const configured = body.configured === true;
+      elevenVerifiedRef.current = configured;
+      elevenUnavailableRef.current = !configured;
+      if (configured) {
+        setCaption("ELEVENLABS ONLINE");
       }
-      return verified;
+      return configured;
     } catch {
       elevenVerifiedRef.current = false;
       elevenUnavailableRef.current = true;
