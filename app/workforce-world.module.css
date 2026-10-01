@@ -31,7 +31,7 @@
   padding:12px 14px;
   border:1px solid rgba(255,255,255,.07);
   background:rgba(8,10,11,.84);
-  backdrop-filter:blur(18px);
+  backdrop-filter:none;
 }
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .brandIcon{
