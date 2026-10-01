@@ -662,6 +662,17 @@ async function systemState() {
   }
 }
 
+async function assistantState() {
+  try {
+    const response = await fetch("/api/assistant/state", { cache: "no-store" });
+    if (!response.ok) return null;
+    const body = await response.json() as { state?: AssistantState };
+    return body.state ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default function ObsidianKnowledgeSync() {
   const busy = useRef(false);
 
@@ -686,7 +697,8 @@ export default function ObsidianKnowledgeSync() {
         const dayKey = localDay();
         const core = readJson<CoreState>(CORE_KEY, {});
         const plan = readJson<PayoutPlan | null>(FINANCE_PLAN_KEY, null);
-        const [finance, system] = await Promise.all([financeState(), systemState()]);
+        const codingHistory = readJson<CodingResult[]>(CODING_HISTORY_KEY, []);
+        const [finance, system, assistant] = await Promise.all([financeState(), systemState(), assistantState()]);
         const notes: Array<{ path: string; content: string }> = [
           { path: "00 Inbox/JARVIS Knowledge Map.md", content: knowledgeMap(dayKey) },
           { path: "01 Daily/" + dayKey + ".md", content: dailyNote(dayKey, core) },
@@ -694,12 +706,33 @@ export default function ObsidianKnowledgeSync() {
           { path: "04 Life/Weekly/7D Review - " + dayKey + ".md", content: weeklyLifeNote(dayKey) },
           { path: "07 Faith/Daily/" + dayKey + ".md", content: faithNote(dayKey) },
           { path: "03 Finance/Next Payout Plan.md", content: payoutPlanNote(plan) },
-          { path: "06 Decisions/Current Next Move.md", content: nextMoveNote(core) }
+          { path: "06 Decisions/Current Next Move.md", content: nextMoveNote(core) },
+          { path: "11 Meetings/Upcoming Meetings.md", content: meetingsNote(assistant) },
+          { path: "12 People/Recent Contacts.md", content: peopleNote(assistant) },
+          { path: "13 Coding/Executor Outcomes.md", content: codingIndexNote(codingHistory) },
         ];
         if (finance) notes.push({ path: "03 Finance/Current Capital Snapshot.md", content: financeNote(finance) });
         if (system) {
           notes.push({ path: "05 SentryOps/Current Operating State.md", content: sentryNote(system) });
           notes.push({ path: "08 Research/SentryOps Research Pulse.md", content: researchNote(system) });
+          notes.push({ path: "06 Decisions/Decision Log.md", content: decisionLogNote(system) });
+          notes.push({ path: "09 Projects/Active Projects.md", content: projectsNote(system) });
+          notes.push({ path: "10 System/JARVIS Capability Registry.md", content: systemCapabilityNote(system) });
+
+          for (const decision of system.core?.memory?.decisions ?? []) {
+            if (!decision.id) continue;
+            notes.push({
+              path: "06 Decisions/History/" + isoDay(decision.at) + " - " + filePart(decision.id, "decision") + ".md",
+              content: decisionHistoryNote(decision),
+            });
+          }
+        }
+        for (const item of codingHistory.slice(-40)) {
+          if (!item.id) continue;
+          notes.push({
+            path: "13 Coding/History/" + isoDay(item.completedAt) + " - " + filePart(item.provider, "agent") + " - " + filePart(item.id, "run") + ".md",
+            content: codingHistoryNote(item),
+          });
         }
 
         const fingerprints = readJson<Record<string, string>>(FP_KEY, {});
@@ -740,14 +773,18 @@ export default function ObsidianKnowledgeSync() {
     const timer = window.setInterval(() => void sync("scheduled"), 60000);
     const onLife = () => void sync("life updated");
     const onCore = () => void sync("core updated");
+    const onCoding = () => void sync("coding outcome");
+    const onGoogle = () => void sync("workspace updated");
     const onManual = () => void sync("manual");
     const onFocus = () => void sync("window focused");
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || [LIFE_PLAN_KEY, CORE_KEY, FINANCE_PLAN_KEY].includes(event.key)) void sync("state changed");
+      if (!event.key || [LIFE_PLAN_KEY, CORE_KEY, FINANCE_PLAN_KEY, CODING_HISTORY_KEY].includes(event.key)) void sync("state changed");
     };
 
     window.addEventListener("jarvis-life-updated", onLife);
     window.addEventListener("jarvis-state-updated", onCore);
+    window.addEventListener("jarvis-coding-result", onCoding);
+    window.addEventListener("jarvis-google-sync", onGoogle);
     window.addEventListener("jarvis-obsidian-sync-now", onManual);
     window.addEventListener("focus", onFocus);
     window.addEventListener("storage", onStorage);
@@ -758,6 +795,8 @@ export default function ObsidianKnowledgeSync() {
       window.clearInterval(timer);
       window.removeEventListener("jarvis-life-updated", onLife);
       window.removeEventListener("jarvis-state-updated", onCore);
+      window.removeEventListener("jarvis-coding-result", onCoding);
+      window.removeEventListener("jarvis-google-sync", onGoogle);
       window.removeEventListener("jarvis-obsidian-sync-now", onManual);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("storage", onStorage);
