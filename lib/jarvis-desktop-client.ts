@@ -10,6 +10,11 @@ export type DesktopIntent = {
     | "CLIPBOARD_WRITE"
     | "UI_CLICK_TEXT"
     | "UI_TYPE_TEXT"
+    | "BROWSER_READ_PAGE"
+    | "BROWSER_NAVIGATE"
+    | "BROWSER_SEARCH"
+    | "BROWSER_BACK"
+    | "RUN_CODING_AGENT"
     | "RUN_APPROVED_COMMAND";
   target?: string | null;
   text?: string | null;
@@ -51,6 +56,36 @@ export function parseDesktopIntent(raw: string): DesktopIntent | null {
   }
   if (/^(?:read|what(?:'s| is) on) (?:my )?clipboard\??$/.test(lower)) {
     return { action: "CLIPBOARD_READ" };
+  }
+
+  if (/^(?:read|inspect|summarize|what(?:'s| is) on) (?:this|the current) (?:web )?page\??$/i.test(text)) {
+    return { action: "BROWSER_READ_PAGE" };
+  }
+
+  const webSearch = text.match(/^(?:search|google|search the web for|look up)\s+(.+)$/i);
+  if (webSearch) return { action: "BROWSER_SEARCH", target: webSearch[1].trim() };
+
+  const navigateDomain = text.match(/^(?:go to|navigate to|open)\s+((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)$/i);
+  if (navigateDomain) {
+    const target = /^https?:\/\//i.test(navigateDomain[1]) ? navigateDomain[1] : "https://" + navigateDomain[1];
+    return { action: "BROWSER_NAVIGATE", target };
+  }
+
+  if (/^(?:go back|browser back|back one page)$/i.test(text)) {
+    return { action: "BROWSER_BACK" };
+  }
+
+  const codeAgent = text.match(/^(?:have|ask|run)\s+(codex|claude code|claude)\s+(?:to\s+)?([\s\S]+)$/i);
+  if (codeAgent) {
+    const provider = /codex/i.test(codeAgent[1]) ? "CODEX" : "CLAUDE";
+    let prompt = codeAgent[2].trim();
+    const pathMatch = prompt.match(/\s+in\s+((?:[a-zA-Z]:\\|\\\\).+)$/);
+    const args: string[] = [];
+    if (pathMatch) {
+      args.push(pathMatch[1].trim());
+      prompt = prompt.slice(0, pathMatch.index).trim();
+    }
+    return { action: "RUN_CODING_AGENT", target: provider, text: prompt, args };
   }
 
   const clipboard = text.match(/^(?:put|copy|set)\s+(.+?)\s+(?:on|to|as)\s+(?:my\s+)?clipboard$/i);
@@ -136,6 +171,13 @@ function formatResult(result: DesktopResult) {
   if (result.action === "SCREEN_CAPTURE") {
     return "I captured your primary screen. The desktop runtime can now provide screenshots on demand; visual reasoning over those captures is the next eyes layer.";
   }
+  if (result.action === "BROWSER_READ_PAGE" && result.data?.trim()) {
+    return result.data.trim().slice(0, 8000);
+  }
+  if (result.action === "RUN_CODING_AGENT") {
+    const output = result.data?.trim();
+    return output ? `${result.summary}\n${output.slice(0, 8000)}` : result.summary;
+  }
   if (result.action === "RUN_APPROVED_COMMAND" && result.data?.trim()) {
     return `${result.summary}\n${result.data.trim().slice(0, 1200)}`;
   }
@@ -176,7 +218,7 @@ export async function executeDesktopIntent(intent: DesktopIntent) {
     },
     body: JSON.stringify({
       ...intent,
-      userAuthorized: !["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ"].includes(intent.action),
+      userAuthorized: !["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ", "BROWSER_READ_PAGE"].includes(intent.action),
     }),
   });
 
