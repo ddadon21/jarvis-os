@@ -680,10 +680,10 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: state.messages.slice(-18).map(({ role, content }) => ({ role, content })),
+          messages: state.messages.slice(-10).map(({ role, content }) => ({ role, content })),
           activeDomain: state.activeDomain,
           goals: state.goals,
-          memories: state.memories.map(({ domain, fact }) => ({ domain, fact })),
+          memories: state.memories.slice(-24).map(({ domain, fact }) => ({ domain, fact })),
         }),
       });
       if (!response.ok || !response.body) throw new Error("Jarvis intelligence unavailable.");
