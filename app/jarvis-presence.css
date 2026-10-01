@@ -57,3 +57,53 @@
 @media(prefers-reduced-motion:reduce){
   .jarvis-presence-halo{animation:none}
 }
+
+.jarvis-brand-presence{
+  width:30px!important;
+  height:30px!important;
+  filter:none!important;
+}
+.jarvis-brand-presence .jarvis-presence-mini{width:30px;min-width:30px}
+.jarvis-living-core{
+  display:grid!important;
+  place-items:center;
+  filter:none!important;
+}
+.jarvis-living-core>.jarvis-presence-form{grid-area:1/1}
+.jarvis-core-readout{
+  grid-area:1/1;
+  z-index:5;
+  align-self:end;
+  margin-bottom:8%;
+  display:grid;
+  justify-items:center;
+  gap:4px;
+  pointer-events:none;
+}
+.jarvis-core-readout span{
+  color:rgba(183,31,38,.68);
+  font-size:.54rem;
+  font-weight:800;
+  letter-spacing:.20em;
+}
+.jarvis-core-readout strong{
+  color:rgba(183,31,38,.92);
+  font-size:.62rem;
+  letter-spacing:.12em;
+  text-shadow:0 0 10px rgba(183,31,38,.28);
+}
+.jarvis-panel-presence{width:82px;min-width:82px}
+.jarvis-ambient-presence{
+  width:min(48vw,520px);
+  display:grid;
+  place-items:center;
+  margin-bottom:1.6rem;
+}
+.jarvis-voice-status>.jarvis-presence-mini{
+  width:24px;
+  min-width:24px;
+}
+@media(max-width:760px){
+  .jarvis-ambient-presence{width:min(78vw,390px);margin-bottom:1.2rem}
+  .jarvis-panel-presence{width:68px;min-width:68px}
+}
