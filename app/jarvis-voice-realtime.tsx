@@ -476,8 +476,8 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     });
   }
 
-  async function playElevenLabsSpeech(spoken: string) {
-    if (elevenUnavailableRef.current) return false;
+  async function playElevenLabsSpeech(spoken: string): Promise<"PLAYED" | "FALLBACK" | "BLOCKED"> {
+    if (elevenUnavailableRef.current) return "FALLBACK";
     try {
       const response = await fetch("/api/voice/elevenlabs", {
         method: "POST",
@@ -485,12 +485,20 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         body: JSON.stringify({ text: spoken }),
       });
       if (!response.ok) {
+        if (response.status === 402) {
+          setCaption("ELEVENLABS PLAN REQUIRED");
+          return "BLOCKED";
+        }
+        if (response.status === 401 || response.status === 403) {
+          setCaption("ELEVENLABS AUTH ERROR");
+          return "BLOCKED";
+        }
         if (response.status === 503) elevenUnavailableRef.current = true;
-        return false;
+        return "FALLBACK";
       }
 
       const blob = await response.blob();
-      if (!blob.size) return false;
+      if (!blob.size) return "FALLBACK";
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       elevenAudioRef.current = audio;
@@ -509,9 +517,9 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         audio.onerror = done;
         void audio.play().catch(done);
       });
-      return true;
+      return "PLAYED";
     } catch {
-      return false;
+      return "FALLBACK";
     }
   }
 
@@ -526,8 +534,8 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     premiumSpeechChainRef.current = premiumSpeechChainRef.current
       .catch(() => undefined)
       .then(async () => {
-        const usedElevenLabs = await playElevenLabsSpeech(spoken);
-        if (!usedElevenLabs) {
+        const elevenState = await playElevenLabsSpeech(spoken);
+        if (elevenState === "FALLBACK") {
           setCaption("JARVIS RESPONDING · FALLBACK VOICE");
           await playBrowserSpeech(spoken);
         }
