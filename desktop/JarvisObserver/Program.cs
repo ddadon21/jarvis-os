@@ -36,6 +36,7 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly UIA3Automation _automation = new();
     private readonly Control _uiInvoker = new();
     private readonly DesktopActionRuntime _desktopRuntime;
+    private readonly string[] _agentCapabilities;
     private readonly string _root;
     private readonly string _configPath;
     private ObserverConfig _config;
@@ -88,6 +89,7 @@ internal sealed class ObserverContext : ApplicationContext
         _config = ObserverConfig.Load(_configPath);
         _uiInvoker.CreateControl();
         _desktopRuntime = new DesktopActionRuntime(_automation, _uiInvoker);
+        _agentCapabilities = DetectAgentCapabilities();
         ImportLocalSecretsIfPresent();
         NormalizeServerUrl();
         NormalizeObsidianConfig();
@@ -514,6 +516,7 @@ internal sealed class ObserverContext : ApplicationContext
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
             req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -573,6 +576,7 @@ internal sealed class ObserverContext : ApplicationContext
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
             req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -881,6 +885,7 @@ internal sealed class ObserverContext : ApplicationContext
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
             req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             using var response = await _http.SendAsync(req, cts.Token);
@@ -905,6 +910,28 @@ internal sealed class ObserverContext : ApplicationContext
             _lastDesktopCommandId = null;
             Log(new { type = "desktop.command.result_error", at = DateTime.UtcNow, id = result.Id, error = ex.Message });
         }
+    }
+
+    private static string[] DetectAgentCapabilities()
+    {
+        var capabilities = new List<string> { "BROWSER" };
+        if (ExecutableOnPath("codex.exe")) capabilities.Add("CODEX");
+        if (ExecutableOnPath("claude.exe")) capabilities.Add("CLAUDE");
+        return capabilities.ToArray();
+    }
+
+    private static bool ExecutableOnPath(string fileName)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (var raw in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(raw.Trim(), fileName))) return true;
+            }
+            catch { }
+        }
+        return false;
     }
 
     private static string NormalizeObsidianVaultPath(string? value)
@@ -960,6 +987,7 @@ internal sealed class ObserverContext : ApplicationContext
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
             req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
             using var response = await _http.SendAsync(req, cts.Token);
