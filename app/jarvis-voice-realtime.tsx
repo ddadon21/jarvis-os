@@ -79,6 +79,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
   const fallbackStreamDoneRef = useRef(true);
   const fallbackSpeechBufferRef = useRef("");
   const fallbackSpeakingRef = useRef(false);
+  const speechGenerationRef = useRef(0);
   const pendingTranscriptRef = useRef("");
   const pendingTranscriptTimerRef = useRef<number | null>(null);
 
@@ -148,7 +149,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
 
   useEffect(() => {
     const remembered = window.localStorage.getItem(VOICE_STORAGE_KEY) === "true";
-    if (remembered) window.setTimeout(() => startVoice(true), 450);
+    if (remembered) window.setTimeout(() => startVoice(true), 100);
 
     return () => {
       voiceEnabledRef.current = false;
@@ -211,10 +212,10 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     }
   }
 
-  function restartWakeSoon(delay = 160) {
-    if (!voiceEnabledRef.current || realtimeActiveRef.current || fallbackSpeakingRef.current) return;
+  function restartWakeSoon(delay = 75, allowDuringSpeech = false) {
+    if (!voiceEnabledRef.current || realtimeActiveRef.current || (!allowDuringSpeech && fallbackSpeakingRef.current)) return;
     window.setTimeout(() => {
-      if (!voiceEnabledRef.current || realtimeActiveRef.current || fallbackSpeakingRef.current) return;
+      if (!voiceEnabledRef.current || realtimeActiveRef.current || (!allowDuringSpeech && fallbackSpeakingRef.current)) return;
       try {
         recognitionRef.current?.start?.();
       } catch {
@@ -271,7 +272,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     if (resumeWake && voiceEnabledRef.current) {
       setVoice("LISTENING");
       setCaption("VOICE ONLINE · TALK NORMALLY");
-      restartWakeSoon(220);
+      restartWakeSoon(90);
     }
   }
 
@@ -380,8 +381,6 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     setVoice("THINKING");
     setCaption("OPENING NEURAL VOICE LINK");
 
-    await new Promise((resolve) => window.setTimeout(resolve, 120));
-
     const peer = new RTCPeerConnection();
     realtimePeerRef.current = peer;
 
@@ -470,7 +469,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     fallbackArmedRef.current = true;
     setVoice("LISTENING");
     setCaption("VOICE ONLINE · TALK NORMALLY");
-    restartWakeSoon(120);
+    restartWakeSoon(70);
   }
 
   function playBrowserSpeech(spoken: string) {
@@ -491,8 +490,12 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     });
   }
 
-  async function playElevenLabsSpeech(spoken: string): Promise<"PLAYED" | "FALLBACK" | "BLOCKED"> {
-    if (elevenUnavailableRef.current) return "FALLBACK";
+  async function prepareElevenLabsSpeech(spoken: string): Promise<
+    | { state: "READY"; blob: Blob }
+    | { state: "FALLBACK" }
+    | { state: "BLOCKED" }
+  > {
+    if (elevenUnavailableRef.current) return { state: "FALLBACK" };
     try {
       const response = await fetch("/api/voice/elevenlabs", {
         method: "POST",
@@ -502,45 +505,55 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
       if (!response.ok) {
         if (response.status === 402) {
           setCaption("ELEVENLABS PLAN REQUIRED");
-          return "BLOCKED";
+          return { state: "BLOCKED" };
         }
         if (response.status === 401 || response.status === 403) {
           setCaption("ELEVENLABS AUTH ERROR");
-          return "BLOCKED";
+          return { state: "BLOCKED" };
         }
         if (response.status === 503) elevenUnavailableRef.current = true;
-        return "FALLBACK";
+        return { state: "FALLBACK" };
       }
 
       const blob = await response.blob();
-      if (!blob.size) return "FALLBACK";
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      elevenAudioRef.current = audio;
-      audio.preload = "auto";
-      setCaption("JARVIS RESPONDING · ELEVENLABS");
-
-      await new Promise<void>((resolve) => {
-        const done = () => {
-          audio.onended = null;
-          audio.onerror = null;
-          if (elevenAudioRef.current === audio) elevenAudioRef.current = null;
-          URL.revokeObjectURL(url);
-          resolve();
-        };
-        audio.onended = done;
-        audio.onerror = done;
-        void audio.play().catch(done);
-      });
-      return "PLAYED";
+      if (!blob.size) return { state: "FALLBACK" };
+      return { state: "READY", blob };
     } catch {
-      return "FALLBACK";
+      return { state: "FALLBACK" };
     }
+  }
+
+  async function playPreparedElevenLabs(blob: Blob, generation: number) {
+    if (generation !== speechGenerationRef.current) return;
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    elevenAudioRef.current = audio;
+    audio.preload = "auto";
+    setCaption("JARVIS RESPONDING · ELEVENLABS");
+
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        audio.onended = null;
+        audio.onerror = null;
+        if (elevenAudioRef.current === audio) elevenAudioRef.current = null;
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onended = done;
+      audio.onerror = done;
+      void audio.play().catch(done);
+    });
   }
 
   function queueFallbackSpeech(text: string) {
     const spoken = cleanForSpeech(text);
     if (!spoken) return;
+
+    const generation = speechGenerationRef.current;
+    // Start synthesis immediately. Playback remains ordered, so later clauses can
+    // generate while the current clause is already being spoken.
+    const prepared = prepareElevenLabsSpeech(spoken);
+
     fallbackSpeakingRef.current = true;
     setVoice("SPEAKING");
     setCaption("JARVIS RESPONDING");
@@ -549,8 +562,12 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     premiumSpeechChainRef.current = premiumSpeechChainRef.current
       .catch(() => undefined)
       .then(async () => {
-        const elevenState = await playElevenLabsSpeech(spoken);
-        if (elevenState === "FALLBACK") {
+        if (generation !== speechGenerationRef.current) return;
+        const elevenState = await prepared;
+        if (generation !== speechGenerationRef.current) return;
+        if (elevenState.state === "READY") {
+          await playPreparedElevenLabs(elevenState.blob, generation);
+        } else if (elevenState.state === "FALLBACK") {
           setCaption("JARVIS RESPONDING · FALLBACK VOICE");
           await playBrowserSpeech(spoken);
         }
@@ -570,9 +587,18 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         buffer = buffer.slice(sentence[0].length).trimStart();
         continue;
       }
-      if (!force && buffer.length > 120) {
-        const cut = buffer.slice(0, 145).lastIndexOf(" ");
-        if (cut > 85) {
+
+      // Start the first useful clause early instead of waiting for an entire sentence.
+      const clause = buffer.match(/^([\s\S]{38,}?[;:])(?=\s|$)/);
+      if (clause) {
+        queueFallbackSpeech(clause[1]);
+        buffer = buffer.slice(clause[0].length).trimStart();
+        continue;
+      }
+
+      if (!force && buffer.length > 72) {
+        const cut = buffer.slice(0, 96).lastIndexOf(" ");
+        if (cut > 48) {
           queueFallbackSpeech(buffer.slice(0, cut));
           buffer = buffer.slice(cut).trimStart();
           continue;
@@ -796,7 +822,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
           pendingTranscriptRef.current = "";
           pendingTranscriptTimerRef.current = null;
           if (fullThought) void handleWakeTranscript(fullThought);
-        }, 700);
+        }, 280);
       }
 
       if (interim.trim() && !realtimeActiveRef.current && voiceStateRef.current !== "THINKING") {
@@ -813,7 +839,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         setCaption("MICROPHONE PERMISSION REQUIRED");
         return;
       }
-      restartWakeSoon(350);
+      restartWakeSoon(150);
     };
     recognition.onend = () => restartWakeSoon();
     return recognition;
@@ -855,7 +881,7 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
     try {
       recognitionRef.current.start();
     } catch {
-      restartWakeSoon(isRestore ? 500 : 160);
+      restartWakeSoon(isRestore ? 120 : 75);
     }
   }
 
