@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useJarvisVoice } from "../jarvis-voice";
+import JarvisPresence from "../jarvis-presence";
 import "./ambient.css";
 
 export default function AmbientPage() {
@@ -30,11 +31,8 @@ export default function AmbientPage() {
       </div>
 
       <section className="ambient-center" aria-live="polite">
-        <div className="jarvis-orbit" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="orbit orbit-three" />
-          <div className="jarvis-core"><span>JARVIS</span></div>
+        <div className="jarvis-ambient-presence">
+          <JarvisPresence state={voiceState} variant="hero" label="JARVIS" />
         </div>
 
         <div className="ambient-time">{time}</div>
