@@ -137,12 +137,6 @@ const sectors = [
   { id: "LIFE" as const, icon: Target, title: "LIFE", signal: "ALIGN" },
 ];
 
-function quickCoreEvent(summary: string) {
-  const compact = summary.replace(/\s+/g, " ").trim();
-  const first = compact.split(/(?<=[.!?])\s+/)[0] || compact;
-  return first.length > 88 ? first.slice(0, 85).trimEnd() + "…" : first;
-}
-
 export default function WorkV2() {
   const { voiceEnabled, voiceState, caption, toggleVoice } = useJarvisVoice();
   const [domain, setDomain] = useState<Domain>(defaultState.activeDomain);
@@ -162,8 +156,6 @@ export default function WorkV2() {
   const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null);
   const [responseMs, setResponseMs] = useState<number | null>(null);
   const [streamStarted, setStreamStarted] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-  const chatLogRef = useRef<HTMLDivElement>(null);
   const systemStatusSignatureRef = useRef("");
   const assistantSignatureRef = useRef("");
 
@@ -256,21 +248,13 @@ export default function WorkV2() {
     }));
   }, [assistantPulse, voiceEnabled]);
 
-  useEffect(() => {
-    const node = chatLogRef.current;
-    if (!node) return;
-    const frame = window.requestAnimationFrame(() => {
-      node.scrollTop = node.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [messages.length, busy]);
-
   const currentSector = useMemo(() => sectors.find((item) => item.id === domain) ?? sectors[0], [domain]);
   const SectorIcon = currentSector.icon;
   const jarvisVisualState = busy ? "THINKING" : voiceEnabled ? voiceState : "STANDBY";
   const runtimeEvents = systemStatus?.events ?? [];
   const systemMode = systemStatus?.online ? systemStatus.mode : "STARTING";
   const assistantState = assistantPulse ?? systemStatus?.assistant ?? null;
+  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")?.content ?? "JARVIS standing by.";
 
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
@@ -475,14 +459,8 @@ export default function WorkV2() {
               </div>
             </div>
           </Panel>
-          <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
-            {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
-          </Panel>
           <Panel title="GOOGLE WORKSPACE" corner={assistantState?.sources?.calendar === "CONNECTED" && assistantState?.sources?.email === "CONNECTED" ? "CONNECTED" : "ASSISTANT"}>
             <StableGoogleWorkspacePanel />
-          </Panel>
-          <Panel title="OBSIDIAN" corner="LOCAL">
-            <StableObsidianBridgePanel />
           </Panel>
           {domain === "TRADING" ? (
             <Panel title="" corner="" className="trading-rules-panel">
@@ -491,16 +469,42 @@ export default function WorkV2() {
           ) : null}
         </aside>
 
-        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
-          {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
-            <div className="core-visual jarvis-living-core">
+        <section className={`center-core domain-page ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
+          <div className="domain-stage">
+            <section className="domain-readiness">
+              <div className="domain-stage-label">
+                <span>{domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"}</span>
+                <b>{domain}</b>
+              </div>
+              {domain === "LIFE" ? <div className="domain-life-progress"><LifeProgress /></div> : null}
+              <DomainGoals domain={domain} events={runtimeEvents} />
+            </section>
+
+            <div className="domain-jarvis">
               <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
-              <div className="jarvis-core-readout">
-                <span>JARVIS CORE</span>
+              <div className="domain-jarvis-caption">
+                <span>JARVIS</span>
                 <strong>{busy ? "THINKING" : voiceEnabled ? voiceState : systemMode}</strong>
               </div>
             </div>
-          )}
+
+            <section className="domain-pulse">
+              <div><span>SYSTEM</span><strong>{systemMode}</strong></div>
+              <div><span>FOCUS</span><strong>{currentSector.signal}</strong></div>
+              <div><span>ROUTE</span><strong>{activeRoute}</strong></div>
+              <div><span>INTELLIGENCE</span><strong>{activeProvider}</strong></div>
+            </section>
+          </div>
+
+          <div className="domain-content">
+            {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
+              <div className="sentryops-page-intro">
+                <span>SENTRYOPS // OPERATING PAGE</span>
+                <strong>{nextMove.title}</strong>
+                <p>{nextMove.reason}</p>
+              </div>
+            )}
+          </div>
 
           <div className="domain-switcher">
             {sectors.map(({ id, icon: Icon }) => <button key={id} className={domain === id ? "active" : ""} onClick={() => setDomain(id)}><Icon size={15} /> {id}</button>)}
@@ -520,43 +524,15 @@ export default function WorkV2() {
             <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={voiceEnabled ? `${voiceState} · ${caption}` : `Tell Jarvis what matters in ${domain.toLowerCase()}...`} autoComplete="off" />
             <button type="submit" aria-label="Send" disabled={busy}><Send size={17} /></button>
           </form>
+          <div className="domain-response-strip" aria-live="polite">
+            <span>{busy && !streamStarted ? "ROUTING INTELLIGENCE…" : latestAssistant}</span>
+            <small>{activeProvider} · {activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small>
+          </div>
         </section>
 
         <aside className="right-column">
-          <Panel title="JARVIS" corner={systemMode} className="jarvis-presence-panel">
-            <div className="jarvis-presence">
-              <JarvisPresence state={jarvisVisualState} variant="compact" label="JARVIS" className="jarvis-panel-presence" />
-              <div className="jarvis-presence-copy">
-                <strong>{busy ? "THINKING" : "ONLINE"}</strong>
-                <span>{domain} MODE</span>
-                <small>{activeProvider} · {activeModel} · {activeRoute}</small>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
-            <div className="brain-runtime"><span>{activeRoute}</span><strong>{activeProvider}</strong><small>{activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small></div>
-            <div className="chat-log" ref={chatLogRef} style={{ height: 210 }}>
-              {messages.slice(-6).map((message, index) => <div key={`${message.role}-${message.createdAt ?? index}`} className={`message ${message.role}`}><div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div><p>{message.content}</p></div>)}
-              {busy && !streamStarted && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Routing intelligence<span>...</span></p></div>}
-              <div ref={endRef} />
-            </div>
-          </Panel>
-
-          <Panel title="EVENTS" corner="BRIEF" className="core-events-panel">
-            <div className="event-list core-event-list">
-              {runtimeEvents.length > 0 ? runtimeEvents.slice(0, 7).map((event) => (
-                <Event
-                  key={event.id}
-                  text={quickCoreEvent(event.summary)}
-                  time={event.importance === "BACKGROUND" ? "BG" : event.domain.slice(0, 6)}
-                />
-              )) : <>
-                <Event text="Jarvis core online" time="NOW" />
-                <Event text="Autonomous workforce ready" time="AI" />
-                <Event text="Finance state connected" time="FIN" />
-              </>}
-            </div>
+          <Panel title="OBSIDIAN" corner="LOCAL" className="core-obsidian-panel">
+            <StableObsidianBridgePanel />
           </Panel>
 
           <Panel title="AI WORKFORCE" corner={systemStatus?.workforce?.status ?? "STARTING"} className="core-workforce-panel">
@@ -574,10 +550,6 @@ export default function WorkV2() {
 
 function Panel({ title, corner, children, className = "" }: { title: string; corner: string; children: React.ReactNode; className?: string }) {
   return <section className={`panel ${className}`}><span className="corner tl" /><span className="corner tr" /><span className="corner bl" /><span className="corner br" /><div className="panel-head"><div><strong>{title}</strong></div><small>{corner}</small></div><div className="panel-rule" /><div className="panel-body">{children}</div></section>;
-}
-
-function Event({ text, time }: { text: string; time: string }) {
-  return <div className="event"><span>[{time}]</span><p>{text}</p><i /></div>;
 }
 
 function AssistantSource({ label, state }: { label: string; state: string }) {
