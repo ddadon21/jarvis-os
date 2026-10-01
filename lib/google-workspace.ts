@@ -335,7 +335,7 @@ export async function syncGoogleWorkspace() {
   });
 
   const messageIds = (gmailList.messages ?? []).flatMap(message => message.id ? [message.id] : []).slice(0, 16);
-  const communications: CommunicationSignal[] = (await Promise.all(messageIds.map(async id => {
+  const fetchedMessages = await Promise.all(messageIds.map(async id => {
     const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}`);
     url.searchParams.set("format", "metadata");
     for (const key of ["From", "Subject", "Date"]) url.searchParams.append("metadataHeaders", key);
@@ -354,9 +354,9 @@ export async function syncGoogleWorkspace() {
           const parsed = raw ? Date.parse(raw) : NaN;
           return Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
         })();
-    return {
+    const signal: CommunicationSignal = {
       id: message.id || id,
-      channel: "EMAIL" as const,
+      channel: "EMAIL",
       from: header(message.payload?.headers, "From"),
       subject: header(message.payload?.headers, "Subject"),
       summary: message.snippet?.trim() || "Email received.",
@@ -364,7 +364,9 @@ export async function syncGoogleWorkspace() {
       relatedEventId: null,
       source: "Gmail",
     };
-  }))).filter((item): item is CommunicationSignal => Boolean(item));
+    return signal;
+  }));
+  const communications: CommunicationSignal[] = fetchedMessages.flatMap(item => item ? [item] : []);
 
   const current = await getAssistantRuntimeState();
   const state = await setAssistantRuntimeState({
