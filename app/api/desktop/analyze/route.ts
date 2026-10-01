@@ -1,9 +1,10 @@
+import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const SCREEN_MODEL = "openai/gpt-6-luna";
+const SCREEN_MODEL = "gpt-5.6-luna";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as {
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await generateText({
-      model: SCREEN_MODEL,
+      model: openai(SCREEN_MODEL),
       system: [
         "You are JARVIS screen perception for Dwight Johnson's own Windows PC.",
         "Describe only what is actually visible in the supplied screenshot.",
