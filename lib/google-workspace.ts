@@ -3,7 +3,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { getCache } from "@vercel/functions";
 import { createClient } from "@supabase/supabase-js";
-import { setAssistantRuntimeState, type CalendarEventSnapshot, type CommunicationSignal } from "./jarvis-assistant-runtime";
+import { getAssistantRuntimeState, setAssistantRuntimeState, type CalendarEventSnapshot, type CommunicationSignal } from "./jarvis-assistant-runtime";
 
 const SUPABASE_FALLBACK_URL = "https://cubkgxdhkehmzczbvczy.supabase.co";
 const TOKEN_STATE_KEY = "integration.google.oauth.v1";
@@ -366,8 +366,13 @@ export async function syncGoogleWorkspace() {
     };
   }))).filter((item): item is CommunicationSignal => Boolean(item));
 
+  const current = await getAssistantRuntimeState();
   const state = await setAssistantRuntimeState({
-    sources: { calendar: "CONNECTED", email: "CONNECTED" },
+    sources: {
+      ...current.sources,
+      calendar: "CONNECTED",
+      email: "CONNECTED",
+    },
     calendar: { asOf: new Date().toISOString(), events: calendar },
     communications: { asOf: new Date().toISOString(), recent: communications },
   });
