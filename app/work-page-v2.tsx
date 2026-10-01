@@ -454,7 +454,7 @@ export default function WorkV2() {
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
           {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
             <div className="core-visual jarvis-living-core">
-              <JarvisPresence state={jarvisVisualState} variant="hero" label="JARVIS" />
+              <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
               <div className="jarvis-core-readout">
                 <span>JARVIS CORE</span>
                 <strong>{busy ? "THINKING" : voiceEnabled ? voiceState : systemMode}</strong>
@@ -484,7 +484,7 @@ export default function WorkV2() {
 
         <aside className="right-column">
           <div className="jarvis-right-orb" aria-label="Jarvis presence">
-            <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
+            <JarvisPresence state={jarvisVisualState} variant="hero" label="JARVIS" />
           </div>
 
           <Panel title="EVENTS" corner="BRIEF" className="core-events-panel">
