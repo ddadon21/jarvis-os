@@ -16,6 +16,11 @@ export type LocalAgentDesktopAction =
   | "CLIPBOARD_WRITE"
   | "UI_CLICK_TEXT"
   | "UI_TYPE_TEXT"
+  | "BROWSER_READ_PAGE"
+  | "BROWSER_NAVIGATE"
+  | "BROWSER_SEARCH"
+  | "BROWSER_BACK"
+  | "RUN_CODING_AGENT"
   | "RUN_APPROVED_COMMAND";
 
 export type LocalAgentDesktopCommand = {
@@ -306,7 +311,7 @@ export async function getObsidianCommandResult(controllerToken: string, commandI
   return { pending: Boolean(link.obsidianCommand), result };
 }
 
-const READ_ONLY_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ"]);
+const READ_ONLY_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ", "BROWSER_READ_PAGE"]);
 const USER_AUTHORIZED_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>([
   "OPEN_APP",
   "FOCUS_WINDOW",
@@ -315,6 +320,10 @@ const USER_AUTHORIZED_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>([
   "CLIPBOARD_WRITE",
   "UI_CLICK_TEXT",
   "UI_TYPE_TEXT",
+  "BROWSER_NAVIGATE",
+  "BROWSER_SEARCH",
+  "BROWSER_BACK",
+  "RUN_CODING_AGENT",
   "RUN_APPROVED_COMMAND",
 ]);
 
@@ -343,7 +352,7 @@ export async function enqueueDesktopCommand(
     ? input.args.map(item => String(item).slice(0, 1000)).slice(0, 20)
     : [];
 
-  if (["OPEN_APP", "FOCUS_WINDOW", "OPEN_PATH", "OPEN_URI", "UI_CLICK_TEXT", "RUN_APPROVED_COMMAND"].includes(action) && !target) {
+  if (["OPEN_APP", "FOCUS_WINDOW", "OPEN_PATH", "OPEN_URI", "UI_CLICK_TEXT", "BROWSER_NAVIGATE", "BROWSER_SEARCH", "RUN_CODING_AGENT", "RUN_APPROVED_COMMAND"].includes(action) && !target) {
     return null;
   }
   if (["CLIPBOARD_WRITE", "UI_TYPE_TEXT"].includes(action) && text == null) return null;
@@ -422,6 +431,8 @@ export async function getLocalAgentPresence() {
     ...presence,
     online: heartbeatAge < 15_000,
     desktopRuntime: versionAtLeast(presence.observerVersion, 0, 8, 0),
+    browserRuntime: versionAtLeast(presence.observerVersion, 0, 9, 0),
+    codingRuntime: versionAtLeast(presence.observerVersion, 0, 9, 0),
   };
 }
 
