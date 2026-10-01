@@ -2,15 +2,10 @@
 
 import {
   Activity,
-  Bot,
-  BrainCircuit,
-  BriefcaseBusiness,
-  LifeBuoy,
-  Mic,
-  Radar,
-  Send,
-  Sparkles,
-  Target,
+   BriefcaseBusiness,
+   Mic,
+   Send,
+   Target,
   TrendingUp,
   WalletCards,
 } from "lucide-react";
