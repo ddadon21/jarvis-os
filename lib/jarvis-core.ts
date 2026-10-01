@@ -8,6 +8,7 @@ import { getLatestPulse, getRecentEvents, type RuntimeDomain, type TruthState } 
 import { getOrSeedWorkforceState } from "./jarvis-workforce";
 import { getTradingState } from "./trading-runtime";
 import { getLocalAgentPresence } from "./trading-device-link";
+import { getElevenLabsRuntimeState } from "./jarvis-voice-runtime";
 
 export type JarvisCoreTruthState = TruthState | "UNKNOWN";
 export type JarvisCoreHealth = "HEALTHY" | "DEGRADED" | "BLOCKED" | "UNKNOWN";
@@ -157,11 +158,12 @@ export type JarvisCoreInputs = {
   events: Awaited<ReturnType<typeof getRecentEvents>>;
   integrations: Awaited<ReturnType<typeof getJarvisIntegrationRegistry>>;
   localAgent: Awaited<ReturnType<typeof getLocalAgentPresence>>;
+  premiumVoice: Awaited<ReturnType<typeof getElevenLabsRuntimeState>>;
 };
 
 export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
   const generatedAt = new Date().toISOString();
-  const { workforce, finance, trading, assistant, pulse, events, integrations, localAgent } = input;
+  const { workforce, finance, trading, assistant, pulse, events, integrations, localAgent, premiumVoice } = input;
 
   const operating = workforce.operatingSystem;
   const truth = operating?.truth;
@@ -270,15 +272,28 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
         : "The Windows Local Agent is not currently online, so JARVIS must not claim computer-control capability.",
   });
   const premiumVoiceConfigured = Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID);
+  const premiumVoiceState =
+    !premiumVoiceConfigured ? "NOT_CONNECTED" :
+    premiumVoice.status === "CONNECTED" ? "CONNECTED" :
+    premiumVoice.status === "PLAN_REQUIRED" || premiumVoice.status === "AUTH_ERROR" || premiumVoice.status === "DEGRADED" ? "DEGRADED" :
+    "NEEDS_CONNECTION";
   tools.push({
     id: "ELEVENLABS_VOICE",
     label: "Jarvis Premium Voice",
-    state: premiumVoiceConfigured ? "CONNECTED" : "NOT_CONNECTED",
+    state: premiumVoiceState,
     authority: "READ_ONLY",
     capabilities: ["Premium text-to-speech", "British voice profile", "Streaming audio output"],
-    note: premiumVoiceConfigured
-      ? `ElevenLabs voice is configured using ${process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5"}.`
-      : "Voice code is installed, but ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are still required in the deployment.",
+    note: !premiumVoiceConfigured
+      ? "Voice code is installed, but ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are still required in the deployment."
+      : premiumVoice.status === "CONNECTED"
+        ? `ElevenLabs TTS is verified using ${premiumVoice.model}.`
+        : premiumVoice.status === "PLAN_REQUIRED"
+          ? "ElevenLabs is configured, but the selected Voice Library voice requires a paid subscription for API use."
+          : premiumVoice.status === "AUTH_ERROR"
+            ? "ElevenLabs is configured, but the provider rejected the current API authentication or permissions."
+            : premiumVoice.status === "DEGRADED"
+              ? premiumVoice.detail
+              : "ElevenLabs is configured but has not yet completed a successful TTS verification.",
   });
   tools.push({
     id: "CODING_EXECUTORS",
@@ -380,10 +395,14 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
         realtimeProvider: "OPENAI",
         fallback: "BROWSER_SPEECH",
         premiumConfigured: premiumVoiceConfigured,
-        model: process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2_5",
-        note: premiumVoiceConfigured
-          ? "ElevenLabs is the primary spoken-output voice. Browser speech is retained only as an emergency fallback; realtime transport optimization is the next voice step."
-          : "ElevenLabs integration is installed but not configured yet. Browser speech remains active until the API key and voice ID are added.",
+        model: premiumVoice.model,
+        note: !premiumVoiceConfigured
+          ? "ElevenLabs integration is installed but not configured yet."
+          : premiumVoice.status === "CONNECTED"
+            ? "ElevenLabs is the verified primary spoken-output voice. Browser speech remains emergency fallback only."
+            : premiumVoice.status === "PLAN_REQUIRED"
+              ? "ElevenLabs is configured, but the selected library voice is blocked until the account is on a paid plan."
+              : premiumVoice.detail,
       },
       desktop: {
         state: localAgent?.online && localAgent.desktopRuntime ? "PARTIAL" : "PARTIAL",
@@ -401,7 +420,7 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
 
 
 export async function getJarvisCoreState(): Promise<JarvisCoreState> {
-  const [workforce, finance, trading, assistant, pulse, events, integrations, localAgent] = await Promise.all([
+  const [workforce, finance, trading, assistant, pulse, events, integrations, localAgent, premiumVoice] = await Promise.all([
     getOrSeedWorkforceState(),
     getOrSeedFinanceState(),
     getTradingState(),
@@ -410,6 +429,7 @@ export async function getJarvisCoreState(): Promise<JarvisCoreState> {
     getRecentEvents(),
     getJarvisIntegrationRegistry(),
     getLocalAgentPresence(),
+    getElevenLabsRuntimeState(),
   ]);
-  return buildJarvisCoreState({ workforce, finance, trading, assistant, pulse, events, integrations, localAgent });
+  return buildJarvisCoreState({ workforce, finance, trading, assistant, pulse, events, integrations, localAgent, premiumVoice });
 }
