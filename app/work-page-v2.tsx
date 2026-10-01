@@ -9,7 +9,7 @@ import {
   TrendingUp,
   WalletCards,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import DwightTradingRules from "./dwight-trading-rules";
 import ObsidianBridgePanel from "./obsidian-bridge-panel";
@@ -121,6 +121,12 @@ type StreamMeta = {
   totalMs?: number | null;
   message?: string;
 };
+
+const StableFinanceCockpit = memo(FinanceCockpitV2);
+const StableTradingCockpit = memo(TradingCockpit);
+const StableLifeCockpit = memo(LifeCockpit);
+const StableWorkforcePanel = memo(WorkforcePanel);
+const StableObsidianBridgePanel = memo(ObsidianBridgePanel);
 
 const sectors = [
   { id: "TRADING" as const, icon: TrendingUp, title: "TRADING", signal: "PASS → PAYOUT" },
@@ -446,7 +452,7 @@ export default function WorkV2() {
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
           <Panel title="OBSIDIAN" corner="LOCAL">
-            <ObsidianBridgePanel />
+            <StableObsidianBridgePanel />
           </Panel>
           {domain === "TRADING" ? (
             <Panel title="" corner="" className="trading-rules-panel">
@@ -456,7 +462,7 @@ export default function WorkV2() {
         </aside>
 
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
-          {domain === "FINANCE" ? <FinanceCockpitV2 /> : domain === "TRADING" ? <TradingCockpit /> : domain === "LIFE" ? <LifeCockpit /> : (
+          {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
             <div className="core-visual jarvis-living-core">
               <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
               <div className="jarvis-core-readout">
@@ -524,7 +530,7 @@ export default function WorkV2() {
           </Panel>
 
           <Panel title="AI WORKFORCE" corner={systemStatus?.workforce?.status ?? "STARTING"} className="core-workforce-panel">
-            <WorkforcePanel />
+            <StableWorkforcePanel />
           </Panel>
 
           <Panel title="DOMAIN" corner={currentSector.signal}>
