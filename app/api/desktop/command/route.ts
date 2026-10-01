@@ -22,10 +22,15 @@ const ACTIONS: LocalAgentDesktopAction[] = [
   "CLIPBOARD_WRITE",
   "UI_CLICK_TEXT",
   "UI_TYPE_TEXT",
+  "BROWSER_READ_PAGE",
+  "BROWSER_NAVIGATE",
+  "BROWSER_SEARCH",
+  "BROWSER_BACK",
+  "RUN_CODING_AGENT",
   "RUN_APPROVED_COMMAND",
 ];
 
-const READ_ONLY = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ"]);
+const READ_ONLY = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ", "BROWSER_READ_PAGE"]);
 
 export async function POST(request: Request) {
   const controllerToken = bearer(request);
