@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { usePathname, useRouter } from "next/navigation";
 import { loadJarvisState, saveJarvisState } from "../lib/jarvis-state";
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
+import { tryExecuteGoogleWorkspaceText } from "../lib/jarvis-google-client";
 import JarvisPresence from "./jarvis-presence";
 
 export type JarvisVoiceState = "STANDBY" | "LISTENING" | "THINKING" | "SPEAKING" | "ERROR";
@@ -839,7 +840,24 @@ export default function JarvisVoiceProvider({ children }: { children: React.Reac
         return;
       }
     } catch {
-      // Fall through to the intelligence path if local desktop routing fails.
+      // Fall through to connected assistant tools if local desktop routing fails.
+    }
+
+    try {
+      const google = await tryExecuteGoogleWorkspaceText(command);
+      if (google) {
+        appendMessage("user", command);
+        stopWakeRecognition();
+        fallbackPendingSpeechRef.current = 0;
+        fallbackStreamDoneRef.current = true;
+        fallbackSpeechBufferRef.current = "";
+        window.speechSynthesis?.cancel();
+        appendMessage("assistant", google.message);
+        queueFallbackSpeech(google.message);
+        return;
+      }
+    } catch {
+      // Fail closed and continue to the general intelligence path.
     }
 
     await askFallback(command);
