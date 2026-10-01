@@ -128,3 +128,107 @@
   flex-shrink:0;
   letter-spacing:.06em;
 }
+
+
+/* Capital Path operating-plan workspace */
+.stagePlan{
+  margin:0 0 14px;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.075);
+  background:linear-gradient(180deg,rgba(255,255,255,.018),rgba(0,0,0,.12));
+}
+.stagePlanHead{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:14px;
+  padding-bottom:10px;
+  margin-bottom:10px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.stagePlanHead>div{
+  display:grid;
+  gap:3px;
+}
+.stagePlanHead span{
+  color:#777;
+  font-size:7px;
+  letter-spacing:.11em;
+}
+.stagePlanHead strong{
+  color:#f1f1f1;
+  font-size:13px;
+  letter-spacing:.08em;
+}
+.stagePlanHead small{
+  color:#929292;
+  font-size:8px;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+.stagePlanGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  margin-bottom:10px;
+}
+.stagePlanGrid>div{
+  padding:9px 10px;
+  border-left:2px solid rgba(183,31,38,.62);
+  background:rgba(0,0,0,.14);
+}
+.stagePlanGrid span{
+  display:block;
+  margin-bottom:4px;
+  color:#8c8c8c;
+  font-size:7px;
+  letter-spacing:.1em;
+}
+.stagePlanGrid p{
+  margin:0;
+  color:#d0d0d0;
+  font-size:9px;
+  line-height:1.45;
+}
+.stageActions{
+  display:grid;
+  gap:6px;
+  margin:10px 0;
+}
+.stageActions>div{
+  display:grid;
+  grid-template-columns:24px 1fr;
+  align-items:start;
+  gap:8px;
+  padding:7px 0;
+  border-bottom:1px solid rgba(255,255,255,.045);
+}
+.stageActions>div:last-child{
+  border-bottom:0;
+}
+.stageActions b{
+  color:var(--jarvis-red);
+  font-size:8px;
+  font-variant-numeric:tabular-nums;
+}
+.stageActions span{
+  color:#aaa;
+  font-size:8.5px;
+  line-height:1.4;
+}
+.stageCta{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  min-height:30px;
+  padding:0 10px;
+  border-color:rgba(183,31,38,.42)!important;
+  background:rgba(183,31,38,.07)!important;
+  color:#e8e8e8!important;
+}
+@media(max-width:720px){
+  .stagePlanHead{align-items:flex-start;flex-direction:column}
+  .stagePlanHead small{text-align:left}
+  .stagePlanGrid{grid-template-columns:1fr}
+}
