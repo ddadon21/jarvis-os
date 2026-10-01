@@ -8,6 +8,7 @@ import "./jarvis-presence.css";
 import PwaRegister from "./pwa-register";
 import JarvisVoiceProvider from "./jarvis-voice";
 import JarvisCloudBridge from "./jarvis-cloud-bridge";
+import PerformanceGovernor from "./performance-governor";
 
 export const metadata: Metadata = {
   title: "JARVIS // Command Core",
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <PwaRegister />
+        <PerformanceGovernor />
         <JarvisCloudBridge />
         <JarvisVoiceProvider>{children}</JarvisVoiceProvider>
       </body>
