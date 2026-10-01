@@ -10,6 +10,7 @@ import { writeObsidianNote } from "../lib/obsidian-bridge-client";
 const CORE_KEY = "jarvis-os-state-v1";
 const FINANCE_PLAN_KEY = "jarvis-finance-payout-plan-v1";
 const FP_KEY = "jarvis-obsidian-sync-fingerprints-v1";
+const CODING_HISTORY_KEY = "jarvis-coding-history-v1";
 
 type CoreState = {
   activeDomain?: string;
@@ -18,6 +19,44 @@ type CoreState = {
 };
 
 type SystemStatus = {
+  core?: {
+    generatedAt?: string;
+    identity?: { name?: string; owner?: string; role?: string };
+    worldState?: { asOf?: string; mission?: string };
+    permissions?: {
+      defaultPosture?: string;
+      autoProceed?: string[];
+      askDwightFirst?: string[];
+      hardLimits?: string[];
+    };
+    tools?: Array<{
+      id?: string;
+      label?: string;
+      state?: string;
+      authority?: string;
+      capabilities?: string[];
+      note?: string;
+    }>;
+    memory?: {
+      decisions?: Array<{
+        id?: string;
+        at?: string;
+        decision?: string;
+        reason?: string;
+        expectedOutcome?: string;
+        evidence?: string[];
+        source?: string;
+      }>;
+      objectives?: Array<{
+        id?: string;
+        title?: string;
+        domain?: string;
+        status?: string;
+        currentFocus?: string;
+        successDefinition?: string;
+      }>;
+    };
+  };
   workforce?: {
     status?: string;
     lastCycleAt?: string | null;
@@ -34,8 +73,81 @@ type SystemStatus = {
     } | null;
   };
   events?: Array<{ domain?: string; importance?: string; occurredAt?: string; summary?: string }>;
-  integrations?: { sentryopsResearch?: string };
+  integrations?: {
+    sentryopsResearch?: string;
+    calendar?: string;
+    email?: string;
+    meetings?: string;
+    contacts?: string;
+    webSearch?: string;
+  };
 };
+
+type AssistantState = {
+  updatedAt?: string;
+  sources?: {
+    calendar?: string;
+    email?: string;
+    meetings?: string;
+    contacts?: string;
+    webSearch?: string;
+  };
+  calendar?: {
+    asOf?: string | null;
+    events?: Array<{
+      id?: string;
+      title?: string;
+      startAt?: string;
+      endAt?: string | null;
+      status?: string;
+      location?: string | null;
+      joinUrl?: string | null;
+      organizer?: string | null;
+      attendees?: Array<{ name?: string | null; email?: string | null; response?: string | null }>;
+      source?: string;
+      updatedAt?: string;
+    }>;
+  };
+  communications?: {
+    asOf?: string | null;
+    recent?: Array<{
+      id?: string;
+      channel?: string;
+      from?: string | null;
+      subject?: string | null;
+      summary?: string;
+      receivedAt?: string;
+      source?: string;
+    }>;
+  };
+};
+
+type CodingResult = {
+  id?: string;
+  provider?: string;
+  workspace?: string | null;
+  task?: string;
+  ok?: boolean;
+  summary?: string;
+  evidence?: string[];
+  error?: string | null;
+  completedAt?: string;
+  outputExcerpt?: string | null;
+};
+
+function filePart(value: string | null | undefined, fallback = "item") {
+  const safe = String(value || fallback)
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 90);
+  return safe || fallback;
+}
+
+function isoDay(value?: string | null) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "undated";
+  return new Date(value).toISOString().slice(0, 10);
+}
 
 function hashText(value: string) {
   let hash = 2166136261;
