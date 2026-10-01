@@ -1,25 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useJarvisVoice } from "../jarvis-voice";
 import JarvisPresence from "../jarvis-presence";
+import JarvisLocalClock from "../jarvis-local-clock";
 import "./ambient.css";
 
 export default function AmbientPage() {
-  const [time, setTime] = useState("--:--");
-  const [date, setDate] = useState("--- --, ----");
-  const { voiceEnabled, voiceState, caption, toggleVoice } = useJarvisVoice();
-
-  useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      setTime(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }));
-      setDate(now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" }).toUpperCase());
-    };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const { voiceState, caption } = useJarvisVoice();
 
   return (
     <main className={`ambient-shell voice-${voiceState.toLowerCase()}`}>
@@ -35,14 +22,10 @@ export default function AmbientPage() {
           <JarvisPresence state={voiceState} variant="hero" label="JARVIS" />
         </div>
 
-        <div className="ambient-time">{time}</div>
-        <div className="ambient-date">{date}</div>
+        <JarvisLocalClock variant="ambient" />
         <div className="ambient-caption">{caption}</div>
       </section>
 
-      <button className={`voice-toggle ${voiceEnabled ? "enabled" : ""}`} type="button" onClick={toggleVoice}>
-        <span className="voice-dot" /> {voiceEnabled ? "VOICE ACTIVE" : "ENABLE VOICE"}
-      </button>
     </main>
   );
 }
