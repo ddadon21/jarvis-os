@@ -13,6 +13,7 @@ import { FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import DwightTradingRules from "./dwight-trading-rules";
 import ObsidianBridgePanel from "./obsidian-bridge-panel";
+import GoogleWorkspacePanel from "./google-workspace-panel";
 import ObsidianKnowledgeSync from "./obsidian-knowledge-sync";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
@@ -127,6 +128,7 @@ const StableTradingCockpit = memo(TradingCockpit);
 const StableLifeCockpit = memo(LifeCockpit);
 const StableWorkforcePanel = memo(WorkforcePanel);
 const StableObsidianBridgePanel = memo(ObsidianBridgePanel);
+const StableGoogleWorkspacePanel = memo(GoogleWorkspacePanel);
 
 const sectors = [
   { id: "TRADING" as const, icon: TrendingUp, title: "TRADING", signal: "PASS → PAYOUT" },
@@ -453,6 +455,9 @@ export default function WorkV2() {
           </Panel>
           <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
+          </Panel>
+          <Panel title="GOOGLE WORKSPACE" corner={assistantState?.sources?.calendar === "CONNECTED" && assistantState?.sources?.email === "CONNECTED" ? "CONNECTED" : "ASSISTANT"}>
+            <StableGoogleWorkspacePanel />
           </Panel>
           <Panel title="OBSIDIAN" corner="LOCAL">
             <StableObsidianBridgePanel />
