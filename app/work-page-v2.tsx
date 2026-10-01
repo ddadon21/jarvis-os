@@ -33,6 +33,7 @@ import {
 } from "../lib/jarvis-state";
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
 import JarvisPresence from "./jarvis-presence";
+import JarvisLocalClock from "./jarvis-local-clock";
 
 type RuntimeEvent = {
   id: string;
@@ -136,8 +137,6 @@ function quickCoreEvent(summary: string) {
 
 export default function WorkV2() {
   const { voiceEnabled, voiceState, caption, toggleVoice } = useJarvisVoice();
-  const [time, setTime] = useState("--:--:--");
-  const [date, setDate] = useState("--- -- ----");
   const [domain, setDomain] = useState<Domain>(defaultState.activeDomain);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -156,6 +155,9 @@ export default function WorkV2() {
   const [responseMs, setResponseMs] = useState<number | null>(null);
   const [streamStarted, setStreamStarted] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const chatLogRef = useRef<HTMLDivElement>(null);
+  const systemStatusSignatureRef = useRef("");
+  const assistantSignatureRef = useRef("");
 
   function hydrateFromState() {
     const saved = loadJarvisState();
@@ -180,24 +182,23 @@ export default function WorkV2() {
   }, [domain, goals, hydrated, memories, messages, nextMove]);
 
   useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      setTime(now.toLocaleTimeString([], { hour12: false }));
-      setDate(now.toLocaleDateString([], { month: "short", day: "2-digit", year: "numeric" }).toUpperCase());
-    };
-    updateClock();
-    const timer = window.setInterval(updateClock, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     async function refreshStatus() {
       try {
         const response = await fetch("/api/system/status", { cache: "no-store" });
         if (!response.ok) return;
         const data = (await response.json()) as SystemStatus;
-        if (!cancelled) setSystemStatus(data);
+        const signature = JSON.stringify({
+          online: data.online,
+          mode: data.mode,
+          integrations: data.integrations,
+          events: data.events,
+          workforce: data.workforce,
+        });
+        if (!cancelled && signature !== systemStatusSignatureRef.current) {
+          systemStatusSignatureRef.current = signature;
+          setSystemStatus(data);
+        }
       } catch {}
     }
     void refreshStatus();
@@ -212,7 +213,15 @@ export default function WorkV2() {
         const response = await fetch("/api/assistant/alerts", { cache: "no-store" });
         if (!response.ok) return;
         const data = (await response.json()) as AssistantPulse;
-        if (!cancelled) setAssistantPulse(data);
+        const signature = JSON.stringify({
+          sources: data.sources,
+          alerts: data.alerts,
+          counts: data.counts,
+        });
+        if (!cancelled && signature !== assistantSignatureRef.current) {
+          assistantSignatureRef.current = signature;
+          setAssistantPulse(data);
+        }
       } catch {}
     }
     void refreshAssistant();
@@ -236,7 +245,14 @@ export default function WorkV2() {
     }));
   }, [assistantPulse, voiceEnabled]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+  useEffect(() => {
+    const node = chatLogRef.current;
+    if (!node) return;
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages.length, busy]);
 
   const currentSector = useMemo(() => sectors.find((item) => item.id === domain) ?? sectors[0], [domain]);
   const SectorIcon = currentSector.icon;
@@ -396,8 +412,7 @@ export default function WorkV2() {
         </div>
         <div className="top-center">
           <div className="status-block"><span>SYSTEM STATUS</span><b><i /> {systemMode}</b></div>
-          <div className="status-block"><span>LOCAL DATE</span><b>{date}</b></div>
-          <div className="status-block"><span>LOCAL TIME</span><b>{time}</b></div>
+          <JarvisLocalClock variant="topbar" />
         </div>
         <div className="company-zone"><div><div className="company">HIMIE JOHNSON VENTURES</div><div className="micro company-micro">DWIGHT // FOUNDER & OPERATOR</div></div><div className="brand-mark"><BriefcaseBusiness size={18} /></div></div>
       </header>
@@ -485,7 +500,7 @@ export default function WorkV2() {
 
           <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
             <div className="brain-runtime"><span>{activeRoute}</span><strong>{activeProvider}</strong><small>{activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small></div>
-            <div className="chat-log" style={{ height: 210 }}>
+            <div className="chat-log" ref={chatLogRef} style={{ height: 210 }}>
               {messages.slice(-6).map((message, index) => <div key={`${message.role}-${message.createdAt ?? index}`} className={`message ${message.role}`}><div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div><p>{message.content}</p></div>)}
               {busy && !streamStarted && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Routing intelligence<span>...</span></p></div>}
               <div ref={endRef} />
