@@ -184,8 +184,11 @@ export default function WorkV2() {
 
   useEffect(() => {
     if (!hydrated) return;
-    saveJarvisState({ version: 1, activeDomain: domain, messages, memories, goals, nextMove });
-  }, [domain, goals, hydrated, memories, messages, nextMove]);
+    const timer = window.setTimeout(() => {
+      saveJarvisState({ version: 1, activeDomain: domain, messages, memories, goals, nextMove });
+    }, busy ? 650 : 180);
+    return () => window.clearTimeout(timer);
+  }, [busy, domain, goals, hydrated, memories, messages, nextMove]);
 
   useEffect(() => {
     let cancelled = false;
