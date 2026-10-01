@@ -15,6 +15,16 @@ const PLAN_KEY = "jarvis-finance-payout-plan-v1";
 const allocations = { tax: ["TAX RESERVE", "Enter your own reserve amount"], bills: ["BILLS + MINIMUMS", "Required obligations"], reserve: ["CASH RESERVE", "Cash you intend to keep"], debt: ["EXTRA DEBT PAYMENT", "Beyond the minimums above"], business: ["BUSINESS CAPITAL", "Planned operating needs"] } as const;
 type View = "OVERVIEW" | "PAYOUT PLAN" | "ACCOUNTS + DATA";
 
+const CAPITAL_STAGE_DETAILS: Record<(typeof FINANCE_STAGES)[number], string> = {
+  DEBT: "Eliminate personal revolving debt without destabilizing operating cash.",
+  STABILITY: "Cover obligations reliably and make monthly cash flow predictable.",
+  RESERVES: "Build a durable cash floor before expanding lifestyle or risk.",
+  CREDIT: "Strengthen revolving-credit health while keeping balances controlled.",
+  CAPITAL: "Stack deployable cash and business capital for asymmetric opportunities.",
+  INVESTING: "Build long-term ownership through disciplined, repeatable investing.",
+  ASSETS: "Acquire durable assets only when the cash base and leverage can support them.",
+};
+
 export default function FinanceCockpitV2() {
   const [runtime, setRuntime] = useState<FinanceRuntimeState | null>(null);
   const [view, setView] = useState<View>("OVERVIEW");
@@ -22,6 +32,7 @@ export default function FinanceCockpitV2() {
   const [message, setMessage] = useState("");
   const [plan, setPlan] = useState<PayoutPlan>(EMPTY_PAYOUT_PLAN);
   const [saved, setSaved] = useState("");
+  const [selectedCapitalStage, setSelectedCapitalStage] = useState<(typeof FINANCE_STAGES)[number] | null>(null);
   const refresh = useCallback(async (manual = false, signal?: AbortSignal) => {
     setLoading(true);
     try {
@@ -56,6 +67,7 @@ export default function FinanceCockpitV2() {
   const totals = financeTotals(accounts);
   const asOf = runtime?.asOf ?? FINANCE_IMPORT.asOf;
   const stage = runtime?.currentStage ?? (totals.personalDebt > 0 ? "DEBT" : "STABILITY");
+  const capitalStage = (selectedCapitalStage ?? stage) as (typeof FINANCE_STAGES)[number];
   const debts = accounts.filter(a => a.type === "credit" || a.type === "loan");
   const personal = debts.filter(a => a.ownership !== "AUTHORIZED_USER");
   const banks = accounts.filter(a => a.type === "depository");
@@ -130,7 +142,17 @@ export default function FinanceCockpitV2() {
       </section>
       <section className={s.panel}>
         <div className={s.panelHead}><h3><Target size={13} />THE CAPITAL PATH</h3><span>LONG HORIZON · $100M CASH</span></div>
-        <div className={s.stages}>{FINANCE_STAGES.map(t => <span key={t} aria-current={t === stage ? "step" : undefined}>{t}</span>)}</div>
+        <div className={s.stages}>{FINANCE_STAGES.map(t => (
+          <button
+            key={t}
+            type="button"
+            aria-current={t === capitalStage ? "step" : undefined}
+            onClick={() => setSelectedCapitalStage(t)}
+          >
+            {t}
+          </button>
+        ))}</div>
+        <p className={s.stageDetail}><strong>{capitalStage}</strong>{CAPITAL_STAGE_DETAILS[capitalStage]}</p>
         <div className={s.goals}>
           <Goal name="DEBT FREEDOM" value={money(totals.personalDebt)} target="$0" percent={totals.personalDebt <= 0 ? 100 : null} note="Remaining own debt. No invented payoff percentage." />
           <Goal name="$10K CASH" value={money(totals.liquidity)} target="$10,000" percent={totals.liquidity / 100} note="Reported bank balances; available cash shown above." />
