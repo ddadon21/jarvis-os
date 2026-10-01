@@ -1,12 +1,12 @@
-# JARVIS Local Agent 0.8.0
+# JARVIS Local Agent 0.9.0
 
-Windows x64 companion for JARVIS. It contains the read-only TradingView Observer, the local Obsidian bridge, and the first JARVIS Desktop Action Runtime.
+Windows x64 companion for JARVIS. It contains the read-only TradingView Observer, the local Obsidian bridge, the JARVIS Desktop Action Runtime, controlled Chrome/Edge browser actions, and workspace-scoped Codex / Claude Code execution.
 
 ## Update
 1. Right-click the existing JARVIS / Observer tray icon and choose Exit.
 2. Extract this ZIP to a new folder and run JarvisObserver.exe.
 3. Keep the existing configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
-4. Refresh JARVIS. The paired Local Agent should report 0.8.0 after the new agent reconnects.
+4. Refresh JARVIS. The paired Local Agent should report 0.9.0 after the new agent reconnects.
 
 ## Obsidian bridge
 JARVIS keeps Supabase as the authoritative structured database. Obsidian is the long-form knowledge vault.
@@ -22,7 +22,7 @@ JARVIS keeps Supabase as the authoritative structured database. Obsidian is the 
 
 The Obsidian API key is encrypted with Windows DPAPI for the current Windows user and is never uploaded to JARVIS Cloud. The bridge rejects non-loopback Obsidian URLs. Self-signed TLS is accepted only for loopback connections.
 
-Version 0.8.0 also lets paired JARVIS send authenticated LIST, READ, WRITE/update, and SEARCH commands through the Local Agent. Obsidian remains local; JARVIS Cloud only queues the command and receives the result.
+Version 0.9.0 also lets paired JARVIS send authenticated LIST, READ, WRITE/update, and SEARCH commands through the Local Agent. Obsidian remains local; JARVIS Cloud only queues the command and receives the result.
 
 ## Desktop Action Runtime
 The same paired device link now gives JARVIS a bounded Windows action layer.
@@ -44,6 +44,34 @@ Explicitly user-authorized actions:
 The Desktop Runtime does not expose arbitrary shell execution. Interactive actions require an authenticated paired controller command marked USER_AUTHORIZED, and every action returns a success/failure result plus evidence to JARVIS Core.
 
 Natural-language desktop reflexes are intentionally narrow. Commands such as `open chrome`, `focus vscode window`, `click "Save"`, or `type "hello"` can route locally; ordinary writing requests are not treated as computer-control commands.
+
+## Browser Runtime
+Version 0.9.0 adds a browser-specific action vocabulary on top of the Desktop Runtime.
+
+Read-only:
+- Read accessible text from the current Chrome or Edge page.
+
+User-authorized:
+- Navigate to an HTTP/HTTPS page.
+- Search Google.
+- Go back one page.
+- Reuse the existing accessibility click/type actions for explicit user-directed interaction.
+
+JARVIS does not treat generic page content as permission to submit forms, send messages, make purchases, or perform other consequential actions.
+
+## Coding Executors
+Version 0.9.0 can dispatch a user-authorized coding task to Codex or Claude Code on the Windows machine.
+
+Security boundaries:
+- The target must be a Git repository.
+- Set `JARVIS_CODE_WORKSPACE` to the approved repository path if JARVIS cannot find `jarvis-os` in a standard folder.
+- Codex is launched with workspace-write sandboxing and no interactive approval expansion.
+- Claude Code is limited to read/search/edit/write plus a narrow build/test/git-status command allowlist.
+- Arbitrary shell execution is not exposed through the JARVIS command contract.
+- Coding work runs in the background so the Local Agent heartbeat and Trading Observer remain responsive.
+- JARVIS reports Codex / Claude as available only when their Windows CLI executables are actually present on PATH when the Local Agent starts.
+
+After installing a coding CLI, restart the Local Agent so capability detection is refreshed.
 
 ## Trading Observer
 - Waiting: no visible order setup or position.
