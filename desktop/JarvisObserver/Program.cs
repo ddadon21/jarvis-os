@@ -12,7 +12,7 @@ using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
-// Local Agent release: 0.8.0 — Trading Observer + Obsidian + Jarvis Desktop Action Runtime
+// Local Agent release: 0.9.0 — Trading Observer + Obsidian + Jarvis Desktop Action Runtime
 
 internal static class Program
 {
@@ -116,7 +116,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.8.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.9.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _ = Task.Run(async () =>
         {
             await Task.Delay(1200);
@@ -502,7 +502,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.8.0",
+            observerVersion = "0.9.0",
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -513,7 +513,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         using var res = await _http.SendAsync(req);
@@ -572,7 +572,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
 
@@ -841,7 +841,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
             using var response = await _http.SendAsync(req, cts.Token);
@@ -920,7 +920,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.8.0");
+            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
             using var response = await _http.SendAsync(req, cts.Token);
