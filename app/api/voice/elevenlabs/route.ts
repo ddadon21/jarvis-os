@@ -1,3 +1,5 @@
+import { getElevenLabsRuntimeState, setElevenLabsRuntimeState } from "../../../../lib/jarvis-voice-runtime";
+
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
@@ -11,6 +13,7 @@ export async function GET() {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = process.env.ELEVENLABS_VOICE_ID;
   const model = process.env.ELEVENLABS_MODEL_ID || DEFAULT_MODEL;
+  const runtimeState = await getElevenLabsRuntimeState();
 
   if (!apiKey || !voiceId) {
     return Response.json({
@@ -20,6 +23,7 @@ export async function GET() {
       voiceIdConfigured: Boolean(voiceId),
       model,
       voiceVerified: false,
+      runtimeState,
     }, { headers: { "Cache-Control": "no-store" } });
   }
 
@@ -47,6 +51,7 @@ export async function GET() {
         accent: voice?.labels?.accent ?? null,
       } : null,
       verificationStatus: upstream.status,
+      runtimeState,
       note: upstream.ok
         ? "Voice metadata verified."
         : "Voice metadata could not be read, but TTS remains enabled because API key and Voice ID are configured. The TTS request is the authoritative capability check.",
@@ -60,6 +65,7 @@ export async function GET() {
       model,
       voiceVerified: false,
       verificationStatus: 0,
+      runtimeState,
     }, { headers: { "Cache-Control": "no-store" } });
   }
 }
@@ -112,6 +118,14 @@ export async function POST(request: Request) {
       modelId,
       response: detail.slice(0, 800),
     });
+    if (upstream.status === 402) {
+      await setElevenLabsRuntimeState("PLAN_REQUIRED", "The selected Voice Library voice requires a paid ElevenLabs subscription for API use.", model);
+    } else if (upstream.status === 401 || upstream.status === 403) {
+      await setElevenLabsRuntimeState("AUTH_ERROR", "ElevenLabs rejected the configured API key or permissions.", model);
+    } else {
+      await setElevenLabsRuntimeState("DEGRADED", `ElevenLabs TTS failed with HTTP ${upstream.status}.`, model);
+    }
+
     const passthroughStatus = [401, 402, 403, 422].includes(upstream.status) ? upstream.status : 502;
     let reason = "ElevenLabs speech generation failed.";
     if (upstream.status === 402) reason = "ElevenLabs paid plan required for the selected library voice.";
@@ -130,6 +144,8 @@ export async function POST(request: Request) {
       },
     });
   }
+
+  await setElevenLabsRuntimeState("CONNECTED", "Selected ElevenLabs voice generated TTS audio successfully.", model);
 
   return new Response(upstream.body, {
     status: 200,
