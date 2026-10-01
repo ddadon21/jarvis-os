@@ -32,6 +32,7 @@ import {
   saveJarvisState,
 } from "../lib/jarvis-state";
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
+import { tryExecuteGoogleWorkspaceText } from "../lib/jarvis-google-client";
 import JarvisPresence from "./jarvis-presence";
 import JarvisLocalClock from "./jarvis-local-clock";
 
@@ -310,7 +311,30 @@ export default function WorkV2() {
       }
     } catch {
       // If a local action path fails before producing a structured result,
-      // fall through to the normal Jarvis reasoning stream.
+      // fall through to other connected tools and normal Jarvis reasoning.
+    }
+
+    try {
+      const google = await tryExecuteGoogleWorkspaceText(text);
+      if (google) {
+        const elapsed = Math.max(1, Math.round(performance.now() - desktopStartedAt));
+        setActiveProvider("GOOGLE WORKSPACE");
+        setActiveModel("CALENDAR + GMAIL");
+        setActiveRoute("FAST");
+        setFirstTokenMs(elapsed);
+        setResponseMs(elapsed);
+        setStreamStarted(true);
+        setMessages((previous) => [
+          ...previous,
+          { role: "assistant", content: google.message, createdAt: assistantStamp },
+        ]);
+        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
+        setBusy(false);
+        window.setTimeout(() => setStreamStarted(false), 120);
+        return;
+      }
+    } catch {
+      // Connected assistant actions fail closed and normal reasoning remains available.
     }
 
     const applyEvent = (eventName: string, payload: StreamMeta) => {
