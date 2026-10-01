@@ -13,7 +13,6 @@ import { FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import DomainGoals from "./domain-goals";
 import DwightTradingRules from "./dwight-trading-rules";
 import ObsidianBridgePanel from "./obsidian-bridge-panel";
-import GoogleWorkspacePanel from "./google-workspace-panel";
 import FinanceCockpitV2 from "./finance-cockpit-v2";
 import TradingCockpit from "./trading-cockpit";
 import LifeCockpit, { LifeProgress } from "./life-cockpit";
@@ -32,7 +31,6 @@ import {
   saveJarvisState,
 } from "../lib/jarvis-state";
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
-import { tryExecuteGoogleWorkspaceText } from "../lib/jarvis-google-client";
 import JarvisPresence from "./jarvis-presence";
 import JarvisLocalClock from "./jarvis-local-clock";
 
@@ -128,7 +126,6 @@ const StableTradingCockpit = memo(TradingCockpit);
 const StableLifeCockpit = memo(LifeCockpit);
 const StableWorkforcePanel = memo(WorkforcePanel);
 const StableObsidianBridgePanel = memo(ObsidianBridgePanel);
-const StableGoogleWorkspacePanel = memo(GoogleWorkspacePanel);
 
 const sectors = [
   { id: "TRADING" as const, icon: TrendingUp, title: "TRADING", signal: "PASS → PAYOUT" },
@@ -162,8 +159,6 @@ export default function WorkV2() {
   const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null);
   const [responseMs, setResponseMs] = useState<number | null>(null);
   const [streamStarted, setStreamStarted] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-  const chatLogRef = useRef<HTMLDivElement>(null);
   const systemStatusSignatureRef = useRef("");
   const assistantSignatureRef = useRef("");
 
@@ -256,15 +251,6 @@ export default function WorkV2() {
     }));
   }, [assistantPulse, voiceEnabled]);
 
-  useEffect(() => {
-    const node = chatLogRef.current;
-    if (!node) return;
-    const frame = window.requestAnimationFrame(() => {
-      node.scrollTop = node.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [messages.length, busy]);
-
   const currentSector = useMemo(() => sectors.find((item) => item.id === domain) ?? sectors[0], [domain]);
   const SectorIcon = currentSector.icon;
   const jarvisVisualState = busy ? "THINKING" : voiceEnabled ? voiceState : "STANDBY";
@@ -312,29 +298,6 @@ export default function WorkV2() {
     } catch {
       // If a local action path fails before producing a structured result,
       // fall through to other connected tools and normal Jarvis reasoning.
-    }
-
-    try {
-      const google = await tryExecuteGoogleWorkspaceText(text);
-      if (google) {
-        const elapsed = Math.max(1, Math.round(performance.now() - desktopStartedAt));
-        setActiveProvider("GOOGLE WORKSPACE");
-        setActiveModel("CALENDAR + GMAIL");
-        setActiveRoute("FAST");
-        setFirstTokenMs(elapsed);
-        setResponseMs(elapsed);
-        setStreamStarted(true);
-        setMessages((previous) => [
-          ...previous,
-          { role: "assistant", content: google.message, createdAt: assistantStamp },
-        ]);
-        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
-        setBusy(false);
-        window.setTimeout(() => setStreamStarted(false), 120);
-        return;
-      }
-    } catch {
-      // Connected assistant actions fail closed and normal reasoning remains available.
     }
 
     const applyEvent = (eventName: string, payload: StreamMeta) => {
@@ -478,9 +441,6 @@ export default function WorkV2() {
           <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
-          <Panel title="GOOGLE WORKSPACE" corner={assistantState?.sources?.calendar === "CONNECTED" && assistantState?.sources?.email === "CONNECTED" ? "CONNECTED" : "ASSISTANT"}>
-            <StableGoogleWorkspacePanel />
-          </Panel>
           <Panel title="OBSIDIAN" corner="LOCAL">
             <StableObsidianBridgePanel />
           </Panel>
@@ -523,25 +483,9 @@ export default function WorkV2() {
         </section>
 
         <aside className="right-column">
-          <Panel title="JARVIS" corner={systemMode} className="jarvis-presence-panel">
-            <div className="jarvis-presence">
-              <JarvisPresence state={jarvisVisualState} variant="compact" label="JARVIS" className="jarvis-panel-presence" />
-              <div className="jarvis-presence-copy">
-                <strong>{busy ? "THINKING" : "ONLINE"}</strong>
-                <span>{domain} MODE</span>
-                <small>{activeProvider} · {activeModel} · {activeRoute}</small>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="JARVIS LINK" corner={activeProvider} className="chat-panel">
-            <div className="brain-runtime"><span>{activeRoute}</span><strong>{activeProvider}</strong><small>{activeModel}{firstTokenMs !== null ? ` · ${(firstTokenMs / 1000).toFixed(1)}s first` : ""}{responseMs !== null ? ` · ${(responseMs / 1000).toFixed(1)}s total` : ""}</small></div>
-            <div className="chat-log" ref={chatLogRef} style={{ height: 210 }}>
-              {messages.slice(-6).map((message, index) => <div key={`${message.role}-${message.createdAt ?? index}`} className={`message ${message.role}`}><div className="message-meta">{message.role === "assistant" ? "JARVIS" : "DWIGHT"}</div><p>{message.content}</p></div>)}
-              {busy && !streamStarted && <div className="message assistant thinking"><div className="message-meta">JARVIS</div><p>Routing intelligence<span>...</span></p></div>}
-              <div ref={endRef} />
-            </div>
-          </Panel>
+          <div className="jarvis-right-orb" aria-label="Jarvis presence">
+            <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
+          </div>
 
           <Panel title="EVENTS" corner="BRIEF" className="core-events-panel">
             <div className="event-list core-event-list">
