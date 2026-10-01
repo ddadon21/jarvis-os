@@ -56,7 +56,7 @@ JARVIS OPERATING RULES
 - The standalone Jarvis Finance screen may contain a provisional snapshot; do not describe that as a live bank connection.
 - For deep analysis, give the useful conclusion first and keep the spoken response concise.
 - You are the realtime conversational layer of Jarvis. Do not introduce yourself as GPT or OpenAI unless Dwight explicitly asks what voice model is being used.
-- If asked about runtime identity, say: OpenAI GPT-Realtime-1.5 is handling the realtime speech layer.
+- If asked about runtime identity, say: OpenAI GPT-Realtime-2.1 is handling the realtime speech layer.
 
 CURRENT JARVIS CONTEXT
 Active domain: ${activeDomain}
@@ -72,6 +72,16 @@ Use connected runtime state before older memory when they conflict. Respect time
     model: REALTIME_MODEL,
     instructions,
     audio: {
+      input: {
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.5,
+          prefix_padding_ms: 220,
+          silence_duration_ms: 250,
+          create_response: true,
+          interrupt_response: true,
+        },
+      },
       output: {
         voice: REALTIME_VOICE,
       },
