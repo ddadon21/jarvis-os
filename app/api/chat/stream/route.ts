@@ -1,3 +1,5 @@
+import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { generateText, streamText } from "ai";
 import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
@@ -8,15 +10,17 @@ import type { AgentId, AgentPermission, RuntimeDomain } from "../../../../lib/ja
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const FAST_MODEL = "openai/gpt-6-luna";
-const STANDARD_MODEL = "openai/gpt-5.6-sol";
-const DEEP_MODEL = "anthropic/claude-opus-5.5";
+const FAST_MODEL = "gpt-5.6-sol";
+const STANDARD_MODEL = "gpt-5.6-sol";
+const DEEP_MODEL = "claude-opus-5";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
 type Memory = { domain: string; fact: string };
 type Route = "FAST" | "STANDARD" | "DEEP";
-type Choice = { provider: "Vercel AI Gateway"; brain: "GATEWAY"; model: string };
+type Choice =
+  | { provider: "OpenAI"; brain: "GPT"; model: string }
+  | { provider: "Anthropic"; brain: "CLAUDE"; model: string };
 type Metadata = {
   memoryUpdates: Array<{ domain: string; fact: string }>;
   nextMove: { title: string; reason: string; domain: string };
@@ -79,15 +83,23 @@ function routeFor(text: string, domain: string): Route {
 }
 
 function choices(route: Route): Choice[] {
-  return [{
-    provider: "Vercel AI Gateway",
-    brain: "GATEWAY",
-    model: route === "FAST" ? FAST_MODEL : route === "DEEP" ? DEEP_MODEL : STANDARD_MODEL,
-  }];
+  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY);
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+  const list: Choice[] = [];
+
+  if (route === "DEEP") {
+    if (hasAnthropic) list.push({ provider: "Anthropic", brain: "CLAUDE", model: DEEP_MODEL });
+    if (hasOpenAI) list.push({ provider: "OpenAI", brain: "GPT", model: STANDARD_MODEL });
+  } else {
+    if (hasOpenAI) list.push({ provider: "OpenAI", brain: "GPT", model: route === "FAST" ? FAST_MODEL : STANDARD_MODEL });
+    if (hasAnthropic) list.push({ provider: "Anthropic", brain: "CLAUDE", model: DEEP_MODEL });
+  }
+
+  return list;
 }
 
 function modelFor(choice: Choice) {
-  return choice.model;
+  return choice.provider === "OpenAI" ? openai(choice.model) : anthropic(choice.model);
 }
 
 function domainFor(value: unknown, fallback = "CORE") {
