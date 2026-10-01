@@ -1,0 +1,87 @@
+/* Simpler side rails: smaller copy, larger floating JARVIS presence. */
+
+.jarvis-right-orb{
+  min-height:330px;
+  display:grid;
+  place-items:center;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+}
+.jarvis-right-orb::before{
+  content:"";
+  position:absolute;
+  inset:10% 4%;
+  background:radial-gradient(circle at center,rgba(183,31,38,.09),transparent 64%);
+  pointer-events:none;
+  z-index:0;
+}
+.jarvis-right-orb .jarvis-presence-core{
+  width:min(100%,290px);
+  z-index:1;
+}
+
+/* The rails should read like supporting information, not compete with the page. */
+.left-column .panel-head strong,
+.right-column .panel-head strong{
+  font-size:9px;
+}
+.left-column .panel-head small,
+.right-column .panel-head small{
+  font-size:7px;
+}
+.left-column .panel-body p,
+.right-column .panel-body p{
+  font-size:8.5px;
+  line-height:1.45;
+}
+.left-column .panel-body span,
+.right-column .panel-body span{
+  font-size:7.5px;
+}
+.left-column .panel-body small,
+.right-column .panel-body small{
+  font-size:7px;
+}
+.left-column .panel-body b,
+.left-column .panel-body strong,
+.right-column .panel-body b,
+.right-column .panel-body strong{
+  font-size:9px;
+}
+.left-column .panel-body button,
+.right-column .panel-body button{
+  font-size:7px;
+}
+
+/* Preserve readable goal and workforce emphasis while keeping the rail compact. */
+.left-column .goal-head{
+  font-size:8px;
+}
+.left-column .goal-head b{
+  font-size:8px;
+}
+.left-column .tiny-row{
+  font-size:8px;
+}
+.right-column .event{
+  font-size:8px;
+}
+.right-column .core-event-list .event p{
+  font-size:8px;
+}
+.right-column .sector-feature strong{
+  font-size:11px;
+}
+.right-column .sector-feature small{
+  font-size:7.5px;
+}
+
+@media(max-width:1100px){
+  .jarvis-right-orb{
+    min-height:230px;
+  }
+  .jarvis-right-orb .jarvis-presence-core{
+    width:min(80vw,220px);
+  }
+}
