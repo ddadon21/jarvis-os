@@ -274,6 +274,19 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
         ? `The Local Agent is online, but version ${localAgent.observerVersion ?? "unknown"} predates the Desktop Action Runtime. Update the Windows agent to 0.8.0 or newer.`
         : "The Windows Local Agent is not currently online, so JARVIS must not claim computer-control capability.",
   });
+  tools.push({
+    id: "BROWSER_RUNTIME",
+    label: "Browser Runtime",
+    state: localAgent?.online && localAgent.browserRuntime ? "CONNECTED" : localAgent?.online ? "DEGRADED" : "NOT_CONNECTED",
+    authority: "EXTERNAL_APPROVAL",
+    capabilities: ["Read current Chrome/Edge page", "Navigate", "Search", "Back", "Reuse accessibility click/type"],
+    note: localAgent?.online && localAgent.browserRuntime
+      ? "Local Agent 0.9+ reports browser automation support. Reading is automatic; navigation, clicks, typing, and submissions remain approval-gated."
+      : localAgent?.online
+        ? "Browser runtime requires Local Agent 0.9.0 or newer."
+        : "Browser runtime requires the Windows Local Agent to be online.",
+  });
+
   const premiumVoiceConfigured = Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID);
   const premiumVoiceState =
     !premiumVoiceConfigured ? "NOT_CONNECTED" :
@@ -298,17 +311,31 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
               ? premiumVoice.detail
               : "ElevenLabs is configured but has not yet completed a successful TTS verification.",
   });
+  const codingVersionReady = Boolean(localAgent?.online && localAgent.codingRuntime);
+  const codexReady = Boolean(codingVersionReady && localAgent?.codexCli);
+  const claudeReady = Boolean(codingVersionReady && localAgent?.claudeCli);
   tools.push({
     id: "CODING_EXECUTORS",
     label: "Coding Executors",
-    state: localAgent?.online && localAgent.codingRuntime ? "CONNECTED" : localAgent?.online ? "DEGRADED" : "NOT_CONNECTED",
+    state: codexReady && claudeReady
+      ? "CONNECTED"
+      : codingVersionReady && (codexReady || claudeReady)
+        ? "DEGRADED"
+        : "NOT_CONNECTED",
     authority: "WRITE_INTERNAL",
-    capabilities: ["Claude Code", "Codex", "Git-workspace-scoped execution", "Tests and build verification"],
-    note: localAgent?.online && localAgent.codingRuntime
-      ? "Local Agent 0.9+ exposes user-authorized Codex and Claude Code tasks inside an approved Git workspace."
-      : localAgent?.online
+    capabilities: [
+      codexReady ? "Codex CLI verified" : "Codex CLI not verified",
+      claudeReady ? "Claude Code CLI verified" : "Claude Code CLI not verified",
+      "Git-workspace-scoped execution",
+      "Tests and build verification",
+    ],
+    note: !localAgent?.online
+      ? "Coding executors require the paired Windows Local Agent to be online."
+      : !codingVersionReady
         ? "Local Agent is online, but coding executors require version 0.9.0 or newer."
-        : "Coding executors require the paired Windows Local Agent to be online.",
+        : codexReady && claudeReady
+          ? "Codex and Claude Code are both present on the Windows machine and available through the approved Git-workspace executor."
+          : `Local Agent 0.9+ is ready, but ${!codexReady && !claudeReady ? "neither Codex nor Claude Code is" : !codexReady ? "Codex is not" : "Claude Code is not"} currently verified on PATH.`,
   });
 
   const decisions: JarvisCoreDecision[] = (operating?.decisionMemory ?? []).map(item => ({
