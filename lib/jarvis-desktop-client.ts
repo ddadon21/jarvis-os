@@ -184,10 +184,10 @@ function formatResult(result: DesktopResult) {
   return result.summary;
 }
 
-async function pollResult(token: string, id: string) {
-  const deadline = Date.now() + 10_000;
+async function pollResult(token: string, id: string, timeoutMs = 10_000, intervalMs = 250) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    await new Promise(resolve => window.setTimeout(resolve, 250));
+    await new Promise(resolve => window.setTimeout(resolve, intervalMs));
     const response = await fetch("/api/desktop/command?id=" + encodeURIComponent(id), {
       cache: "no-store",
       headers: { Authorization: "Bearer " + token },
@@ -237,13 +237,44 @@ export async function executeDesktopIntent(intent: DesktopIntent) {
     };
   }
 
-  const result = await pollResult(token, body.command.id);
+  const codingJob = intent.action === "RUN_CODING_AGENT";
+  const result = await pollResult(
+    token,
+    body.command.id,
+    codingJob ? 16 * 60_000 : 10_000,
+    codingJob ? 900 : 250,
+  );
   if (!result) {
     return {
       handled: true,
       ok: false,
-      message: "The command was accepted, but the Windows Local Agent didn't return evidence within 10 seconds.",
+      message: codingJob
+        ? "The coding job was accepted, but the Local Agent did not return a final result within the 16-minute execution window."
+        : "The command was accepted, but the Windows Local Agent didn't return evidence within 10 seconds.",
     };
+  }
+
+  if (result.action === "RUN_CODING_AGENT") {
+    try {
+      const key = "jarvis-coding-history-v1";
+      const current = JSON.parse(window.localStorage.getItem(key) || "[]") as Array<Record<string, unknown>>;
+      const record = {
+        id: result.id,
+        provider: intent.target || "CODING_AGENT",
+        workspace: intent.args?.[0] || null,
+        task: intent.text || "",
+        ok: result.ok,
+        summary: result.summary,
+        evidence: result.evidence,
+        error: result.error,
+        completedAt: result.completedAt,
+        outputExcerpt: result.data?.trim().slice(0, 1800) || null,
+      };
+      window.localStorage.setItem(key, JSON.stringify([...current, record].slice(-40)));
+      window.dispatchEvent(new CustomEvent("jarvis-coding-result", { detail: record }));
+    } catch {
+      // Coding execution result remains available in the command response even if browser history storage is unavailable.
+    }
   }
 
   let message = formatResult(result);
