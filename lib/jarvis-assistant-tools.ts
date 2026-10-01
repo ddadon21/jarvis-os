@@ -94,9 +94,9 @@ export async function getJarvisCapabilities(runtime?: JarvisRuntimeContext): Pro
       state: assistant.sources.calendar,
       source: assistant.sources.calendar === "CONNECTED" ? "assistant calendar feed" : "not connected",
       canRead: assistant.sources.calendar === "CONNECTED",
-      canWrite: false,
+      canWrite: assistant.sources.calendar === "CONNECTED",
       approvalRequiredForWrite: true,
-      note: "Upcoming meetings, conflicts, time-to-event, and schedule awareness.",
+      note: "Upcoming meetings, conflicts, time-to-event, schedule awareness, and approval-gated event creation.",
     },
     {
       id: "personal.email",
@@ -105,9 +105,9 @@ export async function getJarvisCapabilities(runtime?: JarvisRuntimeContext): Pro
       state: assistant.sources.email,
       source: assistant.sources.email === "CONNECTED" ? "assistant email feed" : "not connected",
       canRead: assistant.sources.email === "CONNECTED",
-      canWrite: false,
+      canWrite: assistant.sources.email === "CONNECTED",
       approvalRequiredForWrite: true,
-      note: "Recent communication and meeting-related messages.",
+      note: "Recent communication plus internal draft creation; sending mail remains explicitly approval-gated.",
     },
     {
       id: "operational.meetings",
