@@ -37,6 +37,7 @@ import {
   saveJarvisState,
 } from "../lib/jarvis-state";
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
+import JarvisPresence from "./jarvis-presence";
 
 type RuntimeEvent = {
   id: string;
@@ -244,6 +245,7 @@ export default function WorkV2() {
 
   const currentSector = useMemo(() => sectors.find((item) => item.id === domain) ?? sectors[0], [domain]);
   const SectorIcon = currentSector.icon;
+  const jarvisVisualState = busy ? "THINKING" : voiceEnabled ? voiceState : "STANDBY";
   const runtimeEvents = systemStatus?.events ?? [];
   const systemMode = systemStatus?.online ? systemStatus.mode : "STARTING";
   const assistantState = assistantPulse ?? systemStatus?.assistant ?? null;
@@ -394,7 +396,7 @@ export default function WorkV2() {
       <div className="grid-overlay" />
       <header className="topbar">
         <div className="brand-zone">
-          <div className="brand-mark"><Sparkles size={18} /></div>
+          <div className="brand-mark jarvis-brand-presence"><JarvisPresence state={jarvisVisualState} variant="mini" label="JARVIS" /></div>
           <div><div className="brand">J.A.R.V.I.S</div><div className="micro">JUST A RATHER VERY INTELLIGENT SYSTEM</div></div>
         </div>
         <div className="top-center">
@@ -445,11 +447,12 @@ export default function WorkV2() {
 
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
           {domain === "FINANCE" ? <FinanceCockpitV2 /> : domain === "TRADING" ? <TradingCockpit /> : domain === "LIFE" ? <LifeCockpit /> : (
-            <div className="core-visual">
-              <div className="radar outer"><span className="sweep one" /><span className="sweep two" /></div>
-              <div className="radar mid" /><div className="radar inner" />
-              <div className="core-node"><BrainCircuit size={36} /><span>CORE</span><strong>{systemMode}</strong></div>
-              <span className="axis a" /><span className="axis b" /><span className="axis c" /><span className="axis d" />
+            <div className="core-visual jarvis-living-core">
+              <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
+              <div className="jarvis-core-readout">
+                <span>JARVIS CORE</span>
+                <strong>{busy ? "THINKING" : voiceEnabled ? voiceState : systemMode}</strong>
+              </div>
             </div>
           )}
 
@@ -476,11 +479,7 @@ export default function WorkV2() {
         <aside className="right-column">
           <Panel title="JARVIS" corner={systemMode} className="jarvis-presence-panel">
             <div className="jarvis-presence">
-              <div className="jarvis-presence-orb" aria-label="Jarvis core presence">
-                <span className="jarvis-presence-ring outer" />
-                <span className="jarvis-presence-ring inner" />
-                <span className="jarvis-presence-core">J</span>
-              </div>
+              <JarvisPresence state={jarvisVisualState} variant="compact" label="JARVIS" className="jarvis-panel-presence" />
               <div className="jarvis-presence-copy">
                 <strong>{busy ? "THINKING" : "ONLINE"}</strong>
                 <span>{domain} MODE</span>
