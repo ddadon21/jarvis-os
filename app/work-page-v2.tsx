@@ -437,7 +437,6 @@ export default function WorkV2() {
 
   return (
     <main className={`shell ${domain === "LIFE" ? lifeStyles.shell : ""}`}>
-      <ObsidianKnowledgeSync />
       <div className="grid-overlay" />
       <header className="topbar">
         <div className="brand-zone">
