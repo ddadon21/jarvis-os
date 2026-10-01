@@ -783,6 +783,45 @@ internal sealed class ObserverContext : ApplicationContext
             args,
             authorization ?? "READ_ONLY");
 
+        if (string.Equals(command.Action, "RUN_CODING_AGENT", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = Task.Run(async () =>
+            {
+                DesktopActionResult backgroundResult;
+                try
+                {
+                    backgroundResult = await _desktopRuntime.ExecuteAsync(command);
+                }
+                catch (Exception ex)
+                {
+                    backgroundResult = new DesktopActionResult(
+                        command.Id,
+                        command.Action,
+                        false,
+                        "Coding-agent action failed.",
+                        null,
+                        Array.Empty<string>(),
+                        ex.Message,
+                        DateTime.UtcNow);
+                }
+
+                Log(new
+                {
+                    type = "desktop.coding_agent.executed",
+                    at = DateTime.UtcNow,
+                    id = backgroundResult.Id,
+                    action = backgroundResult.Action,
+                    ok = backgroundResult.Ok,
+                    summary = backgroundResult.Summary,
+                    evidence = backgroundResult.Evidence,
+                    error = backgroundResult.Error,
+                });
+
+                await PostDesktopCommandResultAsync(backgroundResult);
+            });
+            return;
+        }
+
         DesktopActionResult result;
         try
         {
