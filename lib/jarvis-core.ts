@@ -264,6 +264,9 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
       "Clipboard read/write",
       "Open files and HTTPS URLs",
       "Approved local diagnostics",
+      "Browser page accessibility read",
+      "Browser navigate/search/back",
+      "Controlled Codex and Claude Code execution",
     ],
     note: localAgent?.online && localAgent.desktopRuntime
       ? `JARVIS Desktop Runtime ${localAgent.observerVersion ?? "0.8+"} is online on ${localAgent.deviceName ?? "the paired Windows PC"}.`
@@ -298,10 +301,14 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
   tools.push({
     id: "CODING_EXECUTORS",
     label: "Coding Executors",
-    state: "NOT_CONNECTED",
+    state: localAgent?.online && localAgent.codingRuntime ? "CONNECTED" : localAgent?.online ? "DEGRADED" : "NOT_CONNECTED",
     authority: "WRITE_INTERNAL",
-    capabilities: ["Claude Code", "Codex", "Project workspace execution", "Tests and build verification"],
-    note: "Model routing exists, but JARVIS does not yet own a dedicated coding-executor tool contract.",
+    capabilities: ["Claude Code", "Codex", "Git-workspace-scoped execution", "Tests and build verification"],
+    note: localAgent?.online && localAgent.codingRuntime
+      ? "Local Agent 0.9+ exposes user-authorized Codex and Claude Code tasks inside an approved Git workspace."
+      : localAgent?.online
+        ? "Local Agent is online, but coding executors require version 0.9.0 or newer."
+        : "Coding executors require the paired Windows Local Agent to be online.",
   });
 
   const decisions: JarvisCoreDecision[] = (operating?.decisionMemory ?? []).map(item => ({
@@ -407,7 +414,9 @@ export function buildJarvisCoreState(input: JarvisCoreInputs): JarvisCoreState {
       desktop: {
         state: localAgent?.online && localAgent.desktopRuntime ? "PARTIAL" : "PARTIAL",
         note: localAgent?.online && localAgent.desktopRuntime
-          ? "Desktop Runtime is online with first-pass hands/eyes capabilities. Browser-native automation and coding executors remain separate later steps."
+          ? localAgent.browserRuntime && localAgent.codingRuntime
+            ? "Desktop Runtime is online with browser navigation/read automation and controlled local coding executors."
+            : "Desktop Runtime is online with first-pass hands/eyes capabilities; browser/coding extensions require Local Agent 0.9.0."
           : "The Desktop Runtime code exists, but the paired Windows agent must be updated and online before JARVIS can use it.",
       },
       obsidian: {
