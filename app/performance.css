@@ -1,0 +1,61 @@
+/* Runtime performance policy.
+   Keep JARVIS visually alive at rest, but prioritize input/scrolling over decorative work. */
+
+.grid-overlay{
+  position:absolute!important;
+  mask-image:none!important;
+  -webkit-mask-image:none!important;
+  opacity:.14!important;
+}
+
+.jarvis-global-controls,
+.jarvis-voice-status{
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+  background:rgba(2,4,6,.96)!important;
+}
+
+.jarvis-presence-form{
+  contain:layout paint style;
+  transform:translateZ(0);
+  backface-visibility:hidden;
+}
+
+.jarvis-presence-form canvas{
+  pointer-events:none;
+  transform:translateZ(0);
+}
+
+.jarvis-presence-halo{
+  filter:none!important;
+  will-change:transform,opacity;
+  background:radial-gradient(circle,rgba(183,31,38,.14),rgba(183,31,38,.045) 46%,transparent 74%)!important;
+}
+
+.trading-image-lightbox{
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+  background:rgba(0,0,0,.96)!important;
+}
+
+html[data-jarvis-scrolling="true"] *,
+html[data-jarvis-scrolling="true"] *::before,
+html[data-jarvis-scrolling="true"] *::after,
+html[data-jarvis-hidden="true"] *,
+html[data-jarvis-hidden="true"] *::before,
+html[data-jarvis-hidden="true"] *::after{
+  animation-play-state:paused!important;
+}
+
+html[data-jarvis-scrolling="true"] .jarvis-global-controls,
+html[data-jarvis-scrolling="true"] .jarvis-voice-status{
+  box-shadow:none!important;
+}
+
+@media (prefers-reduced-motion: reduce){
+  .jarvis-presence-halo{animation:none!important}
+}
+
+@media (max-width:900px){
+  .grid-overlay{opacity:.10!important}
+}
