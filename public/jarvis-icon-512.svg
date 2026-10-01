@@ -1,1 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="92" fill="#020305"/><circle cx="256" cy="256" r="154" fill="none" stroke="#b71f26" stroke-width="10"/><circle cx="256" cy="256" r="116" fill="none" stroke="#f2f2f2" stroke-opacity=".7" stroke-width="5"/><circle cx="256" cy="256" r="181" fill="none" stroke="#b71f26" stroke-opacity=".25" stroke-width="3" stroke-dasharray="14 18"/><text x="256" y="273" fill="#f2f2f2" font-family="monospace" font-size="48" font-weight="700" letter-spacing="9" text-anchor="middle">JARVIS</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="92" fill="#020305"/>
+<g fill="#b71f26">
+<circle cx="256" cy="110" r="6"/><circle cx="202" cy="124" r="5.5"/><circle cx="310" cy="124" r="5.5"/>
+<circle cx="160" cy="154" r="5"/><circle cx="224" cy="154" r="7"/><circle cx="288" cy="154" r="7"/><circle cx="352" cy="154" r="5"/>
+<circle cx="134" cy="200" r="4.5"/><circle cx="188" cy="194" r="6.5"/><circle cx="256" cy="186" r="8"/><circle cx="324" cy="194" r="6.5"/><circle cx="378" cy="200" r="4.5"/>
+<circle cx="120" cy="256" r="4.5"/><circle cx="170" cy="248" r="6"/><circle cx="218" cy="240" r="7"/><circle cx="256" cy="234" r="9"/><circle cx="294" cy="240" r="7"/><circle cx="342" cy="248" r="6"/><circle cx="392" cy="256" r="4.5"/>
+<circle cx="134" cy="312" r="4.5"/><circle cx="188" cy="318" r="6.5"/><circle cx="256" cy="326" r="8"/><circle cx="324" cy="318" r="6.5"/><circle cx="378" cy="312" r="4.5"/>
+<circle cx="160" cy="358" r="5"/><circle cx="224" cy="358" r="7"/><circle cx="288" cy="358" r="7"/><circle cx="352" cy="358" r="5"/>
+<circle cx="202" cy="388" r="5.5"/><circle cx="310" cy="388" r="5.5"/><circle cx="256" cy="402" r="6"/>
+</g>
+<ellipse cx="256" cy="256" rx="154" ry="168" fill="none" stroke="#b71f26" stroke-opacity=".12" stroke-width="2"/>
+</svg>
