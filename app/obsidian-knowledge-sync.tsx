@@ -529,6 +529,36 @@ function peopleNote(assistant: AssistantState | null) {
   return lines.join("\n");
 }
 
+function communicationsNote(assistant: AssistantState | null) {
+  const recent = [...(assistant?.communications?.recent ?? [])]
+    .filter(item => item.receivedAt && Number.isFinite(Date.parse(item.receivedAt)))
+    .sort((a, b) => Date.parse(b.receivedAt || "1970-01-01") - Date.parse(a.receivedAt || "1970-01-01"))
+    .slice(0, 40);
+
+  const lines = [
+    "---", "domain: communications", "type: recent-email-signals", "---", "",
+    "# Recent Email Signals", "",
+    "- **Email source:** " + (assistant?.sources?.email || "NOT CONNECTED"),
+    "- **As of:** " + when(assistant?.communications?.asOf || assistant?.updatedAt), "",
+    "> This is a compact institutional index of recent connected email context. It does not mirror full message bodies unless a future workflow explicitly requires that.", "",
+  ];
+
+  if (!recent.length) lines.push("_No recent connected email signals are available._");
+  for (const item of recent) {
+    lines.push(
+      "## " + (item.subject || "No subject"),
+      "- **From:** " + (item.from || "Unknown sender"),
+      "- **Received:** " + when(item.receivedAt),
+      "- **Channel:** " + (item.channel || "EMAIL"),
+      "- **Summary:** " + (item.summary || "No summary available"),
+      "- **Source:** " + (item.source || "Connected email"),
+      "",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function codingIndexNote(history: CodingResult[]) {
   const recent = [...history]
     .sort((a, b) => Date.parse(b.completedAt || "1970-01-01") - Date.parse(a.completedAt || "1970-01-01"))
@@ -596,7 +626,8 @@ function knowledgeMap(dayKey: string) {
     "- [[10 System/JARVIS Capability Registry|System / Capabilities]]",
     "- [[11 Meetings/Upcoming Meetings|Meetings]]",
     "- [[12 People/Recent Contacts|People]]",
-    "- [[13 Coding/Executor Outcomes|Coding Outcomes]]", "",
+    "- [[13 Coding/Executor Outcomes|Coding Outcomes]]",
+    "- [[14 Communications/Recent Email Signals|Communications]]", "",
     "## Storage Model",
     "- **Supabase:** structured source of truth",
     "- **Obsidian:** readable long-term knowledge and reflection",
@@ -622,7 +653,8 @@ function dailyNote(dayKey: string, core: CoreState) {
     "- [[09 Projects/Active Projects|Projects]]",
     "- [[10 System/JARVIS Capability Registry|System]]",
     "- [[11 Meetings/Upcoming Meetings|Meetings]]",
-    "- [[13 Coding/Executor Outcomes|Coding Outcomes]]", "",
+    "- [[13 Coding/Executor Outcomes|Coding Outcomes]]",
+    "- [[14 Communications/Recent Email Signals|Communications]]", "",
     "## Trading",
     "Trading reviews are written from the Trading Day Journal into 02 Trading/Daily when a day is saved.", ""
   ].join("\n");
@@ -710,6 +742,7 @@ export default function ObsidianKnowledgeSync() {
           { path: "11 Meetings/Upcoming Meetings.md", content: meetingsNote(assistant) },
           { path: "12 People/Recent Contacts.md", content: peopleNote(assistant) },
           { path: "13 Coding/Executor Outcomes.md", content: codingIndexNote(codingHistory) },
+          { path: "14 Communications/Recent Email Signals.md", content: communicationsNote(assistant) },
         ];
         if (finance) notes.push({ path: "03 Finance/Current Capital Snapshot.md", content: financeNote(finance) });
         if (system) {
