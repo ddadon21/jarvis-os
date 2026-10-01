@@ -11,6 +11,7 @@ import PwaRegister from "./pwa-register";
 import JarvisVoiceProvider from "./jarvis-voice";
 import JarvisCloudBridge from "./jarvis-cloud-bridge";
 import GoogleWorkspaceSync from "./google-workspace-sync";
+import ObsidianKnowledgeSync from "./obsidian-knowledge-sync";
 import PerformanceGovernor from "./performance-governor";
 
 export const metadata: Metadata = {
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <PerformanceGovernor />
         <JarvisCloudBridge />
         <GoogleWorkspaceSync />
+        <ObsidianKnowledgeSync />
         <JarvisVoiceProvider>{children}</JarvisVoiceProvider>
       </body>
     </html>
