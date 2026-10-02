@@ -38,3 +38,27 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Install browser layout test dependencies
+        run: |
+          npm install --no-save --package-lock=false @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Responsive viewport matrix
+        run: |
+          npm run start -- -p 3100 > /tmp/jarvis-responsive-server.log 2>&1 &
+          echo $! > /tmp/jarvis-responsive-server.pid
+          for i in $(seq 1 45); do
+            if curl --fail --silent http://localhost:3100/work > /dev/null; then break; fi
+            sleep 2
+          done
+          npx playwright test -c playwright.config.cjs tests/responsive.spec.cjs
+
+      - name: Save responsive test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: responsive-viewport-artifacts
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
