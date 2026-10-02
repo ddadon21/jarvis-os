@@ -2,7 +2,8 @@
 
 import {
   Activity,
-   BriefcaseBusiness,
+  ArrowUpRight,
+  BriefcaseBusiness,
    Mic,
    Send,
    Target,
@@ -126,6 +127,8 @@ const StableTradingCockpit = memo(TradingCockpit);
 const StableLifeCockpit = memo(LifeCockpit);
 const StableWorkforcePanel = memo(WorkforcePanel);
 const StableObsidianBridgePanel = memo(ObsidianBridgePanel);
+
+const SENTRYOPS_DEMO_URL = "https://sentryops-prototype-co845i4oz-dwights-projects-8a9a094f.vercel.app/command/dashboard";
 
 const sectors = [
   { id: "TRADING" as const, icon: TrendingUp, title: "TRADING", signal: "PASS → PAYOUT" },
@@ -451,15 +454,37 @@ export default function WorkV2() {
           ) : null}
         </aside>
 
-        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
+        <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "SENTRYOPS" ? "sentryops-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
           {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
-            <div className="core-visual jarvis-living-core">
-              <JarvisPresence state={jarvisVisualState} variant="core" label="JARVIS" />
-              <div className="jarvis-core-readout">
-                <span>JARVIS CORE</span>
-                <strong>{busy ? "THINKING" : voiceEnabled ? voiceState : systemMode}</strong>
+            <section className="sentryops-demo" aria-label="SentryOps existing prototype preview">
+              <div className="sentryops-demo-header">
+                <div>
+                  <span>SENTRYOPS / PRODUCT PROTOTYPE</span>
+                  <strong>COMMAND DASHBOARD</strong>
+                  <small>Existing SentryOps demo · separate from JARVIS</small>
+                </div>
+                <a
+                  href={SENTRYOPS_DEMO_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="sentryops-demo-open"
+                >
+                  OPEN FULL DEMO <ArrowUpRight size={12} aria-hidden="true" />
+                </a>
               </div>
-            </div>
+              <div className="sentryops-demo-viewport">
+                <iframe
+                  title="SentryOps Command Dashboard prototype"
+                  src={SENTRYOPS_DEMO_URL}
+                  loading="lazy"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
+                />
+              </div>
+              <p className="sentryops-demo-note">
+                Preview of the existing prototype. If the embedded controls feel cramped, open the full demo above.
+              </p>
+            </section>
           )}
 
           <div className="domain-switcher">

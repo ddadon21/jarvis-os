@@ -1,0 +1,107 @@
+/* SentryOps-only prototype viewer. Other domain center layouts are unchanged. */
+.center-core.sentryops-mode{
+  align-items:stretch;
+  justify-content:flex-start;
+  min-width:0;
+}
+.sentryops-demo{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  margin:8px auto 0;
+  flex:0 0 auto;
+}
+.sentryops-demo-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+  padding:0 2px;
+}
+.sentryops-demo-header>div{
+  display:grid;
+  gap:4px;
+  min-width:0;
+}
+.sentryops-demo-header span{
+  color:#a44249;
+  font-weight:800;
+  font-size:8px;
+  letter-spacing:.14em;
+}
+.sentryops-demo-header strong{
+  color:#e4e5e6;
+  font-size:13px;
+  font-weight:750;
+  letter-spacing:.055em;
+}
+.sentryops-demo-header small{
+  color:#697176;
+  font-size:8px;
+  letter-spacing:.02em;
+}
+.sentryops-demo-open{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  text-decoration:none;
+  white-space:nowrap;
+  padding:9px 10px;
+  border:1px solid rgba(183,31,38,.43);
+  background:rgba(183,31,38,.065);
+  color:#e5e6e7;
+  font-size:8px;
+  font-weight:750;
+  letter-spacing:.07em;
+  transition:background .16s ease,border-color .16s ease;
+}
+.sentryops-demo-open:hover,
+.sentryops-demo-open:focus-visible{
+  background:rgba(183,31,38,.16);
+  border-color:rgba(183,31,38,.75);
+}
+.sentryops-demo-viewport{
+  width:100%;
+  height:clamp(430px,42vw,580px);
+  min-height:0;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.11);
+  background:#090d11;
+  color-scheme:dark;
+  box-shadow:0 14px 40px rgba(0,0,0,.16);
+}
+.sentryops-demo-viewport iframe{
+  display:block;
+  width:100%;
+  height:100%;
+  border:0;
+  background:#090d11;
+}
+.sentryops-demo-note{
+  margin:9px 2px 0;
+  color:#687076;
+  font-size:8px;
+  line-height:1.45;
+}
+.center-core.sentryops-mode .domain-switcher{
+  margin-top:20px!important;
+  flex:0 0 auto;
+}
+.center-core.sentryops-mode .command-label{
+  margin-top:18px;
+  flex:0 0 auto;
+}
+.center-core.sentryops-mode .command-box{
+  align-self:center;
+  flex:0 0 auto;
+}
+@media(max-width:760px){
+  .sentryops-demo{margin-top:4px}
+  .sentryops-demo-header{align-items:flex-start}
+  .sentryops-demo-header strong{font-size:12px}
+  .sentryops-demo-viewport{height:470px}
+  .center-core.sentryops-mode .domain-switcher{margin-top:16px!important}
+}
