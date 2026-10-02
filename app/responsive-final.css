@@ -171,3 +171,39 @@
 .shell :is(.trading-cockpit,.finance-cockpit,.life,.sentryops-demo){
  width:100%;min-width:0;max-width:100%;
 }
+
+/* Work controls are a footer, never an overlay over previews, journals or cards.
+   Home/Ambient retains its original floating controls. */
+.jarvis-global-controls:not(.ambient-controls){
+ position:relative!important;
+ inset:auto!important;
+ right:auto!important;
+ bottom:auto!important;
+ left:auto!important;
+ width:max-content;
+ max-width:calc(100% - 24px);
+ margin:10px max(12px,env(safe-area-inset-right)) max(15px,env(safe-area-inset-bottom)) auto!important;
+ z-index:10;
+ transform:none!important;
+}
+.jarvis-voice-status{
+ position:relative!important;
+ inset:auto!important;
+ left:auto!important;
+ right:auto!important;
+ bottom:auto!important;
+ width:min(560px,calc(100% - 24px))!important;
+ min-width:0!important;
+ margin:8px max(12px,env(safe-area-inset-right)) 16px auto!important;
+ transform:none!important;
+}
+@media(max-width:520px){
+ .jarvis-global-controls:not(.ambient-controls){
+  max-width:calc(100% - 20px);
+  margin-right:10px!important;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+ }
+ .jarvis-global-controls:not(.ambient-controls) button{min-height:32px}
+ .jarvis-voice-status{width:calc(100% - 20px)!important;margin-right:10px!important}
+}

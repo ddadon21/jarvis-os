@@ -72,6 +72,21 @@ for (const size of viewports) {
       node => getComputedStyle(node).backgroundImage
     ), { timeout: 30_000 }).toContain("linear-gradient");
     await expect(frame.locator(".jarvis-global-controls")).toHaveCount(0);
+    // Parent global controls must live after Work's content, not float across
+    // the actual SentryOps preview or any of the responsive panels.
+    const controlsGeometry = await page.evaluate(() => {
+      const controls = document.querySelector(".jarvis-global-controls:not(.ambient-controls)");
+      const preview = document.querySelector(".sentryops-landing-viewport");
+      if (!controls || !preview) return { overlap: false };
+      const a = controls.getBoundingClientRect();
+      const b = preview.getBoundingClientRect();
+      return { overlap: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top };
+    });
+    expect(controlsGeometry.overlap, "Global controls cover SentryOps preview at " + size.width).toBe(false);
+    await page.locator(".jarvis-right-orb").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500);
+    await page.evaluate(() => window.scrollTo(0, 0));
+
     await page.screenshot({ path: "test-results/screenshots/" + size.name + "-sentryops.png", fullPage: true });
     await context.close();
   });
