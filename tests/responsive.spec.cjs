@@ -66,6 +66,12 @@ for (const size of viewports) {
     await nav.getByRole("button", { name: "SENTRYOPS", exact: true }).click();
     const frame = page.frameLocator('iframe[title="Actual SentryOps public marketing homepage before sign in"]');
     await expect(frame.getByRole("heading", { name: /Central Hub for/i })).toBeVisible({ timeout: 30_000 });
+    // The original deployed stylesheet must apply; merely loading unstyled text
+    // is not a successful public marketing preview.
+    await expect.poll(async () => frame.locator(".min-h-screen").evaluate(
+      node => getComputedStyle(node).backgroundImage
+    ), { timeout: 30_000 }).toContain("linear-gradient");
+    await expect(frame.locator(".jarvis-global-controls")).toHaveCount(0);
     await page.screenshot({ path: "test-results/screenshots/" + size.name + "-sentryops.png", fullPage: true });
     await context.close();
   });
