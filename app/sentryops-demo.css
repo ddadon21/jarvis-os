@@ -165,3 +165,25 @@
  .sentryops-stat strong{font-size:20px}
  .sentryops-demo-tag{display:none}
 }
+
+/* The original public landing lives under the same JARVIS origin in an isolated frame. */
+.sentryops-landing-viewport{
+ height:clamp(430px,44vw,650px);
+ width:100%;
+ overflow:hidden;
+ background:#020617;
+ color-scheme:dark;
+}
+.sentryops-landing-viewport iframe{
+ width:100%;
+ height:100%;
+ display:block;
+ border:0;
+ background:#020617;
+}
+@media(max-width:900px){
+ .sentryops-landing-viewport{height:clamp(460px,66vw,590px)}
+}
+@media(max-width:520px){
+ .sentryops-landing-viewport{height:min(68dvh,540px);min-height:400px}
+}

@@ -1,0 +1,173 @@
+/* Final responsive shell: nav is the first content row for EVERY domain. */
+.shell,.shell *, .shell *::before,.shell *::after{box-sizing:border-box}
+.shell{width:100%;max-width:100%;min-width:0}
+.shell .workspace{width:100%;max-width:100%;min-width:0}
+.shell .workspace > *,
+.shell .center-core > *,
+.shell .left-column,.shell .right-column,
+.shell .panel,.shell .panel-body{min-width:0;max-width:100%}
+.shell .center-core{
+ justify-content:flex-start!important;
+ align-items:stretch!important;
+ min-width:0;
+}
+.shell .center-core > nav.domain-switcher{
+ position:relative;
+ z-index:6;
+ order:-1!important;
+ flex:0 0 auto;
+ display:grid!important;
+ grid-template-columns:repeat(4,minmax(0,1fr));
+ align-items:stretch;
+ justify-content:stretch;
+ gap:8px;
+ width:100%;
+ max-width:100%;
+ margin:0 0 14px!important;
+ padding:0;
+}
+.shell .center-core > nav.domain-switcher button{
+ display:flex;align-items:center;justify-content:center;gap:6px;
+ min-width:0;min-height:36px;padding:7px 5px;
+ border-radius:0;white-space:normal;
+ overflow-wrap:anywhere;
+ text-align:center;
+}
+.shell .center-core > nav.domain-switcher button.active{
+ border-color:rgba(183,31,38,.65)!important;
+ background:rgba(183,31,38,.09)!important;
+ color:#f4f4f4!important;
+}
+.shell .center-core > nav.domain-switcher button span{
+ display:block;min-width:0;font-size:clamp(8px,.63vw,10px);
+ line-height:1.15;letter-spacing:.035em;
+}
+.shell .center-core .command-label{
+ align-self:center;
+ margin-top:16px!important;
+}
+.shell .center-core .command-box{
+ width:min(650px,100%);
+ max-width:100%;
+ align-self:center;
+ grid-template-columns:auto minmax(0,1fr) auto;
+}
+.shell .center-core .command-box input{min-width:0}
+/* Desktop: prevent fixed-width columns from widening the viewport. */
+@media(min-width:1201px){
+ .shell .workspace{
+  grid-template-columns:clamp(190px,16vw,225px) minmax(0,1fr) clamp(215px,17vw,260px)!important;
+  column-gap:clamp(10px,1vw,16px)!important;
+ }
+ .shell .center-core{padding-inline:clamp(7px,.9vw,16px)!important}
+}
+@media (max-width:1200px) and (min-width:901px){
+ .shell .workspace{
+  grid-template-columns:clamp(180px,21vw,218px) minmax(0,1fr)!important;
+  gap:13px!important;
+ }
+ .shell .right-column{
+  grid-column:1/-1!important;
+  display:grid!important;
+  grid-template-columns:minmax(175px,.7fr) minmax(0,1.3fr)!important;
+  align-items:start;
+ }
+ .shell .right-column>.jarvis-right-orb{grid-column:1;grid-row:1}
+ .shell .right-column>.core-events-panel{grid-column:2;grid-row:1}
+ .shell .right-column>.core-workforce-panel{grid-column:1/-1;grid-row:2}
+ .shell .right-column>.panel:last-child{display:none!important}
+ .shell .workspace-memo{left:16px!important;right:16px!important}
+}
+@media(max-width:900px){
+ .shell .workspace{
+  display:flex!important;
+  flex-direction:column!important;
+  gap:14px!important;
+  padding:76px max(12px,env(safe-area-inset-right)) 20px max(12px,env(safe-area-inset-left))!important;
+  width:100%;
+ }
+ .shell .workspace-memo{
+  top:7px!important;left:12px!important;right:12px!important;
+  padding:4px 5px!important;
+ }
+ .shell .workspace-memo strong{font-size:clamp(10px,2.2vw,13px)}
+ .shell .workspace-memo span{font-size:clamp(8px,1.4vw,10px);letter-spacing:.015em}
+ .shell .center-core{
+  order:1!important;
+  min-height:0!important;
+  width:100%!important;
+  border:0!important;
+  padding:8px 4px 14px!important;
+ }
+ .shell .left-column{
+  order:2!important;
+  display:flex!important;
+  flex-direction:column!important;
+  gap:12px!important;
+  width:100%;
+ }
+ .shell .right-column{
+  order:3!important;
+  display:flex!important;
+  flex-direction:column!important;
+  gap:12px!important;
+  width:100%;
+ }
+ .shell .right-column>.jarvis-right-orb{
+  width:100%;height:auto;
+  min-height:210px;
+ }
+ .shell .right-column>.panel{width:100%;max-width:100%}
+ .shell .right-column>.panel:last-child{display:none!important}
+ .shell .center-core > nav.domain-switcher{gap:6px;margin:0 0 12px!important}
+ .shell .center-core > nav.domain-switcher button{min-height:39px;padding:7px 4px}
+ .shell .center-core > nav.domain-switcher button span{font-size:clamp(8px,1.5vw,10px)}
+ .shell .center-core .command-label{margin-top:13px!important}
+ .shell .trading-cockpit,
+ .shell .finance-cockpit,.shell .life{
+  max-width:100%;min-width:0;
+ }
+ .shell .trading-hero,
+ .shell .trading-account-toolbar{min-width:0;flex-wrap:wrap}
+ .shell :is(img,video,canvas,iframe){max-width:100%}
+ .shell .panel-body{overflow-wrap:anywhere}
+}
+@media(max-width:520px){
+ .shell .topbar{
+  padding:0 10px!important;
+  min-width:0;
+  column-gap:8px;
+ }
+ .shell .topbar .brand-zone,
+ .shell .topbar .company-zone{min-width:0}
+ .shell .topbar .brand{font-size:clamp(10px,2.7vw,13px)}
+ .shell .topbar .company{font-size:clamp(8px,2vw,10px)!important;white-space:normal!important;line-height:1.15}
+ .shell .workspace{padding-top:80px!important;padding-inline:10px!important}
+ .shell .workspace-memo{left:8px!important;right:8px!important}
+ .shell .center-core{padding-inline:0!important}
+ .shell .center-core > nav.domain-switcher{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:5px;
+  margin:0 0 12px!important;
+ }
+ .shell .center-core > nav.domain-switcher button{min-height:37px;gap:7px}
+ .shell .center-core > nav.domain-switcher button span{font-size:10px}
+ .shell .center-core .command-box{
+  padding:8px!important;
+  grid-template-columns:28px minmax(0,1fr) 22px;
+  gap:7px;
+ }
+ .shell .center-core .command-box input{font-size:16px!important}
+ .shell .right-column>.jarvis-right-orb{min-height:185px}
+ .shell .finance-mode :is(.metrics,.finance-metrics){min-width:0}
+}
+@media(max-width:360px){
+ .shell .workspace{padding-top:88px!important}
+ .shell .topbar .micro{display:none!important}
+ .shell .topbar .brand-zone{gap:4px}
+ .shell .center-core > nav.domain-switcher button{min-height:34px}
+}
+/* Defensive control layout for embedded dashboard content. */
+.shell :is(.trading-cockpit,.finance-cockpit,.life,.sentryops-demo){
+ width:100%;min-width:0;max-width:100%;
+}

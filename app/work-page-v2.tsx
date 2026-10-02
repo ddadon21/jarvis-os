@@ -453,13 +453,23 @@ export default function WorkV2() {
         </aside>
 
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "SENTRYOPS" ? "sentryops-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
+          <nav className="domain-switcher" aria-label="JARVIS domain navigation">
+            {sectors.map(({ id, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={domain === id ? "active" : ""}
+                aria-current={domain === id ? "page" : undefined}
+                onClick={() => setDomain(id)}
+              >
+                <Icon size={15} aria-hidden="true" /> <span>{id}</span>
+              </button>
+            ))}
+          </nav>
+
           {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
             <SentryOpsCommandPreview />
           )}
-
-          <div className="domain-switcher">
-            {sectors.map(({ id, icon: Icon }) => <button key={id} className={domain === id ? "active" : ""} onClick={() => setDomain(id)}><Icon size={15} /> {id}</button>)}
-          </div>
 
           <div className="command-label"><Activity size={14} /> {domain} // JARVIS WORKING</div>
           <form className="command-box" onSubmit={sendMessage}>
