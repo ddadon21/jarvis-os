@@ -6,7 +6,8 @@
   place-items:center;
   position:relative;
   isolation:isolate;
-  overflow:hidden;
+  /* Preserve Home's unconstrained particle halo instead of cropping it. */
+  overflow:visible;
 }
 .jarvis-right-orb .jarvis-presence-hero{
   width:min(100%,310px);
@@ -77,5 +78,3 @@
     width:min(80vw,240px);
   }
 }
-/* deployment-head: jarvis-side-rail-and-capital-path */
-/* deploy: home-hero-orb-match */
