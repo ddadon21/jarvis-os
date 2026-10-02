@@ -17,6 +17,8 @@ type CloudKey = typeof CLOUD_KEYS[number];
 const LOCAL_BACKUP_PREFIX = "local.";
 const SENSITIVE_LOCAL_KEYS = new Set([
   "jarvis-observer-controller-v1",
+  // Managed by the dedicated durable Obsidian outbox, not generic local-key backup.
+  "jarvis-obsidian-outbox-v1",
 ]);
 
 function shouldBackupLocalKey(key: string) {

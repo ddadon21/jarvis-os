@@ -41,7 +41,7 @@ export default function ObsidianBridgePanel() {
   const [files, setFiles] = useState<string[]>([]);
   const [query, setQuery] = useState("JARVIS");
   const [searchPreview, setSearchPreview] = useState("");
-  const [syncDetail, setSyncDetail] = useState("Automatic knowledge sync ready.");
+  const [syncDetail, setSyncDetail] = useState("Sync Now works offline. Vault delivery resumes with the Local Agent.");
 
   useEffect(() => {
     let cancelled = false;
@@ -106,14 +106,9 @@ export default function ObsidianBridgePanel() {
   }, []);
 
   function syncNow() {
-    const token = controllerToken();
-    if (!token) {
-      setState("UNPAIRED");
-      setMessage("PAIR LOCAL AGENT");
-      setDetail("JARVIS does not see the saved desktop pairing in this browser. Re-pair once in Trading.");
-      return;
-    }
-    setSyncDetail("Manual knowledge sync requested…");
+    // Staging is independent of Local Agent pairing. The sync service prepares
+    // and queues notes first, then delivers when the vault is reachable.
+    setSyncDetail("Preparing current knowledge and saving sync request…");
     window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-now"));
   }
 
@@ -207,7 +202,7 @@ export default function ObsidianBridgePanel() {
       <div className="obsidian-bridge-actions">
         <button type="button" disabled={state === "WORKING"} onClick={() => void run("LIST")}>TEST VAULT</button>
         <button type="button" disabled={state === "WORKING"} onClick={() => void run("WRITE")}>WRITE TEST</button>
-        <button type="button" onClick={syncNow}>SYNC NOW</button>
+        <button type="button" onClick={syncNow}>SYNC NOW / QUEUE</button>
       </div>
       <small className="obsidian-bridge-sync">{syncDetail}</small>
       <div className="obsidian-bridge-search">

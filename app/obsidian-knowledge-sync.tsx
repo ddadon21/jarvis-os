@@ -6,6 +6,7 @@ import { PILLARS } from "../lib/life-missions";
 import type { FinanceRuntimeState } from "../lib/jarvis-runtime";
 import type { PayoutPlan } from "../lib/finance-math";
 import { writeObsidianNote } from "../lib/obsidian-bridge-client";
+import { loadObsidianOutbox, persistObsidianOutbox, type PendingObsidianNote } from "../lib/obsidian-outbox";
 
 const CORE_KEY = "jarvis-os-state-v1";
 const FINANCE_PLAN_KEY = "jarvis-finance-payout-plan-v1";
@@ -719,12 +720,9 @@ export default function ObsidianKnowledgeSync() {
       let failed = 0;
 
       try {
-        if (!(await online())) {
-          window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", { detail: { state: "OFFLINE", message: "Knowledge sync is waiting for the Local Agent." } }));
-          return;
-        }
-
-        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", { detail: { state: "SYNCING", message: "Syncing knowledge to Obsidian - " + reason } }));
+        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", {
+          detail: { state: "PREPARING", message: "Preparing knowledge snapshot - " + reason }
+        }));
 
         const dayKey = localDay();
         const core = readJson<CoreState>(CORE_KEY, {});
@@ -768,32 +766,86 @@ export default function ObsidianKnowledgeSync() {
           });
         }
 
+        // Always stage the current notes first. A disconnected agent must never
+        // cause the manual Sync Now request or new knowledge to be dropped.
         const fingerprints = readJson<Record<string, string>>(FP_KEY, {});
-        const next = { ...fingerprints };
-
+        const pending = await loadObsidianOutbox();
+        const queue = new Map<string, PendingObsidianNote>(
+          pending.notes.map(note => [note.path, note])
+        );
+        const now = new Date().toISOString();
+        let newlyQueued = 0;
         for (const note of notes) {
-          if (disposed) break;
           const fingerprint = hashText(note.content);
-          if (fingerprints[note.path] === fingerprint) {
+          const existing = queue.get(note.path);
+          if (existing?.content === note.content) {
             skipped += 1;
+            continue;
+          }
+          if (!existing && fingerprints[note.path] === fingerprint) {
+            skipped += 1;
+            continue;
+          }
+          queue.set(note.path, { ...note, queuedAt: now });
+          newlyQueued += 1;
+        }
+
+        let remaining = [...queue.values()];
+        const staged = newlyQueued || remaining.length
+          ? await persistObsidianOutbox(remaining)
+          : { localSaved: true, cloudSaved: pending.cloudAvailable };
+        if (!staged.localSaved) {
+          window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", {
+            detail: { state: "ERROR", message: "Could not save this sync request. Check browser storage." }
+          }));
+          return;
+        }
+
+        if (!(await online())) {
+          const state = staged.cloudSaved ? "QUEUED_CLOUD" : "QUEUED_LOCAL";
+          const message = staged.cloudSaved
+            ? remaining.length + " notes staged in Supabase. Local vault delivery waits for the agent."
+            : remaining.length + " notes stored in this browser. Cloud staging unavailable; keep this browser's data until the vault reconnects.";
+          window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", {
+            detail: { state, message, at: now }
+          }));
+          return;
+        }
+
+        window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", {
+          detail: { state: "DELIVERING", message: "Delivering " + remaining.length + " queued notes to local Obsidian…" }
+        }));
+        const next = { ...fingerprints };
+        const undelivered: PendingObsidianNote[] = [];
+        for (const note of remaining) {
+          if (disposed) {
+            undelivered.push(note);
             continue;
           }
           try {
             await writeObsidianNote(note.path, note.content);
-            next[note.path] = fingerprint;
+            next[note.path] = hashText(note.content);
             wrote += 1;
           } catch {
             failed += 1;
+            undelivered.push(note);
+            // Don't repeatedly stall on an offline / stopped agent.
+            if (!(await online())) {
+              const attempted = wrote + failed;
+              undelivered.push(...remaining.slice(attempted));
+              break;
+            }
           }
         }
-
+        remaining = undelivered;
         try { window.localStorage.setItem(FP_KEY, JSON.stringify(next)); } catch {}
+        const saved = await persistObsidianOutbox(remaining);
         window.dispatchEvent(new CustomEvent("jarvis-obsidian-sync-status", {
           detail: {
-            state: failed ? "DEGRADED" : "SYNCED",
-            message: failed
-              ? "Knowledge sync: " + wrote + " updated, " + failed + " failed."
-              : "Knowledge synced: " + wrote + " updated, " + skipped + " already current.",
+            state: failed || remaining.length ? "DEGRADED" : "SYNCED",
+            message: remaining.length
+              ? wrote + " written to Obsidian; " + remaining.length + " remain queued" + (saved.cloudSaved ? " in cloud." : " locally.")
+              : "Obsidian vault confirmed: " + wrote + " written, " + skipped + " already current.",
             at: new Date().toISOString()
           }
         }));
