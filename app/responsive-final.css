@@ -207,3 +207,13 @@
  .jarvis-global-controls:not(.ambient-controls) button{min-height:32px}
  .jarvis-voice-status{width:calc(100% - 20px)!important;margin-right:10px!important}
 }
+
+/* Undo an older compact.css rule that accidentally labels Obsidian as EVENTS. */
+.shell .left-column > .obsidian-panel .panel-head strong{
+ font-size:9px!important;
+ color:#d7dde0!important;
+}
+.shell .left-column > .obsidian-panel .panel-head strong::after{
+ content:none!important;
+ display:none!important;
+}

@@ -442,7 +442,7 @@ export default function WorkV2() {
           <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
-          <Panel title="OBSIDIAN" corner="LOCAL">
+          <Panel title="OBSIDIAN" corner="LOCAL" className="obsidian-panel">
             <StableObsidianBridgePanel />
           </Panel>
           {domain === "TRADING" ? (
