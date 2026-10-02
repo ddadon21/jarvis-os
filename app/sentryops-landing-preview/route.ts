@@ -1,5 +1,6 @@
 // Original compiled PUBLIC SentryOps homepage, pinned to an immutable verified
-// prototype deployment. This route serves standalone HTML, not the JARVIS app
+// prototype deployment, with exact public JS/CSS assets bundled in JARVIS.
+// This route serves standalone HTML, not the JARVIS app
 // layout: the iframe must not mount JARVIS controls, cloud sync or voice twice.
 // No authenticated prototype routes are proxied or made less restricted.
 export const runtime = "nodejs";
@@ -10,7 +11,7 @@ const PUBLIC_INDEX_HTML = "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <m
 export async function GET() {
   const html = PUBLIC_INDEX_HTML
     .replace(/(src|href)="\/(?!\/)([^"]+)"/g, (_, attr: string, path: string) =>
-      attr + '="' + ORIGIN + '/' + path + '"')
+      attr + '="' + (path.startsWith("assets/") ? "/sentryops-preview/" + path : ORIGIN + "/" + path) + '"')
     .replace(
       '<script type="module"',
       `<script>
