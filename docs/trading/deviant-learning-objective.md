@@ -46,6 +46,9 @@ For every observed trade:
 - Do not force a daily arrow solely to hit the 1-2/day target if no qualifying setup is present.
 - Keep live execution manual until a separately validated shadow/paper execution system is reliable.
 
+## Implementation
+See `docs/trading/learning-pipeline.md` (how learning works) and `docs/trading/ea-roadmap.md` (gates toward automation).
+
 ## Storage plan
 - Raw TradingView visual evidence: local Jarvis Observer session folders first.
 - Structured trade/context/event dataset: Jarvis persistence layer once wired.

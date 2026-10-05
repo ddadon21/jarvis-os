@@ -477,6 +477,8 @@
 .stepRow > span { display: grid; gap: 1px; min-width: 0 }
 .stepRow strong { font-size: 8.5px; letter-spacing: .06em }
 .stepRow small { font-size: 7.3px; color: #8b7d80; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.labLink { margin-top: 2px; align-self: flex-start; padding: 5px 8px; border: 1px solid rgba(255, 59, 68, .5); color: #fff; font-size: 8px; letter-spacing: .14em; text-decoration: none }
+.labLink:hover { background: rgba(183, 31, 38, .25) }
 .step_OK, .step_LIVE { color: var(--profit) }
 .step_OFF { color: var(--crimson-hot) }
 .step_TODO { color: #8b7d80 }

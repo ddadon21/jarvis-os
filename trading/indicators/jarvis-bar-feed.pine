@@ -1,0 +1,22 @@
+//@version=6
+// JARVIS BAR FEED — sends every closed 1-minute bar to JARVIS so the learning
+// pipeline has market data aligned with your observed trades. No broker API needed.
+//
+// Setup (once):
+// 1. Add this indicator to a 1-minute NQ1! (or MNQ1!) chart. It draws nothing.
+// 2. Paste your JARVIS_MARKET_WEBHOOK_SECRET into the indicator's "JARVIS secret" input.
+// 3. Create an alert: Condition = "JARVIS BAR FEED" → "Any alert() function call".
+//    Notifications → Webhook URL = https://<your-jarvis-domain>/api/trading/market-webhook
+//    Expiration = open-ended. (Webhooks need a paid TradingView plan.)
+// 4. For history: on the same 1-minute chart use "Export chart data…" and import the CSV
+//    in JARVIS → Learning Lab.
+indicator("JARVIS BAR FEED", overlay = true)
+
+secret = input.string("", "JARVIS secret")
+
+// Pine requires one output; this draws nothing.
+plot(na, "JARVIS feed", display = display.none)
+
+if barstate.isconfirmed and timeframe.period == "1" and str.length(secret) > 0
+    payload = '{"secret":"' + secret + '","kind":"bar","symbol":"' + syminfo.ticker + '","timeframe":"1","time":' + str.tostring(time) + ',"open":' + str.tostring(open, format.mintick) + ',"high":' + str.tostring(high, format.mintick) + ',"low":' + str.tostring(low, format.mintick) + ',"close":' + str.tostring(close, format.mintick) + ',"volume":' + str.tostring(volume) + '}'
+    alert(payload, alert.freq_once_per_bar_close)

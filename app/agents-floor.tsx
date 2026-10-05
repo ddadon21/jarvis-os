@@ -1064,29 +1064,55 @@ function TradingSessionScreen({ state }: { state: TradingSnapshot | null }) {
   );
 }
 
+type LearningStatus = {
+  ok: boolean;
+  coverage?: Array<{ family: string; bars: number }>;
+  trades?: { total: number };
+  runs?: Array<{ id: string; status: string; outcome: string; createdAt: string; metrics?: { test?: { combined?: { recall: number } } | null } }>;
+};
+
 function LearningScreen({ state, events }: { state: TradingSnapshot | null; events: WorkforceEvent[] }) {
+  const [learning, setLearning] = useState<LearningStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/learning/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body: LearningStatus) => { if (!cancelled) setLearning(body); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
   const live = observerIsLive(state);
   const durable = state?.durableTradeCount;
-  const captured = durable ?? state?.journalCount ?? 0;
-  const withOutcome = (state?.recentTrades ?? []).filter((trade) => trade.realizedPnl != null).length;
-  const progress = Math.min(100, Math.round((captured / FIRST_CANDIDATE_TARGET) * 100));
-  const evidence = events.find((event) => event.type === "trading.indicator_evidence") ?? null;
+  const captured = learning?.trades?.total ?? durable ?? state?.journalCount ?? 0;
+  const bars = (learning?.coverage ?? []).reduce((sum, item) => sum + item.bars, 0);
+  const latest = learning?.runs?.[0] ?? null;
+  const shadow = learning?.runs?.find((run) => run.status === "SHADOW") ?? null;
+  const firstGoal = 40;
+  const reliableGoal = FIRST_CANDIDATE_TARGET;
+  const goal = captured < firstGoal ? firstGoal : reliableGoal;
+  const progress = Math.min(100, Math.round((captured / goal) * 100));
+  const evidence = events.find((event) => event.type === "trading.indicator_evidence" || event.type === "trading.learning_run") ?? null;
   const steps: Array<{ label: string; state: "OK" | "LIVE" | "OFF" | "TODO" | "LOCKED"; note: string }> = [
     { label: "LIVE CAPTURE", state: live ? "LIVE" : "OFF", note: live ? "Observer is reading your chart" : "Local Agent not streaming" },
-    { label: "ENTRIES LABELED", state: captured > 0 ? "OK" : "TODO", note: `${captured} captured · ${withOutcome} with P&L` },
     durable != null
       ? { label: "DURABLE TRADE LOG", state: "OK", note: `${durable} trades saved permanently` }
       : { label: "DURABLE TRADE LOG", state: "OFF", note: "Supabase not connected: only the last 100 are kept" },
-    { label: "MARKET BARS ALIGNED", state: "TODO", note: "No OHLCV data source yet" },
-    { label: "FEATURE + RULE MODEL", state: "TODO", note: "Needs bars + labeled entries" },
-    { label: "DEVIANT CANDIDATE", state: "LOCKED", note: "Baseline v1 immutable" },
-    { label: "SHADOW SCORING", state: "TODO", note: "Compare arrows vs your trades daily" },
+    { label: "ENTRIES LABELED", state: captured >= firstGoal ? "OK" : "TODO", note: `${captured} journaled · first candidate at ${firstGoal}` },
+    { label: "MARKET BARS", state: bars > 0 ? "OK" : "TODO", note: bars > 0 ? `${bars.toLocaleString()} 1-minute bars stored` : "Add the TradingView bar feed / import CSV" },
+    latest
+      ? { label: "LEARNED RULES", state: latest.outcome === "CANDIDATE" ? "OK" : "TODO", note: `${latest.outcome.replace("_", " ")} · ${timeAgo(latest.createdAt)}` }
+      : { label: "LEARNED RULES", state: "TODO", note: "No learning run yet" },
+    shadow
+      ? { label: "SHADOW SCORING", state: "LIVE", note: `${shadow.id} replayed daily` }
+      : { label: "SHADOW SCORING", state: "TODO", note: "Put a candidate in shadow mode" },
+    { label: "DEVIANT V1 BASELINE", state: "LOCKED", note: "Never modified; every candidate is versioned" },
   ];
   return (
     <div className={styles.screen}>
       <div className={styles.screenHead}><span>ARROW MODEL // LEARNING</span><b>{progress}%</b></div>
       <div className={styles.progress}><i style={{ width: progress + "%" }} /></div>
-      <p className={styles.screenMuted}>{captured} / {FIRST_CANDIDATE_TARGET} observed entries before a first testable DEVIANT candidate.</p>
+      <p className={styles.screenMuted}>{captured} / {goal} observed entries {captured < firstGoal ? "before the first testable DEVIANT candidate" : "toward a reliable model"}.</p>
       <div className={styles.list}>
         {steps.map((step) => (
           <div key={step.label} className={styles.stepRow}>
@@ -1097,10 +1123,11 @@ function LearningScreen({ state, events }: { state: TradingSnapshot | null; even
       </div>
       {evidence ? (
         <>
-          <label className={styles.screenLabel}>LATEST INDICATOR EVIDENCE · {timeAgo(evidence.occurredAt)}</label>
+          <label className={styles.screenLabel}>LATEST LEARNING EVIDENCE · {timeAgo(evidence.occurredAt)}</label>
           <p className={styles.screenText}>{quickEvent(evidence.summary)}</p>
         </>
       ) : null}
+      <a className={styles.labLink} href="/learning">OPEN LEARNING LAB →</a>
     </div>
   );
 }
