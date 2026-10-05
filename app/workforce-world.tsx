@@ -3,74 +3,34 @@
 import Link from "next/link";
 import {
   Activity,
-  Bot,
   BrainCircuit,
   BriefcaseBusiness,
   Building2,
   ChevronRight,
   CircleDot,
-  Code2,
   Eye,
   Landmark,
   Network,
   Play,
-  RefreshCcw,
   Search,
-  ServerCog,
   ShieldCheck,
   TerminalSquare,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import styles from "./workforce-world.module.css";
+import AgentsFloor from "./agents-floor";
+import {
+  AGENT_PROFILES,
+  quickEvent,
+  timeAgo,
+  type WorkforceAgent,
+  type WorkforceEvent,
+  type WorkforceTask,
+} from "./agent-profiles";
 
-type AgentStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
-type AgentMotion = "READY" | "WALKING" | "RETURNING" | "SEATED" | "REPORTING" | "BLOCKED" | "ERROR";
-type Agent = {
-  id: string;
-  domain: string;
-  status: AgentStatus;
-  permissionCeiling: string;
-  lastRanAt: string | null;
-  lastResult: string;
-  currentWork: string;
-};
-type Task = {
-  id: string;
-  title: string;
-  domain: string;
-  assignedTo: string;
-  status: "QUEUED" | "RUNNING" | "DONE" | "BLOCKED" | "FAILED" | "WAITING_APPROVAL";
-  priority: string;
-  updatedAt: string;
-  result: string | null;
-  evidence: string[];
-  blockedReason: string | null;
-  definitionOfDone?: string;
-  verification?: {
-    state: "CLAIMED" | "OBSERVED" | "VERIFIED" | "DISPUTED";
-    checkedBy: string | null;
-    checkedAt: string | null;
-    rationale: string;
-    evidenceCount: number;
-  };
-  governance?: {
-    risk: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-    scope: "MAINTAIN" | "EXECUTE" | "EXPAND";
-    action: "AUTO_PROCEED" | "USER_AUTHORIZED" | "WAIT_FOR_DWIGHT" | "BLOCKED";
-    reason: string;
-    evaluatedAt: string;
-  };
-};
-type RuntimeEvent = {
-  id: string;
-  type: string;
-  domain: string;
-  source: string;
-  importance: string;
-  occurredAt: string;
-  receivedAt: string;
-  summary: string;
-};
+type Agent = WorkforceAgent;
+type Task = WorkforceTask;
+type RuntimeEvent = WorkforceEvent;
 
 type Objective = {
   id: string;
@@ -240,135 +200,11 @@ type Payload = {
   };
 };
 
-const profiles: Record<string, {
-  name: string;
-  role: string;
-  station: string;
-  icon: typeof Bot;
-  specialty: string;
-  accent: string;
-  zone: string;
-}> = {
-  EXECUTIVE: {
-    name: "EXECUTIVE",
-    role: "Chief of Staff",
-    station: "Command Center",
-    icon: BrainCircuit,
-    specialty: "Priorities · delegation · approvals",
-    accent: "#ef4444",
-    zone: "EXECUTIVE WING",
-  },
-  FINANCE_CFO: {
-    name: "CFO",
-    role: "Capital Intelligence",
-    station: "Capital Desk",
-    icon: Landmark,
-    specialty: "Cash · debt · leverage · capital",
-    accent: "#eab308",
-    zone: "CAPITAL WING",
-  },
-  SENTRYOPS_RESEARCH: {
-    name: "RESEARCH",
-    role: "SentryOps Intelligence",
-    station: "Research Lab",
-    icon: Search,
-    specialty: "Markets · agencies · competitors",
-    accent: "#3b82f6",
-    zone: "SENTRYOPS LAB",
-  },
-  TRADING_OBSERVER: {
-    name: "OBSERVER",
-    role: "Trading Intelligence",
-    station: "Observation Bay",
-    icon: Eye,
-    specialty: "Setups · execution · behavior",
-    accent: "#f97316",
-    zone: "MARKET BAY",
-  },
-  BUILDER: {
-    name: "BUILDER",
-    role: "Software Engineer",
-    station: "Build Lab",
-    icon: Code2,
-    specialty: "JARVIS · SentryOps · automation",
-    accent: "#14b8a6",
-    zone: "ENGINEERING",
-  },
-  JARVIS_QA: {
-    name: "QA",
-    role: "Quality Watchdog",
-    station: "QA Control",
-    icon: ShieldCheck,
-    specialty: "Failures · evidence · reliability",
-    accent: "#a855f7",
-    zone: "QA CONTROL",
-  },
-  IT_INFRA: {
-    name: "INFRA",
-    role: "Infrastructure / SRE",
-    station: "Network Operations",
-    icon: ServerCog,
-    specialty: "Runtime · uptime · persistence",
-    accent: "#22c55e",
-    zone: "IT OPERATIONS",
-  },
-  IT_SECURITY: {
-    name: "SECURITY",
-    role: "Security Operations",
-    station: "Security Operations Center",
-    icon: ShieldCheck,
-    specialty: "Access · secrets · boundaries",
-    accent: "#e11d48",
-    zone: "SECURITY",
-  },
-  IT_INTEGRATIONS: {
-    name: "INTEGRATIONS",
-    role: "Systems Integration",
-    station: "Integration Hub",
-    icon: Network,
-    specialty: "APIs · connectors · handoffs",
-    accent: "#06b6d4",
-    zone: "INTEGRATIONS",
-  },
-};
-
-const officePositions: Record<string, {
-  deskX: number;
-  deskY: number;
-  readyX: number;
-  readyY: number;
-}> = {
-  EXECUTIVE: { deskX: 17, deskY: 21, readyX: 34, readyY: 89 },
-  FINANCE_CFO: { deskX: 50, deskY: 19, readyX: 42, readyY: 89 },
-  SENTRYOPS_RESEARCH: { deskX: 83, deskY: 21, readyX: 50, readyY: 89 },
-  TRADING_OBSERVER: { deskX: 17, deskY: 49, readyX: 58, readyY: 89 },
-  BUILDER: { deskX: 50, deskY: 49, readyX: 66, readyY: 89 },
-  JARVIS_QA: { deskX: 83, deskY: 49, readyX: 38, readyY: 95 },
-  IT_INFRA: { deskX: 17, deskY: 77, readyX: 46, readyY: 95 },
-  IT_SECURITY: { deskX: 50, deskY: 77, readyX: 54, readyY: 95 },
-  IT_INTEGRATIONS: { deskX: 83, deskY: 77, readyX: 62, readyY: 95 },
-}
+const profiles = AGENT_PROFILES;
 
 type OperatorIntent = "ACTIVE" | "PAUSED";
 
 const WORKFORCE_INTENT_KEY = "jarvis-workforce-operator-intent-v1";
-
-function timeAgo(value: string | null) {
-  if (!value) return "NEVER";
-  const delta = Math.max(0, Date.now() - Date.parse(value));
-  const minutes = Math.floor(delta / 60_000);
-  if (minutes < 1) return "JUST NOW";
-  if (minutes < 60) return minutes + "M AGO";
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return hours + "H AGO";
-  return Math.floor(hours / 24) + "D AGO";
-}
-
-function quickEvent(summary: string) {
-  const compact = summary.replace(/\s+/g, " ").trim();
-  const first = compact.split(/(?<=[.!?])\s+/)[0] || compact;
-  return first.length > 96 ? first.slice(0, 93).trimEnd() + "…" : first;
-}
 
 export default function WorkforceWorld() {
   const [payload, setPayload] = useState<Payload | null>(null);
@@ -376,13 +212,10 @@ export default function WorkforceWorld() {
   const [busy, setBusy] = useState(false);
   const [taskText, setTaskText] = useState("");
   const [notice, setNotice] = useState("AUTONOMOUS FLOOR ONLINE");
-  const [agentMotion, setAgentMotion] = useState<Record<string, AgentMotion>>({});
   const [operatorIntent, setOperatorIntent] = useState<OperatorIntent | null>(null);
   const operatorIntentRef = useRef<OperatorIntent | null>(null);
   const repairingDurableRun = useRef(false);
   const payloadSignatureRef = useRef("");
-  const previousStatuses = useRef<Record<string, AgentStatus>>({});
-  const previousFloorActive = useRef<boolean | null>(null);
 
   function commitOperatorIntent(intent: OperatorIntent) {
     operatorIntentRef.current = intent;
@@ -674,77 +507,6 @@ export default function WorkforceWorld() {
     operatorIntent === null && serverFloorActive
   );
 
-  const agentIdsKey = agents.map((agent) => agent.id).join("|");
-
-  useEffect(() => {
-    previousStatuses.current = Object.fromEntries(agents.map((agent) => [agent.id, agent.status]));
-  }, [agents]);
-
-  useEffect(() => {
-    if (!agents.length) return;
-    const timers: number[] = [];
-    const wasActive = previousFloorActive.current;
-
-    if (wasActive === null) {
-      setAgentMotion(Object.fromEntries(agents.map((agent) => [
-        agent.id,
-        floorActive
-          ? agent.status === "BLOCKED" ? "BLOCKED"
-          : agent.status === "ERROR" ? "ERROR"
-          : "SEATED"
-          : "READY",
-      ])));
-      previousFloorActive.current = floorActive;
-      return;
-    }
-
-    if (floorActive === wasActive) return;
-
-    if (floorActive) {
-      setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "WALKING" as AgentMotion])));
-      agents.forEach((agent, index) => {
-        timers.push(window.setTimeout(() => {
-          const latestStatus = previousStatuses.current[agent.id];
-          setAgentMotion((state) => ({
-            ...state,
-            [agent.id]:
-              latestStatus === "BLOCKED" ? "BLOCKED" :
-              latestStatus === "ERROR" ? "ERROR" :
-              "SEATED",
-          }));
-        }, 2600 + index * 70));
-      });
-    } else {
-      setAgentMotion(Object.fromEntries(agents.map((agent) => [agent.id, "RETURNING" as AgentMotion])));
-      agents.forEach((agent, index) => {
-        timers.push(window.setTimeout(() => {
-          setAgentMotion((state) => ({ ...state, [agent.id]: "READY" }));
-        }, 2400 + index * 55));
-      });
-    }
-
-    previousFloorActive.current = floorActive;
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, [floorActive, agentIdsKey]);
-
-  useEffect(() => {
-    if (!floorActive || !agents.length) return;
-    setAgentMotion((current) => {
-      const next = { ...current };
-      for (const agent of agents) {
-        const motion = current[agent.id];
-        if (motion === "WALKING" || motion === "RETURNING") continue;
-        next[agent.id] =
-          agent.status === "BLOCKED" ? "BLOCKED" :
-          agent.status === "ERROR" ? "ERROR" :
-          "SEATED";
-      }
-      return next;
-    });
-  }, [agents, floorActive]);
-
-
-
   return (
     <main className={styles.page}>
       <div className={styles.grid} />
@@ -779,178 +541,14 @@ export default function WorkforceWorld() {
         </div>
       </section>
 
-      <section className={styles.floor}>
-        <div className={styles.floorHead}>
-          <div>
-            <span>OPERATIONS FLOOR</span>
-            <strong>HIMIE JOHNSON VENTURES // LIVE AI OPERATIONS</strong>
-          </div>
-          <small>TOP OFFICE VIEW · PEOPLE MOVE WHEN REAL WORK STARTS</small>
-        </div>
-
-        <div className={styles.worldShell}>
-          <div className={styles.worldRibbon}>
-            <span><i className={styles.dotWorking} /> SEATED + WORKING</span>
-            <span><i className={styles.dotReady} /> READY BAY</span>
-            <span><i className={styles.dotBlocked} /> BLOCKED / INCIDENT</span>
-            <b>{floorActive
-              ? "OPERATOR LOCK: ACTIVE · CLICK / ZOOM / REFRESH CANNOT PAUSE THE TEAM"
-              : "PAUSED BY OPERATOR · START = WALK TO DESKS"}</b>
-          </div>
-
-          <div className={styles.simFloor}>
-            <div className={styles.simFloorPlane} />
-            <div className={styles.glassNorthWall} />
-            <div className={styles.centralAisle} />
-            <div className={styles.crossAisle} />
-
-            <div className={styles.jarvisOverlook}>
-              <div className={styles.jarvisOrb}><BrainCircuit size={16} /></div>
-              <div><strong>JARVIS</strong><small>COMMAND OVERLOOK</small></div>
-            </div>
-
-            <div className={styles.readyBay}>
-              <strong>READY BAY</strong>
-              <small>IDLE EMPLOYEES WAIT HERE UNTIL WORK IS ASSIGNED</small>
-            </div>
-
-            {agents.map((agent, index) => {
-              const profile = profiles[agent.id] ?? {
-                name: agent.id,
-                role: agent.domain,
-                station: "Operations",
-                icon: Bot,
-                specialty: agent.currentWork,
-                accent: "#94a3b8",
-                zone: "OPERATIONS",
-              };
-              const Icon = profile.icon;
-              const pos = officePositions[agent.id] ?? {
-                deskX: 16 + (index % 3) * 34,
-                deskY: 22 + Math.floor(index / 3) * 28,
-                readyX: 10 + index * 10,
-                readyY: 91,
-              };
-              return (
-                <button
-                  type="button"
-                  key={"desk-" + agent.id}
-                  className={
-                    styles.deskPod +
-                    " " + styles[agent.status.toLowerCase()] +
-                    (floorActive && agent.status !== "BLOCKED" && agent.status !== "ERROR" ? " " + styles.operating : "") +
-                    (selectedId === agent.id ? " " + styles.selectedDeskPod : "")
-                  }
-                  style={{
-                    "--agent-accent": profile.accent,
-                    "--desk-x": pos.deskX + "%",
-                    "--desk-y": pos.deskY + "%",
-                  } as CSSProperties}
-                  onClick={() => setSelectedId(agent.id)}
-                >
-                  <div className={styles.deskLabel}>
-                    <span>{profile.zone}</span>
-                    <b>{String(index + 1).padStart(2, "0")}</b>
-                  </div>
-                  <div className={styles.isometricDesk}>
-                    <span className={styles.deskSurface} />
-                    <span className={styles.deskFace} />
-                    <span className={styles.deskSide} />
-                    <span className={styles.deskFootA} />
-                    <span className={styles.deskFootB} />
-                    <span className={styles.chairBase} />
-                    <span className={styles.chairBack} />
-                  </div>
-                  <div className={styles.deskScreens}>
-                    <span className={styles.screenPrimary}><i /><i /><i /><i /></span>
-                    <span className={styles.screenSecondary}><i /><i /><i /></span>
-                  </div>
-                  <div className={styles.deskIdentity}>
-                    <Icon size={11} />
-                    <div><strong>{profile.name}</strong><small>{profile.station}</small></div>
-                  </div>
-                  <div className={styles.workSignal}>
-                    <i />
-                    <span>{
-                      !floorActive ? "STANDBY" :
-                      agent.status === "BLOCKED" ? "WAITING" :
-                      agent.status === "ERROR" ? "INCIDENT" :
-                      agent.status === "RUNNING" ? "WORKING" :
-                      agent.status === "DONE" ? "MONITORING" :
-                      "ON DUTY"
-                    }</span>
-                  </div>
-                  {floorActive && agent.status !== "ERROR" ? (
-                    <div className={styles.activeTaskRibbon}>{agent.currentWork || profile.specialty}</div>
-                  ) : null}
-                </button>
-              );
-            })}
-
-            <div className={styles.peopleLayer}>
-              {agents.map((agent, index) => {
-                const profile = profiles[agent.id] ?? {
-                  name: agent.id,
-                  role: agent.domain,
-                  station: "Operations",
-                  icon: Bot,
-                  specialty: agent.currentWork,
-                  accent: "#94a3b8",
-                  zone: "OPERATIONS",
-                };
-                const pos = officePositions[agent.id] ?? {
-                  deskX: 16 + (index % 3) * 34,
-                  deskY: 22 + Math.floor(index / 3) * 28,
-                  readyX: 10 + index * 10,
-                  readyY: 91,
-                };
-                const motion = agentMotion[agent.id] ??
-                  (!floorActive ? "READY" :
-                   agent.status === "BLOCKED" ? "BLOCKED" :
-                   agent.status === "ERROR" ? "ERROR" :
-                   "SEATED");
-
-                return (
-                  <button
-                    type="button"
-                    key={"person-" + agent.id}
-                    className={
-                      styles.simPerson +
-                      " " + styles["motion" + motion] +
-                      (selectedId === agent.id ? " " + styles.selectedPerson : "")
-                    }
-                    style={{
-                      "--agent-accent": profile.accent,
-                      "--desk-x": pos.deskX + "%",
-                      "--desk-y": (pos.deskY + 3.2) + "%",
-                      "--ready-x": pos.readyX + "%",
-                      "--ready-y": pos.readyY + "%",
-                      "--walk-delay": (index * 70) + "ms",
-                    } as CSSProperties}
-                    onClick={() => setSelectedId(agent.id)}
-                    title={profile.name + " · " + motion}
-                  >
-                    <span className={styles.personShadow} />
-                    <span className={styles.personLegLeft} />
-                    <span className={styles.personLegRight} />
-                    <span className={styles.personTorso} />
-                    <span className={styles.personArmLeft} />
-                    <span className={styles.personArmRight} />
-                    <span className={styles.personHead}><i /></span>
-                    <span className={styles.personHair} />
-                    <span className={styles.personName}>{profile.name}</span>
-                    {motion === "WALKING" ? <span className={styles.personAction}>WALKING TO DESK</span> : null}
-                    {motion === "RETURNING" ? <span className={styles.personAction}>RETURNING TO READY BAY</span> : null}
-                    {motion === "SEATED" ? <span className={styles.personAction}>WORKING</span> : null}
-                    {motion === "BLOCKED" ? <span className={styles.personAction}>BLOCKED</span> : null}
-                    {motion === "ERROR" ? <span className={styles.personAction}>INCIDENT</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
+      <AgentsFloor
+        agents={agents}
+        tasks={tasks}
+        events={recentEvents}
+        floorActive={floorActive}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
 
       <section className={styles.workVisibility}>
         <div className={styles.workVisibilityHead}>
