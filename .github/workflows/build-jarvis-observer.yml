@@ -8,6 +8,7 @@ on:
     paths:
       - 'desktop/JarvisObserver/**'
       - 'desktop/JarvisObserver.Tests/**'
+      - 'desktop/JarvisObserver.CoreTests/**'
       - '.github/workflows/build-jarvis-observer.yml'
   workflow_dispatch:
 
@@ -25,6 +26,9 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Verify trade journal, outbox, frame store and command ledger
+        run: dotnet run --project ./desktop/JarvisObserver.CoreTests/JarvisObserver.CoreTests.csproj -c Release
 
       - name: Verify order reader regressions
         run: dotnet run --project ./desktop/JarvisObserver.Tests/JarvisObserver.Tests.csproj -c Release

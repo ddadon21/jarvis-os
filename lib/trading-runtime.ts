@@ -199,7 +199,10 @@ export async function restoreTradingState(state: TradingRuntimeState): Promise<T
   return state;
 }
 
-export async function ingestTradingObservation(input: TradingObservationInput): Promise<TradingRuntimeState> {
+export async function ingestTradingObservation(
+  input: TradingObservationInput,
+  options: { durableTrades?: boolean } = {},
+): Promise<TradingRuntimeState> {
   await getTradingRules().catch(() => null);
   const previous = await getTradingState();
   // A slower vision response must not replace a more recent screen state.
@@ -209,7 +212,7 @@ export async function ingestTradingObservation(input: TradingObservationInput): 
   const next = buildState(input, previous);
   await writeState(next);
   try {
-    await persistTradingTransition(previous, next);
+    await persistTradingTransition(previous, next, { trades: options.durableTrades !== false });
   } catch (error) {
     console.warn("Durable trading persistence failed", error instanceof Error ? error.message : error);
   }

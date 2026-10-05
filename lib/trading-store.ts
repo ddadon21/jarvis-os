@@ -55,9 +55,16 @@ const SNAPSHOT_INTERVAL_MS = 15_000;
 let lastSnapshotAt = 0;
 let lastSnapshotKey = "";
 
-export async function persistTradingTransition(previous: TradingRuntimeState, next: TradingRuntimeState) {
-  const events = diffTradingStates(previous, next);
-  const trades = changedTrades(previous, next);
+export async function persistTradingTransition(
+  previous: TradingRuntimeState,
+  next: TradingRuntimeState,
+  options: { trades?: boolean } = {},
+) {
+  // Observer >= 1.0 journals trades itself (idempotent, offline-safe); then the live
+  // frame path only records snapshots so trades are never stored twice.
+  const writeTrades = options.trades !== false;
+  const events = writeTrades ? diffTradingStates(previous, next) : [];
+  const trades = writeTrades ? changedTrades(previous, next) : [];
   const writes: Array<Promise<boolean>> = [];
 
   if (trades.length) {

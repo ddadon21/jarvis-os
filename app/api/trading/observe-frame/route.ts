@@ -110,6 +110,8 @@ export async function POST(request: Request) {
 
   const previous = await getTradingState();
   const observerVersion = typeof body.observerVersion === "string" ? body.observerVersion : "";
+  // Observer 1.0+ syncs trades through its own journal (/api/trading/observer-events).
+  const ingestOptions = { durableTrades: !journalingObserver(observerVersion) };
 
   if (
     ocrExecution?.frame.positionStatus === "FLAT" &&
@@ -117,7 +119,7 @@ export async function POST(request: Request) {
     !accessibilityExecution
   ) {
     const flatFrame = ocrExecution.frame;
-    const state = await ingestTradingObservation(mapFrameToObservation(flatFrame, capturedAt, previous.openTrades));
+    const state = await ingestTradingObservation(mapFrameToObservation(flatFrame, capturedAt, previous.openTrades), ingestOptions);
     console.info("Observer local OCR execution cleared", {
       status: "FLAT",
       priorStatus: previous.observer?.status,
@@ -149,7 +151,7 @@ export async function POST(request: Request) {
   ) {
     const frame = mergeSemanticWithPrevious(semanticExecution.frame, previous.observer, capturedAt);
     const observation = mapFrameToObservation(frame, capturedAt, previous.openTrades);
-    const state = await ingestTradingObservation(observation);
+    const state = await ingestTradingObservation(observation, ingestOptions);
     console.info(
       ocrExecution?.frame.positionStatus === "PENDING" || ocrExecution?.frame.positionStatus === "OPEN"
         ? "Observer local OCR execution accepted"
@@ -208,7 +210,7 @@ export async function POST(request: Request) {
     // Transport freshness and the time of the actual reading are independent.
     // Cached cloud facts retain their original screenshot timestamp in observer.
     observation.observedAt = capturedAt;
-    const state = await ingestTradingObservation(observation);
+    const state = await ingestTradingObservation(observation, ingestOptions);
     return Response.json({
       ok: true,
       accepted: true,
@@ -480,4 +482,9 @@ function parseJson(text: string): unknown {
   const last = cleaned.lastIndexOf("}");
   if (first < 0 || last <= first) throw new Error("Claude observer returned no JSON object.");
   return JSON.parse(cleaned.slice(first, last + 1));
+}
+
+function journalingObserver(version: string) {
+  const major = Number.parseInt(version.split(".")[0] ?? "", 10);
+  return Number.isFinite(major) && major >= 1;
 }

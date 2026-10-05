@@ -12,7 +12,7 @@ using FlaUI.UIA3;
 
 namespace JarvisObserver;
 
-// Local Agent release: 0.9.0 — Trading Observer + Obsidian + Jarvis Desktop Action Runtime
+// Local Agent release: see ObserverInfo.Version — Trading Observer + trade journal + Obsidian + Desktop Action Runtime
 
 internal static class Program
 {
@@ -24,19 +24,44 @@ internal static class Program
     }
 }
 
+internal static class ObserverInfo
+{
+    public const string Version = "1.0.0";
+}
+
 internal sealed class ObserverContext : ApplicationContext
 {
     private readonly NotifyIcon _tray;
     private readonly System.Threading.Timer _captureTimer;
     private readonly System.Threading.Timer _controlTimer;
     private readonly System.Threading.Timer _semanticTimer;
-    private readonly System.Threading.Timer _ocrTimer;
+    private readonly System.Threading.Timer _syncTimer;
     private readonly LocalExecutionOcr _executionOcr = new();
     private readonly HttpClient _http = CreateHttpClient();
     private readonly UIA3Automation _automation = new();
     private readonly Control _uiInvoker = new();
     private readonly DesktopActionRuntime _desktopRuntime;
     private readonly string[] _agentCapabilities;
+    private readonly FrameStore _frames;
+    private readonly TradeLifecycle _lifecycle;
+    private readonly TradeJournalStore _journal;
+    private readonly OutboxQueue _eventOutbox;
+    private readonly OutboxQueue _frameOutbox;
+    private readonly CommandLedger _ledger;
+    private readonly object _journalGate = new();
+    private readonly List<JournalEvent> _currentTradeEvents = new();
+    private readonly List<PendingBundle> _pendingBundles = new();
+    private volatile bool _localPaused;
+    private int _syncBusy;
+    private DateTime _lastCleanupUtc = DateTime.MinValue;
+    private DateTime _lastOcrStartUtc = DateTime.MinValue;
+    private IntPtr _cachedWindow;
+    private DateTime _lastWindowScanUtc = DateTime.MinValue;
+
+    private sealed record PendingBundle(JournalTrade Trade, List<JournalEvent> Events, DateTime DueAt);
+
+    /// <summary>Local recording never depends on the cloud link unless the owner chose FOLLOW_CLOUD.</summary>
+    private bool RecordingActive => !_localPaused && (!string.Equals(_config.LocalRecordingMode, "FOLLOW_CLOUD", StringComparison.OrdinalIgnoreCase) || !_paused);
     private readonly string _root;
     private readonly string _configPath;
     private ObserverConfig _config;
@@ -54,8 +79,6 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastControlPollUtc = DateTime.MinValue;
     private DateTime _lastPairAttemptUtc = DateTime.MinValue;
     private string? _pairDialogShownForCode;
-    private string? _lastObsidianCommandId;
-    private string? _lastDesktopCommandId;
     private bool _deploymentAccessPrimed;
     private string? _latestSemanticText;
     private string? _lastSemanticHash;
@@ -95,16 +118,24 @@ internal sealed class ObserverContext : ApplicationContext
         NormalizeObsidianConfig();
         NormalizePerformanceConfig();
         SaveConfig();
+        _frames = new FrameStore(_root) { RollingMinutes = _config.RollingMinutes, RetentionDays = _config.RetentionDays };
+        _journal = new TradeJournalStore(_root);
+        _lifecycle = new TradeLifecycle { DevicePrefix = "obs-" + _config.InstallId };
+        _eventOutbox = new OutboxQueue(Path.Combine(_root, "outbox", "events"));
+        _frameOutbox = new OutboxQueue(Path.Combine(_root, "outbox", "frames"));
+        _ledger = new CommandLedger(Path.Combine(_root, "command-ledger.json"));
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open observer folder", null, (_, _) => OpenFolder(_root));
         menu.Items.Add("Show / New pairing code", null, async (_, _) => await ShowOrCreatePairingCodeAsync());
         menu.Items.Add("Set / replace Vercel access key", null, (_, _) => PromptAndStoreVercelBypassSecret(showSuccess: true));
+        menu.Items.Add("Set JARVIS server address", null, (_, _) => PromptServerUrl());
+        menu.Items.Add("Open trade journal folder", null, (_, _) => OpenFolder(Path.Combine(_root, "trades")));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Obsidian: Set / replace API key", null, (_, _) => PromptAndStoreObsidianApiKey(showSuccess: true));
         menu.Items.Add("Obsidian: Test connection", null, async (_, _) => await TestObsidianConnectionAsync(showSuccess: true));
         menu.Items.Add("Obsidian: Write Local Agent test note", null, async (_, _) => await WriteObsidianAgentTestNoteAsync(showSuccess: true));
-        menu.Items.Add("Pause / Resume", null, (_, _) => TogglePause());
+        menu.Items.Add("Pause / Resume local recording", null, (_, _) => TogglePause());
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
@@ -118,7 +149,7 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
-        Log(new { type = "observer.started", at = DateTime.UtcNow, version = "0.9.0", mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
+        Log(new { type = "observer.started", at = DateTime.UtcNow, version = ObserverInfo.Version, mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _ = Task.Run(async () =>
         {
             await Task.Delay(1200);
@@ -130,7 +161,7 @@ internal sealed class ObserverContext : ApplicationContext
         _captureTimer = new System.Threading.Timer(async _ => await TickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
-        _ocrTimer = new System.Threading.Timer(async _ => await OcrTickAsync(), null, TimeSpan.FromMilliseconds(350), TimeSpan.FromMilliseconds(650));
+        _syncTimer = new System.Threading.Timer(async _ => await SyncTickAsync(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
         Log(new { type = "observer.local_ocr", at = DateTime.UtcNow, available = _executionOcr.Available });
     }
 
@@ -139,7 +170,7 @@ internal sealed class ObserverContext : ApplicationContext
         _captureTimer.Dispose();
         _controlTimer.Dispose();
         _semanticTimer.Dispose();
-        _ocrTimer.Dispose();
+        _syncTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
@@ -170,9 +201,9 @@ internal sealed class ObserverContext : ApplicationContext
         if (Interlocked.Exchange(ref _semanticBusy, 1) == 1) return Task.CompletedTask;
         try
         {
-            if (_paused) return Task.CompletedTask;
+            if (!RecordingActive) return Task.CompletedTask;
 
-            var target = FindTradingViewWindow();
+            var target = TradingViewWindow();
             if (target == IntPtr.Zero) return Task.CompletedTask;
 
             var now = DateTime.UtcNow;
@@ -217,31 +248,24 @@ internal sealed class ObserverContext : ApplicationContext
         return Task.CompletedTask;
     }
 
-    private async Task OcrTickAsync()
+    /// <summary>OCR runs on a clone of the frame TickAsync already captured (one capture per cycle).</summary>
+    private async Task RunOcrAsync(Bitmap frame, IntPtr target)
     {
-        if (Interlocked.Exchange(ref _ocrBusy, 1) == 1) return;
         try
         {
-            if (_paused || !_executionOcr.Available) return;
-
-            var target = FindTradingViewWindow();
-            if (target == IntPtr.Zero) return;
-
-            using var frame = CaptureWindow(target);
-            if (frame is null) return;
-
             Point? pointer = null;
             if (GetCursorPos(out var cursor) && GetWindowRect(target, out var rect))
                 pointer = new Point(cursor.X - rect.Left, cursor.Y - rect.Top);
             var ocr = await _executionOcr.ReadAsync(frame, pointer);
             if (string.IsNullOrWhiteSpace(ocr)) return;
+            var readAt = DateTime.UtcNow;
 
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ocr)));
             var changed = false;
             lock (_semanticGate)
             {
                 _latestOcrText = ocr;
-                _latestOcrAt = DateTime.UtcNow;
+                _latestOcrAt = readAt;
                 if (!string.Equals(hash, _lastOcrHash, StringComparison.Ordinal))
                 {
                     _lastOcrHash = hash;
@@ -254,17 +278,18 @@ internal sealed class ObserverContext : ApplicationContext
                     ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=PREPARING", StringComparison.OrdinalIgnoreCase))
                 {
                     _richExecutionSemanticText = ocr;
-                    _richExecutionSemanticAt = DateTime.UtcNow;
+                    _richExecutionSemanticAt = readAt;
                 }
                 else if (ocr.Contains("JARVIS_OCR_EXECUTION|STATUS=FLAT", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Two consecutive clean OCR scans with no chart order are stronger
-                    // than a stale accessibility snapshot. Drop the old pending hold so
-                    // cancel returns Jarvis to WAITING on the next upload.
+                    // Clean OCR scans with no chart order are stronger than a stale accessibility
+                    // snapshot. Drop the old pending hold so cancel returns Jarvis to WAITING.
                     _richExecutionSemanticText = null;
                     _richExecutionSemanticAt = DateTime.MinValue;
                 }
             }
+
+            ObserveExecution(ocr, readAt);
 
             if (changed)
             {
@@ -278,8 +303,46 @@ internal sealed class ObserverContext : ApplicationContext
         }
         finally
         {
+            frame.Dispose();
             Volatile.Write(ref _ocrBusy, 0);
         }
+    }
+
+    /// <summary>Feeds the local trade journal. Works fully offline; events sync later.</summary>
+    private void ObserveExecution(string ocr, DateTime at)
+    {
+        var read = ExecutionRead.Parse(ocr, at);
+        if (read is null) return;
+        List<JournalEvent> events;
+        lock (_journalGate)
+        {
+            events = _lifecycle.Observe(read);
+            foreach (var item in events)
+            {
+                if (item.Type == "ORDER_CANCELLED")
+                {
+                    _currentTradeEvents.Clear();
+                    continue;
+                }
+                _currentTradeEvents.Add(item);
+                if (item.Type == "EXIT" && _lifecycle.LastClosedTrade is { } closed)
+                {
+                    var tradeEvents = _currentTradeEvents.Where(e => e.TradeId == null || e.TradeId == closed.Id).ToList();
+                    _pendingBundles.Add(new PendingBundle(closed, tradeEvents, item.At.AddMinutes(5)));
+                    _journal.SaveTrade(closed);
+                    _currentTradeEvents.Clear();
+                }
+            }
+        }
+        if (events.Count == 0) return;
+        _journal.Append(events);
+        foreach (var item in events)
+        {
+            _eventOutbox.Enqueue(item.Id, JsonSerializer.Serialize(item, TradeJournalStore.Json));
+            Log(new { type = "journal." + item.Type.ToLowerInvariant(), at = item.At, tradeId = item.TradeId, item.Symbol, item.Side, item.Quantity, item.Price, item.StopPrice, item.TargetPrice });
+        }
+        if (events.Any(e => e.Type == "ENTRY"))
+            _tray.ShowBalloonTip(1800, "JARVIS TRADE JOURNAL", "Entry recorded. The setup before it is being kept.", ToolTipIcon.Info);
     }
 
     private async Task TickAsync()
@@ -287,11 +350,13 @@ internal sealed class ObserverContext : ApplicationContext
         if (Interlocked.Exchange(ref _captureBusy, 1) == 1) return;
         try
         {
-            if (_paused) return;
+            if (!RecordingActive) return;
 
-            var target = FindTradingViewWindow();
+            var target = TradingViewWindow();
             if (target == IntPtr.Zero)
             {
+                // Minimized is not closed: keep the session and journal state.
+                if (_tradingViewDetected && TradingViewRunning()) return;
                 if (_tradingViewDetected)
                 {
                     _tradingViewDetected = false;
@@ -317,11 +382,20 @@ internal sealed class ObserverContext : ApplicationContext
                 return;
             }
 
+            var now = DateTime.UtcNow;
+            if (_executionOcr.Available &&
+                now - _lastOcrStartUtc >= TimeSpan.FromMilliseconds(650) &&
+                Interlocked.CompareExchange(ref _ocrBusy, 1, 0) == 0)
+            {
+                _lastOcrStartUtc = now;
+                var clone = (Bitmap)frame.Clone();
+                _ = Task.Run(() => RunOcrAsync(clone, target));
+            }
+
             var signature = BuildSignature(frame);
             var difference = _lastSignature is null ? 1d : SignatureDifference(_lastSignature, signature);
             _lastSignature = signature;
 
-            var now = DateTime.UtcNow;
             var meaningfulVisualChange = difference >= _config.VisualChangeThreshold;
             var heartbeatDue = now - _lastSentUtc >= TimeSpan.FromSeconds(_config.HeartbeatSeconds);
             var semanticChangeDue = Volatile.Read(ref _semanticChangedPending) == 1;
@@ -337,7 +411,7 @@ internal sealed class ObserverContext : ApplicationContext
                 if (eventSaveDue) _lastEventSavedUtc = now;
             }
 
-            if (_config.CloudEnabled && now - _lastSentUtc >= TimeSpan.FromMilliseconds(_config.MinimumCloudIntervalMs))
+            if (_config.CloudEnabled && !_paused && now - _lastSentUtc >= TimeSpan.FromMilliseconds(_config.MinimumCloudIntervalMs))
             {
                 var semanticForUpload = GetSemanticForUpload(now);
                 QueueCloudFrame(jpg, now, difference, semanticForUpload);
@@ -382,16 +456,14 @@ internal sealed class ObserverContext : ApplicationContext
     {
         if (_sessionDir is null) return;
         _frameNumber++;
-        var path = Path.Combine(_sessionDir, $"frame_{_frameNumber:0000}_{at:HHmmss}.jpg");
-        File.WriteAllBytes(path, jpg);
+        var path = _frames.Save(jpg, at);
         File.AppendAllText(Path.Combine(_sessionDir, "frames.jsonl"), JsonSerializer.Serialize(new
         {
             frame = _frameNumber,
             at,
             visualDifference = Math.Round(difference, 5),
-            file = Path.GetFileName(path),
+            file = path,
         }) + Environment.NewLine);
-        TrimSessionFrames(_sessionDir, _config.MaxLocalFrames);
     }
 
     private string? GetSemanticForUpload(DateTime now)
@@ -416,7 +488,7 @@ internal sealed class ObserverContext : ApplicationContext
 
     private static bool IsRichExecutionSemantic(string semantic)
     {
-        if (Regex.IsMatch(semantic, @"JARVIS_OCR_EXECUTION\\|STATUS=(?:PREPARING|PENDING|OPEN)", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(semantic, @"JARVIS_OCR_EXECUTION\|STATUS=(?:PREPARING|PENDING|OPEN)", RegexOptions.IgnoreCase)) return true;
         if (semantic.Contains("Cancel project order", StringComparison.OrdinalIgnoreCase)) return true;
         return Regex.IsMatch(
             semantic,
@@ -504,7 +576,7 @@ internal sealed class ObserverContext : ApplicationContext
             imageBase64 = Convert.ToBase64String(jpg),
             visualDifference = difference,
             source = "TradingView Desktop",
-            observerVersion = "0.9.0",
+            observerVersion = ObserverInfo.Version,
             semanticText = string.IsNullOrWhiteSpace(semanticText) ? null : SanitizeSensitive(semanticText),
         });
 
@@ -515,7 +587,7 @@ internal sealed class ObserverContext : ApplicationContext
         if (!string.IsNullOrWhiteSpace(_config.DeviceId))
         {
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-observer-version", ObserverInfo.Version);
             req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
         }
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -575,7 +647,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-observer-version", ObserverInfo.Version);
             req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
             using var controlCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var res = await _http.SendAsync(req, controlCts.Token);
@@ -665,8 +737,7 @@ internal sealed class ObserverContext : ApplicationContext
             : null;
 
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(action)) return;
-        if (string.Equals(_lastObsidianCommandId, id, StringComparison.Ordinal)) return;
-        _lastObsidianCommandId = id;
+        if (!await ShouldExecuteCommandAsync(id!, "/api/obsidian/result", action!)) return;
 
         string? data = null;
         string? error = null;
@@ -776,8 +847,7 @@ internal sealed class ObserverContext : ApplicationContext
             : Array.Empty<string>();
 
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(action)) return;
-        if (string.Equals(_lastDesktopCommandId, id, StringComparison.Ordinal)) return;
-        _lastDesktopCommandId = id;
+        if (!await ShouldExecuteCommandAsync(id!, "/api/desktop/result", action!)) return;
 
         var command = new DesktopActionCommand(
             id!,
@@ -877,6 +947,8 @@ internal sealed class ObserverContext : ApplicationContext
             error = result.Error,
             completedAt = result.CompletedAt,
         });
+        // Record completion first: if the post fails the cloud re-delivers and we re-post, never re-run.
+        _ledger.Complete(result.Id, body);
 
         try
         {
@@ -884,7 +956,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-observer-version", ObserverInfo.Version);
             req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
@@ -900,14 +972,9 @@ internal sealed class ObserverContext : ApplicationContext
                 status = (int)response.StatusCode,
             });
 
-            if (!response.IsSuccessStatusCode)
-            {
-                _lastDesktopCommandId = null;
-            }
         }
         catch (Exception ex)
         {
-            _lastDesktopCommandId = null;
             Log(new { type = "desktop.command.result_error", at = DateTime.UtcNow, id = result.Id, error = ex.Message });
         }
     }
@@ -979,6 +1046,7 @@ internal sealed class ObserverContext : ApplicationContext
             error = error is null ? null : TrimForBridge(error, 2_000),
             completedAt = DateTime.UtcNow,
         });
+        _ledger.Complete(id, body);
 
         try
         {
@@ -986,7 +1054,7 @@ internal sealed class ObserverContext : ApplicationContext
             ApplyVercelBypassHeaders(req);
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
             req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
-            req.Headers.Add("x-jarvis-observer-version", "0.9.0");
+            req.Headers.Add("x-jarvis-observer-version", ObserverInfo.Version);
             req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
             req.Content = new StringContent(body, Encoding.UTF8, "application/json");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -1002,16 +1070,206 @@ internal sealed class ObserverContext : ApplicationContext
                 status = (int)response.StatusCode,
             });
 
-            if (!response.IsSuccessStatusCode)
+        }
+        catch (Exception ex)
+        {
+            Log(new { type = "obsidian.command.result_error", at = DateTime.UtcNow, id, error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Idempotency gate for cloud commands. A command id runs at most once on this PC;
+    /// if the cloud re-delivers it (its result never arrived) the stored result is re-posted.
+    /// </summary>
+    private async Task<bool> ShouldExecuteCommandAsync(string id, string resultPath, string action)
+    {
+        if (_ledger.TryBegin(id, out var prior)) return true;
+        if (prior?.ResultJson is string stored)
+        {
+            await PostDeviceJsonAsync(resultPath, stored, TimeSpan.FromSeconds(10));
+            return false;
+        }
+        if (prior is not null && DateTime.UtcNow - prior.At > TimeSpan.FromMinutes(30))
+        {
+            // Started but never finished (app restarted mid-command): report failure instead of re-running.
+            var failure = JsonSerializer.Serialize(new
             {
-                // Allow the command to be attempted again if the cloud could not acknowledge it.
-                _lastObsidianCommandId = null;
+                id,
+                action = action.ToUpperInvariant(),
+                ok = false,
+                summary = "Command was interrupted before it finished; JARVIS did not re-run it.",
+                data = (string?)null,
+                evidence = Array.Empty<string>(),
+                error = "INTERRUPTED",
+                completedAt = DateTime.UtcNow,
+            });
+            _ledger.Complete(id, failure);
+            await PostDeviceJsonAsync(resultPath, failure, TimeSpan.FromSeconds(10));
+        }
+        return false;
+    }
+
+    private async Task<HttpResponseMessage?> PostDeviceJsonAsync(string path, string json, TimeSpan timeout)
+    {
+        if (string.IsNullOrWhiteSpace(_config.ServerUrl) || string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken)) return null;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, _config.ServerUrl.TrimEnd('/') + path);
+            ApplyVercelBypassHeaders(req);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
+            req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
+            req.Headers.Add("x-jarvis-observer-version", ObserverInfo.Version);
+            req.Headers.Add("x-jarvis-capabilities", string.Join(",", _agentCapabilities));
+            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var cts = new CancellationTokenSource(timeout);
+            return await _http.SendAsync(req, cts.Token);
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("device.post.error:" + path + ":" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Every 3 s: bundle finished trades, keep pre-entry frames pinned, trim disk,
+    /// and sync the journal + key frames (with retry) when the cloud is reachable.
+    /// </summary>
+    private async Task SyncTickAsync()
+    {
+        if (Interlocked.Exchange(ref _syncBusy, 1) == 1) return;
+        try
+        {
+            var now = DateTime.UtcNow;
+            List<PendingBundle> due;
+            DateTime? pin = null;
+            lock (_journalGate)
+            {
+                due = _pendingBundles.Where(b => b.DueAt <= now).ToList();
+                _pendingBundles.RemoveAll(b => b.DueAt <= now);
+                var open = _lifecycle.OpenTrade;
+                var start = open is not null ? (open.PreparedAt ?? open.OpenedAt) : _lifecycle.StagedSince;
+                if (start is DateTime s) pin = s.AddMinutes(-15);
+                foreach (var bundle in _pendingBundles)
+                {
+                    var from = (bundle.Trade.PreparedAt ?? bundle.Trade.OpenedAt).AddMinutes(-15);
+                    if (pin is null || from < pin) pin = from;
+                }
+                foreach (var bundle in due)
+                {
+                    var from = (bundle.Trade.PreparedAt ?? bundle.Trade.OpenedAt).AddMinutes(-15);
+                    if (pin is null || from < pin) pin = from;
+                }
+            }
+            _frames.SetPin(pin);
+
+            foreach (var bundle in due)
+            {
+                try
+                {
+                    var trade = bundle.Trade;
+                    var from = (trade.PreparedAt ?? trade.OpenedAt).AddMinutes(-15);
+                    var to = (trade.ClosedAt ?? now).AddMinutes(5);
+                    var result = _frames.BundleTrade(trade.Id, from, to, bundle.Events, JsonSerializer.Serialize(trade, TradeJournalStore.Json));
+                    foreach (var keyFrame in result.KeyFrames)
+                    {
+                        var at = FrameStore.ParseTime(keyFrame) ?? now;
+                        _frameOutbox.Enqueue(trade.Id + "_" + Path.GetFileNameWithoutExtension(keyFrame), JsonSerializer.Serialize(new { tradeId = trade.Id, capturedAt = at, path = keyFrame }));
+                    }
+                    WriteTradeNote(trade, bundle.Events, result.Folder);
+                    Log(new { type = "journal.trade_bundled", at = now, tradeId = trade.Id, folder = result.Folder, keyFrames = result.KeyFrames.Count });
+                }
+                catch (Exception ex)
+                {
+                    Log(new { type = "journal.bundle_error", at = now, tradeId = bundle.Trade.Id, error = ex.Message });
+                }
+            }
+
+            if (now - _lastCleanupUtc >= TimeSpan.FromMinutes(1))
+            {
+                _lastCleanupUtc = now;
+                _frames.Cleanup();
+            }
+
+            if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken)) return;
+
+            var batch = _eventOutbox.TakeDue(50);
+            if (batch.Count > 0)
+            {
+                var json = "{\"events\":[" + string.Join(",", batch.Select(item => item.Json)) + "]}";
+                using var response = await PostDeviceJsonAsync("/api/trading/observer-events", json, TimeSpan.FromSeconds(20));
+                if (response is not null && response.IsSuccessStatusCode)
+                {
+                    _eventOutbox.Ack(batch.Select(item => item.File));
+                }
+                else if (response is not null && (int)response.StatusCode == 400)
+                {
+                    // Invalid payload will never succeed; keep a copy locally (journal) and drop it from the queue.
+                    Log(new { type = "journal.sync_rejected", at = now, count = batch.Count });
+                    _eventOutbox.Ack(batch.Select(item => item.File));
+                }
+                else
+                {
+                    _eventOutbox.Fail(batch.Select(item => item.File));
+                }
+            }
+
+            if (!_paused)
+            {
+                foreach (var item in _frameOutbox.TakeDue(3))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(item.Json);
+                        var path = doc.RootElement.GetProperty("path").GetString();
+                        if (path is null || !File.Exists(path))
+                        {
+                            _frameOutbox.Ack(new[] { item.File });
+                            continue;
+                        }
+                        var body = JsonSerializer.Serialize(new
+                        {
+                            tradeId = doc.RootElement.GetProperty("tradeId").GetString(),
+                            capturedAt = doc.RootElement.GetProperty("capturedAt").GetDateTime(),
+                            imageBase64 = Convert.ToBase64String(File.ReadAllBytes(path)),
+                        });
+                        using var response = await PostDeviceJsonAsync("/api/trading/observer-frames", body, TimeSpan.FromSeconds(30));
+                        if (response is not null && (response.IsSuccessStatusCode || (int)response.StatusCode == 400)) _frameOutbox.Ack(new[] { item.File });
+                        else _frameOutbox.Fail(new[] { item.File });
+                    }
+                    catch
+                    {
+                        _frameOutbox.Fail(new[] { item.File });
+                    }
+                }
             }
         }
         catch (Exception ex)
         {
-            _lastObsidianCommandId = null;
-            Log(new { type = "obsidian.command.result_error", at = DateTime.UtcNow, id, error = ex.Message });
+            LogRateLimited("sync.tick.error:" + ex.GetType().Name, TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            Volatile.Write(ref _syncBusy, 0);
+        }
+    }
+
+    /// <summary>Human-readable trade note next to the frames (and in the Obsidian vault when configured).</summary>
+    private void WriteTradeNote(JournalTrade trade, IReadOnlyList<JournalEvent> events, string folder)
+    {
+        var note = TradeNotes.Render(trade, events);
+        File.WriteAllText(Path.Combine(folder, "trade.md"), note);
+        var vault = _config.ObsidianVaultPath;
+        if (string.IsNullOrWhiteSpace(vault) || !Directory.Exists(vault)) return;
+        try
+        {
+            var dir = Path.Combine(vault, "JARVIS", "Trading", "Trades", trade.OpenedAt.ToLocalTime().ToString("yyyy-MM"));
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, TradeNotes.FileName(trade)), note);
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("vault.trade_note.error:" + ex.GetType().Name, TimeSpan.FromMinutes(5));
         }
     }
 
@@ -1494,7 +1752,7 @@ internal sealed class ObserverContext : ApplicationContext
         return true;
     }
 
-    private static string? PromptSecret(string prompt, string title)
+    private static string? PromptSecret(string prompt, string title, bool masked = true)
     {
         using var form = new Form
         {
@@ -1521,7 +1779,7 @@ internal sealed class ObserverContext : ApplicationContext
             Left = 18,
             Top = 95,
             Width = 505,
-            UseSystemPasswordChar = true,
+            UseSystemPasswordChar = masked,
         };
         var ok = new System.Windows.Forms.Button
         {
@@ -1590,19 +1848,49 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
+    private const string DefaultServerUrl = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+
+    /// <summary>Respects the configured server; only fills it in when missing. Change it from the tray menu.</summary>
     private void NormalizeServerUrl()
     {
-        const string current = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
-        _config.ServerUrl = current;
+        if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            _config.ServerUrl = DefaultServerUrl;
+        }
+        _config.ServerUrl = _config.ServerUrl!.TrimEnd('/');
         _config.AccessBootstrapUrl = null;
+    }
+
+    private void PromptServerUrl()
+    {
+        var value = PromptSecret(
+            "JARVIS server address (https://...). Use your production domain once JARVIS is deployed there.\n\nCurrent: " + _config.ServerUrl,
+            "JARVIS Local Agent — server address",
+            masked: false);
+        if (string.IsNullOrWhiteSpace(value)) return;
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            MessageBox.Show("Enter a full https:// address.", "JARVIS Local Agent", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        var changed = !string.Equals(uri.GetLeftPart(UriPartial.Authority), new Uri(_config.ServerUrl!).GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
+        _config.ServerUrl = uri.GetLeftPart(UriPartial.Authority);
+        if (changed) ClearPairingState(); // a different deployment needs its own pairing
+        SaveConfig();
+        Log(new { type = "observer.server_url_changed", at = DateTime.UtcNow, url = _config.ServerUrl });
+        MessageBox.Show(changed ? "Server saved. Pair again: choose Show / New pairing code." : "Server saved.", "JARVIS Local Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void NormalizePerformanceConfig()
     {
-        // Upgrade older local configs to the responsive v0.4.5 observation cadence.
-        _config.MinimumCloudIntervalMs = Math.Min(_config.MinimumCloudIntervalMs, 700);
-        _config.HeartbeatSeconds = Math.Min(_config.HeartbeatSeconds, 3);
-        _config.SemanticPollMs = Math.Min(_config.SemanticPollMs, 250);
+        _config.MinimumCloudIntervalMs = Math.Clamp(_config.MinimumCloudIntervalMs, 500, 5000);
+        _config.HeartbeatSeconds = Math.Clamp(_config.HeartbeatSeconds, 2, 30);
+        // A full accessibility-tree walk is expensive for TradingView; OCR carries the fast path.
+        _config.SemanticPollMs = _config.SemanticPollMs < 500 ? 750 : Math.Min(_config.SemanticPollMs, 3000);
+        _config.RollingMinutes = Math.Clamp(_config.RollingMinutes, 20, 240);
+        _config.RetentionDays = Math.Clamp(_config.RetentionDays, 3, 365);
+        if (string.IsNullOrWhiteSpace(_config.InstallId)) _config.InstallId = Guid.NewGuid().ToString("N")[..10];
+        if (!string.Equals(_config.LocalRecordingMode, "FOLLOW_CLOUD", StringComparison.OrdinalIgnoreCase)) _config.LocalRecordingMode = "ALWAYS";
     }
 
     private void SaveConfig()
@@ -1615,10 +1903,10 @@ internal sealed class ObserverContext : ApplicationContext
 
     private void TogglePause()
     {
-        _paused = !_paused;
-        _tray.Text = _paused ? "JARVIS Local Agent — paused" : (_tradingViewDetected ? "JARVIS Local Agent — ACTIVE" : "JARVIS Local Agent — standby");
-        _tray.ShowBalloonTip(1800, "JARVIS TRADING OBSERVER", _paused ? "Observation paused." : "Observation resumed.", ToolTipIcon.Info);
-        Log(new { type = _paused ? "observer.paused" : "observer.resumed", at = DateTime.UtcNow });
+        _localPaused = !_localPaused;
+        _tray.Text = _localPaused ? "JARVIS Local Agent — recording paused" : (_tradingViewDetected ? "JARVIS Local Agent — ACTIVE" : "JARVIS Local Agent — standby");
+        _tray.ShowBalloonTip(1800, "JARVIS TRADING OBSERVER", _localPaused ? "Local recording paused. Nothing is captured." : "Local recording resumed.", ToolTipIcon.Info);
+        Log(new { type = _localPaused ? "observer.local_paused" : "observer.local_resumed", at = DateTime.UtcNow });
     }
 
     private void EnsureConfigExists()
@@ -1660,15 +1948,32 @@ internal sealed class ObserverContext : ApplicationContext
         if (shouldLog) Log(new { type, at = now });
     }
 
-    private static IntPtr FindTradingViewWindow()
+    /// <summary>Cached TradingView window: no full process scan on every tick.</summary>
+    private IntPtr TradingViewWindow()
+    {
+        var cached = _cachedWindow;
+        if (cached != IntPtr.Zero && IsWindow(cached))
+        {
+            return IsWindowVisible(cached) && !IsIconic(cached) ? cached : IntPtr.Zero;
+        }
+        var now = DateTime.UtcNow;
+        if (now - _lastWindowScanUtc < TimeSpan.FromSeconds(2)) return IntPtr.Zero;
+        _lastWindowScanUtc = now;
+        _cachedWindow = FindTradingViewWindowHandle();
+        return _cachedWindow != IntPtr.Zero && IsWindowVisible(_cachedWindow) && !IsIconic(_cachedWindow) ? _cachedWindow : IntPtr.Zero;
+    }
+
+    /// <summary>True while the TradingView window exists, even minimized.</summary>
+    private bool TradingViewRunning() => _cachedWindow != IntPtr.Zero && IsWindow(_cachedWindow);
+
+    private static IntPtr FindTradingViewWindowHandle()
     {
         foreach (var process in Process.GetProcesses())
         {
             try
             {
-                var name = process.ProcessName;
-                if (!name.Contains("TradingView", StringComparison.OrdinalIgnoreCase)) continue;
-                if (process.MainWindowHandle == IntPtr.Zero || !IsWindowVisible(process.MainWindowHandle) || IsIconic(process.MainWindowHandle)) continue;
+                if (!process.ProcessName.Contains("TradingView", StringComparison.OrdinalIgnoreCase)) continue;
+                if (process.MainWindowHandle == IntPtr.Zero) continue;
                 return process.MainWindowHandle;
             }
             catch
@@ -1908,16 +2213,6 @@ internal sealed class ObserverContext : ApplicationContext
         return stream.ToArray();
     }
 
-    private static void TrimSessionFrames(string dir, int max)
-    {
-        var files = Directory.GetFiles(dir, "frame_*.jpg").OrderBy(File.GetCreationTimeUtc).ToArray();
-        if (files.Length <= max) return;
-        foreach (var file in files.Take(files.Length - max))
-        {
-            try { File.Delete(file); } catch { }
-        }
-    }
-
     private static void OpenFolder(string path)
     {
         Process.Start(new ProcessStartInfo("explorer.exe", path) { UseShellExecute = true });
@@ -1932,6 +2227,10 @@ internal sealed class ObserverContext : ApplicationContext
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -2015,6 +2314,7 @@ internal sealed class ObserverConfig
     [JsonPropertyName("jpegQuality")]
     public long JpegQuality { get; set; } = 62;
 
+    /// <summary>Unused since 1.0 (frames are retained by age, see rollingMinutes/retentionDays). Kept for config compatibility.</summary>
     [JsonPropertyName("maxLocalFrames")]
     public int MaxLocalFrames { get; set; } = 600;
 
@@ -2023,6 +2323,26 @@ internal sealed class ObserverConfig
 
     [JsonPropertyName("maxSemanticChars")]
     public int MaxSemanticChars { get; set; } = 20000;
+
+    /// <summary>ALWAYS (default): record locally whenever TradingView is open. FOLLOW_CLOUD: only while Jarvis says WATCH.</summary>
+    [JsonPropertyName("localRecordingMode")]
+    public string LocalRecordingMode { get; set; } = "ALWAYS";
+
+    /// <summary>Minutes of full-rate frames kept on disk so the setup before an entry is always available.</summary>
+    [JsonPropertyName("rollingMinutes")]
+    public int RollingMinutes { get; set; } = 45;
+
+    /// <summary>Days of one-per-minute context frames kept. Trade folders are kept indefinitely.</summary>
+    [JsonPropertyName("retentionDays")]
+    public int RetentionDays { get; set; } = 30;
+
+    /// <summary>Stable id for this install, used in journal trade ids.</summary>
+    [JsonPropertyName("installId")]
+    public string? InstallId { get; set; }
+
+    /// <summary>Optional: absolute path of the Obsidian vault folder. Trade notes are written to JARVIS/Trading/Trades.</summary>
+    [JsonPropertyName("obsidianVaultPath")]
+    public string? ObsidianVaultPath { get; set; }
 
     [JsonIgnore]
     public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && (!string.IsNullOrWhiteSpace(DeviceToken) || !string.IsNullOrWhiteSpace(TradingSecret));

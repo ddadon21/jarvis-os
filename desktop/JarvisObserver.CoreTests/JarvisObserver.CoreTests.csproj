@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Platform-neutral tests for the Observer's pure logic (journal, outbox, frames, ledger). Runs on Linux and Windows. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>JarvisObserver</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../JarvisObserver/TradeJournal.cs" Link="TradeJournal.cs" />
+    <Compile Include="../JarvisObserver/ObserverStorage.cs" Link="ObserverStorage.cs" />
+    <Compile Include="../JarvisObserver/TradeNotes.cs" Link="TradeNotes.cs" />
+  </ItemGroup>
+</Project>

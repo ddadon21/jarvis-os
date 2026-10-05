@@ -1,4 +1,4 @@
-# JARVIS Local Agent 0.9.0
+# JARVIS Local Agent 1.0.0
 
 Windows x64 companion for JARVIS. It contains the read-only TradingView Observer, the local Obsidian bridge, the JARVIS Desktop Action Runtime, controlled Chrome/Edge browser actions, and workspace-scoped Codex / Claude Code execution.
 
@@ -6,7 +6,7 @@ Windows x64 companion for JARVIS. It contains the read-only TradingView Observer
 1. Right-click the existing JARVIS / Observer tray icon and choose Exit.
 2. Extract this ZIP to a new folder and run JarvisObserver.exe.
 3. Keep the existing configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
-4. Refresh JARVIS. The paired Local Agent should report 0.9.0 after the new agent reconnects.
+4. Refresh JARVIS. The paired Local Agent should report 1.0.0 after the new agent reconnects.
 
 ## Obsidian bridge
 JARVIS keeps Supabase as the authoritative structured database. Obsidian is the long-form knowledge vault.
@@ -72,6 +72,20 @@ Security boundaries:
 - JARVIS reports Codex / Claude as available only when their Windows CLI executables are actually present on PATH when the Local Agent starts.
 
 After installing a coding CLI, restart the Local Agent so capability detection is refreshed.
+
+## What's new in 1.0 — the trade journal
+Without broker API access, the Observer is the record of every trade. Version 1.0 makes that record durable:
+
+- **Records whenever TradingView is open.** Local recording no longer waits for the cloud. "Pause / Resume local recording" in the tray stops it. Set `"localRecordingMode": "FOLLOW_CLOUD"` in config.json to only record while JARVIS says Watch.
+- **Keeps the setup before every entry.** Full-rate frames are kept for the last 45 minutes (`rollingMinutes`). While an order is being prepared or a position is open, nothing from 15 minutes before it is deleted.
+- **Local trade journal.** Every prepare, working order, cancel, entry, stop/target/size change and exit is written to `%LOCALAPPDATA%\JarvisObserver\journal\events.jsonl`. A state has to be read twice in a row before it counts, so one bad read never creates a fake trade.
+- **Trade folders.** Five minutes after each exit, `trades\<trade id>\` gets the frames from 15 minutes before preparation to 5 minutes after exit, `events.json`, `trade.json` and a readable `trade.md` with R multiple, best/worst excursion and a timeline. Set `"obsidianVaultPath"` to also write the note into `JARVIS/Trading/Trades` in your vault.
+- **Nothing is lost offline.** Journal events and key frames wait in `outbox\` and retry with backoff until JARVIS confirms them. Duplicates are ignored by the server.
+- **Commands never run twice.** Finished desktop/Obsidian command results are remembered in `command-ledger.json`; if JARVIS re-sends a command, the stored result is re-sent instead of running it again.
+- **Server address is a setting.** Tray → "Set JARVIS server address". Changing to a different deployment asks you to pair again.
+- **Lighter on your PC.** One window capture per cycle feeds both the change detector and the text reader; the TradingView window is cached instead of scanning every process 4 times a second; the accessibility read runs every 750 ms instead of 250 ms. Minimizing TradingView no longer ends the session.
+
+Disk use: about 45 minutes of full-rate frames, one frame per minute for 30 days (`retentionDays`), plus trade folders (kept until you delete them).
 
 ## Trading Observer
 - Waiting: no visible order setup or position.
