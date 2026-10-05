@@ -8,15 +8,28 @@ import { FINANCE_IMPORT } from '../lib/finance-import.ts';
 import { deriveFinanceFocus } from '../lib/finance-focus.ts';
 
 const totals = math.financeTotals(FINANCE_IMPORT.accounts);
+// Expected values are recomputed independently from the snapshot so a balance refresh
+// (lib/finance-import.ts) does not break the reconciliation checks.
+const c = (n) => Math.round(n * 100);
+const sumOf = (items, field = 'current') => items.reduce((n, a) => n + c(a[field] ?? 0), 0) / 100;
+const banks = FINANCE_IMPORT.accounts.filter(a => a.type === 'depository');
+const debts = FINANCE_IMPORT.accounts.filter(a => a.type === 'credit' || a.type === 'loan');
+const owed = (items) => items.reduce((n, a) => n + c(Math.max(0, a.current)), 0) / 100;
+const expected = {
+  liquidity: sumOf(banks),
+  availableCash: sumOf(banks, 'available'),
+  businessCash: sumOf(banks.filter(a => a.ownership === 'BUSINESS')),
+  personalDebt: owed(debts.filter(a => a.ownership !== 'AUTHORIZED_USER')),
+  investmentValue: sumOf(FINANCE_IMPORT.accounts.filter(a => a.type === 'investment')),
+  authorizedUserBalance: owed(debts.filter(a => a.ownership === 'AUTHORIZED_USER')),
+};
+expected.personalNetWorth = (c(expected.liquidity) + c(expected.investmentValue) - c(expected.personalDebt)) / 100;
+expected.providerNetWorth = (c(expected.personalNetWorth) - c(expected.authorizedUserBalance)) / 100;
 test('refreshed balances reconcile with available cash and separate AU debt', () => {
-  assert.equal(totals.liquidity, 538.70);
-  assert.equal(totals.availableCash, 14.34);
-  assert.equal(totals.businessCash, 528.10);
-  assert.equal(totals.personalDebt, 1138.31);
-  assert.equal(totals.investmentValue, 1.78);
-  assert.equal(totals.authorizedUserBalance, 8205.97);
-  assert.equal(totals.personalNetWorth, -597.83);
-  assert.equal(totals.providerNetWorth, -8803.80);
+  assert.ok(banks.length > 0 && debts.length > 0, 'snapshot has bank and debt accounts');
+  for (const [key, value] of Object.entries(expected)) assert.equal(totals[key], value, key);
+  assert.ok(totals.authorizedUserBalance > 0, 'authorized-user debt is tracked separately');
+  assert.equal(totals.providerNetWorth, (c(totals.personalNetWorth) - c(totals.authorizedUserBalance)) / 100);
 });
 test('missing available balance is unknown, not replaced with current balance', () => {
   const accounts = FINANCE_IMPORT.accounts.map(a => a.key === 'bofa-business' ? { ...a, available: null } : a);
@@ -65,11 +78,11 @@ function runtime(existing) {
 test('new import replaces stale snapshot cache but preserves newer account updates', async () => {
   const old = { ...FINANCE_IMPORT, asOf: '2026-09-19T19:25:00Z', accounts: [{ ...FINANCE_IMPORT.accounts[0], current: 999 }] };
   const next = await runtime(old).getOrSeedFinanceState();
-  assert.equal(next.metrics.liquidity, 538.70);
+  assert.equal(next.metrics.liquidity, expected.liquidity);
   assert.equal(next.asOf, FINANCE_IMPORT.asOf);
-  assert.equal(next.accounts.find(a => a.key === 'bofa-business').available, 4.74);
+  assert.equal(next.accounts.find(a => a.key === 'bofa-business').available, FINANCE_IMPORT.accounts.find(a => a.key === 'bofa-business').available);
   assert.equal(next.accounts[0].balanceFreshness, 'unknown');
-  const newer = { ...FINANCE_IMPORT, mode: 'DIRECT', asOf: '2026-09-26T04:00:00Z', accounts: [{ ...FINANCE_IMPORT.accounts[0], current: 1000 }] };
+  const newer = { ...FINANCE_IMPORT, mode: 'DIRECT', asOf: new Date(Date.parse(FINANCE_IMPORT.asOf) + 86_400_000).toISOString(), accounts: [{ ...FINANCE_IMPORT.accounts[0], current: 1000 }] };
   const kept = await runtime(newer).getOrSeedFinanceState();
   assert.equal(kept.mode, 'DIRECT');
   assert.equal(kept.metrics.liquidity, 1000);
