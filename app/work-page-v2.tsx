@@ -129,10 +129,10 @@ const StableWorkforcePanel = memo(WorkforcePanel);
 const StableObsidianBridgePanel = memo(ObsidianBridgePanel);
 
 const sectors = [
+  { id: "LIFE" as const, icon: Target, title: "LIFE", signal: "ALIGN" },
   { id: "TRADING" as const, icon: TrendingUp, title: "TRADING", signal: "PASS → PAYOUT" },
   { id: "FINANCE" as const, icon: WalletCards, title: "FINANCE", signal: "$100M CASH" },
   { id: "SENTRYOPS" as const, icon: BriefcaseBusiness, title: "SENTRYOPS", signal: "BUILD → CUSTOMER" },
-  { id: "LIFE" as const, icon: Target, title: "LIFE", signal: "ALIGN" },
 ];
 
 function quickCoreEvent(summary: string) {
