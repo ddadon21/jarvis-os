@@ -1,6 +1,7 @@
 import { getCache } from "@vercel/functions";
 import type { JarvisGovernancePolicy } from "./jarvis-core-policy";
 import { createClient } from "@supabase/supabase-js";
+import { durableRead, durableWrite } from "./jarvis-db";
 
 export type RuntimeDomain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE" | "CORE";
 
@@ -398,13 +399,59 @@ export async function getLastPulseAt(): Promise<string | null> {
 }
 
 export async function getRecentEvents(): Promise<RuntimeEvent[]> {
-  return (await readValue<RuntimeEvent[]>(RECENT_EVENTS_KEY)) ?? [];
+  const cached = await readValue<RuntimeEvent[]>(RECENT_EVENTS_KEY);
+  if (cached && cached.length) return cached;
+  // Cache was evicted or this is a fresh region: rebuild from the durable log.
+  const durable = await listDurableEvents({ limit: 100 });
+  if (durable.length) await writeValue(RECENT_EVENTS_KEY, durable);
+  return durable;
 }
 
 export async function appendRuntimeEvent(event: RuntimeEvent): Promise<void> {
-  const current = await getRecentEvents();
+  const current = (await readValue<RuntimeEvent[]>(RECENT_EVENTS_KEY)) ?? [];
   const next = [event, ...current.filter((item) => item.id !== event.id)].slice(0, 100);
   await writeValue(RECENT_EVENTS_KEY, next);
+  await durableWrite("jarvis_runtime_events", ({ db, workspaceId }) =>
+    db.from("jarvis_runtime_events").upsert({
+      id: event.id,
+      workspace_id: workspaceId,
+      type: event.type,
+      domain: event.domain,
+      source: event.source,
+      importance: event.importance,
+      occurred_at: event.occurredAt,
+      received_at: event.receivedAt,
+      summary: event.summary,
+    }, { onConflict: "id" }),
+  );
+}
+
+/** Durable event history (beyond the 100 most recent cached events). */
+export async function listDurableEvents(options: { type?: string; domain?: RuntimeDomain; since?: string; limit?: number } = {}): Promise<RuntimeEvent[]> {
+  const rows = await durableRead<Array<{
+    id: string; type: string; domain: RuntimeDomain; source: string; importance: RuntimeEvent["importance"];
+    occurred_at: string; received_at: string; summary: string;
+  }>>("jarvis_runtime_events", ({ db, workspaceId }) => {
+    let query = db.from("jarvis_runtime_events")
+      .select("id,type,domain,source,importance,occurred_at,received_at,summary")
+      .eq("workspace_id", workspaceId)
+      .order("occurred_at", { ascending: false })
+      .limit(Math.min(1000, options.limit ?? 100));
+    if (options.type) query = query.eq("type", options.type);
+    if (options.domain) query = query.eq("domain", options.domain);
+    if (options.since) query = query.gte("occurred_at", options.since);
+    return query;
+  });
+  return (rows ?? []).map((row) => ({
+    id: row.id,
+    type: row.type,
+    domain: row.domain,
+    source: row.source,
+    importance: row.importance,
+    occurredAt: row.occurred_at,
+    receivedAt: row.received_at,
+    summary: row.summary,
+  }));
 }
 
 export async function getWorkforceState(): Promise<WorkforceState | null> {

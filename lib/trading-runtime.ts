@@ -1,5 +1,8 @@
 import { getCache } from "@vercel/functions";
 import { appendRuntimeEvent, createRuntimeEvent } from "./jarvis-runtime";
+import { estimatePnl, pointValue, sessionDay } from "./trading-session";
+import { cachedTradingRules, getTradingRules } from "./trading-rules";
+import { persistTradingTransition } from "./trading-store";
 
 export type TradingConnectionState = "DISCONNECTED" | "CONNECTING" | "OBSERVING" | "DEGRADED";
 export type TradingStage = "PASS CURRENT ACCOUNT" | "FIRST PAYOUT" | "REPEAT PAYOUTS" | "SCALE FUNDED CAPITAL";
@@ -93,6 +96,15 @@ export type JournalTrade = {
   confirmation: string | null;
   followedRules: boolean | null;
   notes: string | null;
+  /** Learning fields: how the trade was planned and how far price went. */
+  initialStop?: number | null;
+  initialTarget?: number | null;
+  maxQuantity?: number | null;
+  mfePrice?: number | null;
+  maePrice?: number | null;
+  preparedAt?: string | null;
+  pnlSource?: "BROKER" | "ESTIMATED" | null;
+  sessionDay?: string;
 };
 
 export type TradingRuntimeState = {
@@ -109,6 +121,8 @@ export type TradingRuntimeState = {
   observer?: TradingObserverState;
   guardrails: TradingGuardrailState;
   journalCount: number;
+  /** When the current order preparation / working order first appeared. */
+  stagedSince?: string | null;
   today: {
     trades: number;
     wins: number;
@@ -186,6 +200,7 @@ export async function restoreTradingState(state: TradingRuntimeState): Promise<T
 }
 
 export async function ingestTradingObservation(input: TradingObservationInput): Promise<TradingRuntimeState> {
+  await getTradingRules().catch(() => null);
   const previous = await getTradingState();
   // A slower vision response must not replace a more recent screen state.
   const incomingAt = Date.parse(input.observedAt ?? "");
@@ -193,6 +208,11 @@ export async function ingestTradingObservation(input: TradingObservationInput): 
   if (Number.isFinite(incomingAt) && Number.isFinite(priorAt) && incomingAt < priorAt) return previous;
   const next = buildState(input, previous);
   await writeState(next);
+  try {
+    await persistTradingTransition(previous, next);
+  } catch (error) {
+    console.warn("Durable trading persistence failed", error instanceof Error ? error.message : error);
+  }
 
   const previousIds = new Set([...previous.openTrades, ...previous.recentTrades].map((trade) => trade.id));
   const newTrades = [...next.openTrades, ...next.recentTrades].filter((trade) => !previousIds.has(trade.id));
@@ -265,20 +285,42 @@ export async function ingestTradingObservation(input: TradingObservationInput): 
 function buildState(input: TradingObservationInput, previous: TradingRuntimeState | null): TradingRuntimeState {
   const observedAt = normalizeDate(input.observedAt) ?? new Date().toISOString();
   const priorAccount = previous?.account;
+  const rules = cachedTradingRules();
+  const connection = input.connection ?? priorAccount?.connection ?? "DISCONNECTED";
+  const observer = normalizeObserver(input.observer, previous?.observer, connection === "OBSERVING" ? observedAt : null);
+
+  const staged = observer.status === "PENDING" || (observer.intentState === "PREPARING" && observer.status !== "OPEN");
+  const priorStagedSince = previous?.stagedSince ?? null;
+  const stagedSince = staged ? (priorStagedSince ?? observer.observedAt ?? observedAt) : observer.status === "OPEN" ? priorStagedSince : null;
+
+  const priorTrades = new Map<string, JournalTrade>();
+  for (const trade of [...(previous?.recentTrades ?? []), ...(previous?.openTrades ?? [])]) priorTrades.set(trade.id, trade);
+
   const incomingTrades = (input.trades ?? []).map((trade) => normalizeTrade(trade, input.provider ?? priorAccount?.provider ?? "UNKNOWN", observedAt));
-  const tradeMap = new Map<string, JournalTrade>();
-  for (const trade of [...(previous?.recentTrades ?? []), ...(previous?.openTrades ?? []), ...incomingTrades]) tradeMap.set(trade.id, trade);
+  const tradeMap = new Map<string, JournalTrade>(priorTrades);
+  for (const incoming of incomingTrades) {
+    const prior = priorTrades.get(incoming.id);
+    tradeMap.set(incoming.id, mergeTrade(prior, incoming, priorStagedSince, rules.pointValues));
+  }
+
+  // Track best / worst price reached while each matching position is open.
+  const price = observer.currentPrice;
+  for (const [id, trade] of tradeMap) {
+    if (trade.status !== "OPEN" || price == null) continue;
+    if (observer.symbol && trade.symbol.toUpperCase() !== observer.symbol.toUpperCase()) continue;
+    const better = (a: number | null | undefined, b: number) => a == null ? b : trade.side === "LONG" ? Math.max(a, b) : Math.min(a, b);
+    const worse = (a: number | null | undefined, b: number) => a == null ? b : trade.side === "LONG" ? Math.min(a, b) : Math.max(a, b);
+    tradeMap.set(id, { ...trade, mfePrice: better(trade.mfePrice, price), maePrice: worse(trade.maePrice, price) });
+  }
+
   const allTrades = [...tradeMap.values()];
   const openTrades = allTrades.filter((trade) => trade.status === "OPEN").sort(sortNewest);
   const recentTrades = allTrades.filter((trade) => trade.status === "CLOSED").sort(sortNewest).slice(0, 100);
 
-  const connection = input.connection ?? priorAccount?.connection ?? "DISCONNECTED";
-  const observer = normalizeObserver(input.observer, previous?.observer, connection === "OBSERVING" ? observedAt : null);
-
   const account: TradingAccountState = {
     provider: clean(input.provider ?? priorAccount?.provider ?? "NOT CONNECTED", 60),
-    propFirm: nullableClean(input.propFirm ?? priorAccount?.propFirm ?? null, 80),
-    accountLabel: clean(input.accountLabel ?? priorAccount?.accountLabel ?? "CURRENT PROP ACCOUNT", 80),
+    propFirm: nullableClean(input.propFirm ?? priorAccount?.propFirm ?? rules.propFirm, 80),
+    accountLabel: clean(input.accountLabel ?? priorAccount?.accountLabel ?? rules.accountLabel, 80),
     accountIdMasked: nullableClean(input.accountIdMasked ?? priorAccount?.accountIdMasked ?? null, 40),
     connection,
     stage: input.stage ?? priorAccount?.stage ?? "PASS CURRENT ACCOUNT",
@@ -293,10 +335,10 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     lastObservedAt: connection === "OBSERVING" || connection === "DEGRADED" ? observedAt : (priorAccount?.lastObservedAt ?? null),
   };
 
-  const todayKey = observedAt.slice(0, 10);
-  const todayClosedTrades = recentTrades.filter((trade) => (trade.closedAt ?? trade.openedAt).slice(0, 10) === todayKey);
-  const todayEntries = [...openTrades, ...recentTrades].filter((trade) => trade.openedAt.slice(0, 10) === todayKey);
-  const guardrails = buildGuardrails(observer, todayEntries, previous?.guardrails, observedAt);
+  const todayKey = sessionDay(observedAt);
+  const todayClosedTrades = recentTrades.filter((trade) => sessionDay(trade.closedAt ?? trade.openedAt) === todayKey);
+  const todayEntries = [...openTrades, ...recentTrades].filter((trade) => sessionDay(trade.openedAt) === todayKey);
+  const guardrails = buildGuardrails(observer, todayEntries, previous?.guardrails, observedAt, rules);
   const progress = account.profitTarget && account.closedPnl > 0 ? Math.max(0, Math.min(100, (account.closedPnl / account.profitTarget) * 100)) : null;
 
   return {
@@ -315,6 +357,7 @@ function buildState(input: TradingObservationInput, previous: TradingRuntimeStat
     observer,
     guardrails,
     journalCount: recentTrades.length + openTrades.length,
+    stagedSince,
     today: {
       trades: todayEntries.length,
       wins: todayClosedTrades.filter((trade) => (trade.realizedPnl ?? 0) > 0).length,
@@ -353,7 +396,62 @@ function normalizeTrade(input: Partial<JournalTrade> & { symbol: string; side: "
     confirmation: nullableClean(input.confirmation ?? null, 180),
     followedRules: typeof input.followedRules === "boolean" ? input.followedRules : null,
     notes: nullableClean(input.notes ?? null, 500),
+    initialStop: safeNullable(input.initialStop ?? null),
+    initialTarget: safeNullable(input.initialTarget ?? null),
+    maxQuantity: safeNullable(input.maxQuantity ?? null),
+    mfePrice: safeNullable(input.mfePrice ?? null),
+    maePrice: safeNullable(input.maePrice ?? null),
+    preparedAt: normalizeDate(input.preparedAt ?? null),
+    pnlSource: input.pnlSource === "BROKER" || input.pnlSource === "ESTIMATED" ? input.pnlSource : null,
+    sessionDay: sessionDay(normalizeDate(input.openedAt) ?? observedAt),
   };
+}
+
+/** Merge a fresh observation of a trade with what Jarvis already knew about it. */
+function mergeTrade(prior: JournalTrade | undefined, incoming: JournalTrade, stagedSince: string | null, pointOverrides: Record<string, number>): JournalTrade {
+  if (!prior) {
+    return {
+      ...incoming,
+      initialStop: incoming.initialStop ?? incoming.stopPrice,
+      initialTarget: incoming.initialTarget ?? incoming.targetPrice,
+      maxQuantity: incoming.maxQuantity ?? (incoming.quantity || null),
+      preparedAt: incoming.preparedAt ?? (incoming.status === "OPEN" ? stagedSince : null),
+    };
+  }
+  const closing = incoming.status === "CLOSED" && prior.status === "OPEN";
+  const quantity = closing && !incoming.quantity ? prior.quantity : incoming.quantity;
+  const merged: JournalTrade = {
+    ...prior,
+    ...incoming,
+    quantity,
+    entryPrice: incoming.entryPrice ?? prior.entryPrice,
+    stopPrice: incoming.stopPrice ?? prior.stopPrice,
+    targetPrice: incoming.targetPrice ?? prior.targetPrice,
+    openedAt: prior.openedAt,
+    initialStop: prior.initialStop ?? prior.stopPrice ?? incoming.stopPrice,
+    initialTarget: prior.initialTarget ?? prior.targetPrice ?? incoming.targetPrice,
+    maxQuantity: Math.max(prior.maxQuantity ?? prior.quantity ?? 0, quantity ?? 0) || null,
+    mfePrice: prior.mfePrice ?? incoming.mfePrice ?? null,
+    maePrice: prior.maePrice ?? incoming.maePrice ?? null,
+    preparedAt: prior.preparedAt ?? incoming.preparedAt ?? null,
+    sessionDay: prior.sessionDay ?? incoming.sessionDay,
+  };
+  if (merged.status === "CLOSED") {
+    if (merged.realizedPnl != null) {
+      merged.pnlSource = incoming.realizedPnl != null ? "BROKER" : prior.pnlSource ?? "BROKER";
+    } else {
+      const estimate = estimatePnl({
+        symbol: merged.symbol,
+        side: merged.side,
+        quantity: merged.quantity || merged.maxQuantity || null,
+        entryPrice: merged.entryPrice,
+        exitPrice: merged.exitPrice,
+      }, pointOverrides);
+      merged.realizedPnl = estimate;
+      merged.pnlSource = estimate == null ? null : "ESTIMATED";
+    }
+  }
+  return merged;
 }
 
 function normalizeObserver(
@@ -414,18 +512,19 @@ function buildGuardrails(
   todayEntries: JournalTrade[],
   previous: TradingGuardrailState | undefined,
   observedAt: string,
+  rules = cachedTradingRules(),
 ): TradingGuardrailState {
-  const maxTradesPerDay = 2;
-  const riskTargetDollars = 500;
+  const maxTradesPerDay = rules.maxTradesPerDay;
+  const riskTargetDollars = rules.riskTargetDollars;
   const todayTradeCount = todayEntries.length;
   const remainingTrades = Math.max(0, maxTradesPerDay - todayTradeCount);
-  const plannedRisk = estimatePlannedRisk(observer);
+  const plannedRisk = estimatePlannedRisk(observer, rules.pointValues);
   const preparing = observer.intentState === "PREPARING" || observer.status === "PENDING";
   let activeAlert: TradingRuleAlert | null = null;
 
   if (preparing && todayTradeCount >= maxTradesPerDay) {
     activeAlert = {
-      id: `${observedAt.slice(0, 10)}:TRADE_COUNT:${todayTradeCount + 1}`,
+      id: `${sessionDay(observedAt)}:TRADE_COUNT:${todayTradeCount + 1}`,
       rule: "TRADE_COUNT",
       severity: "VIOLATION",
       title: "TRADE LIMIT",
@@ -438,7 +537,7 @@ function buildGuardrails(
     };
   } else if (preparing && plannedRisk != null && plannedRisk > riskTargetDollars) {
     activeAlert = {
-      id: `${observedAt.slice(0, 10)}:RISK_LIMIT:${Math.round(plannedRisk)}`,
+      id: `${sessionDay(observedAt)}:RISK_LIMIT:${Math.round(plannedRisk)}`,
       rule: "RISK_LIMIT",
       severity: "WARNING",
       title: "RISK LIMIT",
@@ -451,7 +550,7 @@ function buildGuardrails(
     };
   }
 
-  const previousEvents = (previous?.eventsToday ?? []).filter((event) => event.observedAt.slice(0, 10) === observedAt.slice(0, 10));
+  const previousEvents = (previous?.eventsToday ?? []).filter((event) => sessionDay(event.observedAt) === sessionDay(observedAt));
   const eventsToday = [...previousEvents];
   if (activeAlert && !eventsToday.some((event) => event.id === activeAlert!.id)) eventsToday.push(activeAlert);
 
@@ -465,17 +564,11 @@ function buildGuardrails(
   };
 }
 
-function estimatePlannedRisk(observer: TradingObserverState): number | null {
+function estimatePlannedRisk(observer: TradingObserverState, overrides?: Record<string, number>): number | null {
   if (observer.entryPrice == null || observer.stopPrice == null || observer.quantity == null || observer.quantity <= 0 || !observer.symbol) return null;
-  const symbol = observer.symbol.toUpperCase().replace(/[^A-Z]/g, "");
-  const pointValue =
-    symbol.startsWith("MNQ") ? 2 :
-    symbol.startsWith("NQ") ? 20 :
-    symbol.startsWith("MYM") ? 0.5 :
-    symbol.startsWith("YM") ? 5 :
-    null;
-  if (pointValue == null) return null;
-  const risk = Math.abs(observer.entryPrice - observer.stopPrice) * pointValue * observer.quantity;
+  const value = pointValue(observer.symbol, overrides);
+  if (value == null) return null;
+  const risk = Math.abs(observer.entryPrice - observer.stopPrice) * value * observer.quantity;
   return Number.isFinite(risk) ? Math.round(risk * 100) / 100 : null;
 }
 

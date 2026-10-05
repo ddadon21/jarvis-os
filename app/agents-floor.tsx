@@ -73,6 +73,8 @@ type TradingSnapshot = {
   };
   journalCount: number;
   today: { trades: number; wins: number; losses: number; realizedPnl: number };
+  /** Count from durable storage; null when Supabase persistence is not configured. */
+  durableTradeCount?: number | null;
 };
 
 type Tick = { t: number; p: number };
@@ -121,11 +123,12 @@ function useTradingFeed(fast: boolean) {
       try {
         const response = await fetch("/api/trading/state", { cache: "no-store" });
         if (!response.ok) throw new Error(String(response.status));
-        const body = (await response.json()) as { state?: TradingSnapshot };
+        const body = (await response.json()) as { state?: TradingSnapshot; durableTradeCount?: number | null };
         if (cancelled) return;
         if (body.state) {
-          setState(body.state);
-          recordTick(body.state);
+          const snapshot = { ...body.state, durableTradeCount: body.durableTradeCount ?? null };
+          setState(snapshot);
+          recordTick(snapshot);
         }
         setFailed(false);
       } catch {
@@ -1063,14 +1066,17 @@ function TradingSessionScreen({ state }: { state: TradingSnapshot | null }) {
 
 function LearningScreen({ state, events }: { state: TradingSnapshot | null; events: WorkforceEvent[] }) {
   const live = observerIsLive(state);
-  const captured = state?.journalCount ?? 0;
+  const durable = state?.durableTradeCount;
+  const captured = durable ?? state?.journalCount ?? 0;
   const withOutcome = (state?.recentTrades ?? []).filter((trade) => trade.realizedPnl != null).length;
   const progress = Math.min(100, Math.round((captured / FIRST_CANDIDATE_TARGET) * 100));
   const evidence = events.find((event) => event.type === "trading.indicator_evidence") ?? null;
   const steps: Array<{ label: string; state: "OK" | "LIVE" | "OFF" | "TODO" | "LOCKED"; note: string }> = [
     { label: "LIVE CAPTURE", state: live ? "LIVE" : "OFF", note: live ? "Observer is reading your chart" : "Local Agent not streaming" },
     { label: "ENTRIES LABELED", state: captured > 0 ? "OK" : "TODO", note: `${captured} captured · ${withOutcome} with P&L` },
-    { label: "DURABLE TRADE LOG", state: "TODO", note: "Runtime cache keeps only the last 100" },
+    durable != null
+      ? { label: "DURABLE TRADE LOG", state: "OK", note: `${durable} trades saved permanently` }
+      : { label: "DURABLE TRADE LOG", state: "OFF", note: "Supabase not connected: only the last 100 are kept" },
     { label: "MARKET BARS ALIGNED", state: "TODO", note: "No OHLCV data source yet" },
     { label: "FEATURE + RULE MODEL", state: "TODO", note: "Needs bars + labeled entries" },
     { label: "DEVIANT CANDIDATE", state: "LOCKED", note: "Baseline v1 immutable" },

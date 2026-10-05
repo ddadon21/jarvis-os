@@ -40,6 +40,9 @@ function harness({ generate, cacheFails = false } = {}) {
       authenticateObserverDevice: async (_id, token) => token === 'test' ? { deviceId: id } : null,
       markObserverFrame: async () => {},
     },
+    '../../../../lib/trading-rules': {
+      cachedTradingRules: () => ({ propFirm: 'Lucid Trading', accountLabel: 'CURRENT PROP ACCOUNT', maxTradesPerDay: 2, riskTargetDollars: 500, pointValues: {} }),
+    },
     '../../../../lib/trading-runtime': {
       getTradingState: async () => state,
       ingestTradingObservation: async (input) => {

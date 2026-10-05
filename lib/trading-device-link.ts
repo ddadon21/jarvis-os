@@ -1,5 +1,20 @@
 import { createHash, randomBytes } from "node:crypto";
 import { getCache } from "@vercel/functions";
+import { durableContext } from "./jarvis-db";
+
+/**
+ * Local Agent link: pairing, heartbeat, and the command queue between JARVIS
+ * Cloud and the Windows Local Agent.
+ *
+ * - Pairing lives in Supabase (jarvis_devices) so a cache eviction or the old
+ *   90-day TTL can no longer silently unpair the Observer. Runtime Cache is a
+ *   fast copy.
+ * - Commands are a queue (jarvis_device_commands), one row per command, so a
+ *   new command never overwrites an unacknowledged one and a heartbeat write
+ *   can never erase a queued command.
+ * - Commands that sit unclaimed for 15 minutes expire instead of running
+ *   unexpectedly later.
+ */
 
 export type ObserverCommand = "WATCH" | "PAUSE";
 
@@ -75,11 +90,11 @@ export type ObserverDeviceLink = {
   command: ObserverCommand;
   observerVersion: string | null;
   agentCapabilities?: string[];
-  obsidianCommand?: LocalAgentObsidianCommand | null;
-  obsidianResult?: LocalAgentObsidianResult | null;
-  desktopCommand?: LocalAgentDesktopCommand | null;
-  desktopResult?: LocalAgentDesktopResult | null;
 };
+
+type CommandKind = "DESKTOP" | "OBSIDIAN";
+type QueuedCommand = LocalAgentDesktopCommand | LocalAgentObsidianCommand;
+type CommandResult = LocalAgentDesktopResult | LocalAgentObsidianResult;
 
 type PendingPair = {
   deviceId: string;
@@ -92,10 +107,18 @@ type PendingPair = {
 const PAIR_TTL_SECONDS = 10 * 60;
 const DEVICE_TTL_SECONDS = 60 * 60 * 24 * 90;
 const LOCAL_AGENT_PRESENCE_KEY = "jarvis:local-agent:presence:v1";
+const COMMAND_EXPIRY_MS = 15 * 60_000;
+const DURABLE_HEARTBEAT_MS = 30_000;
+const MAX_QUEUE = 20;
+const MAX_RESULTS = 20;
+
+const lastDurableHeartbeat = new Map<string, number>();
 
 function pairKey(code: string) { return `jarvis:trading:pair:${normalizeCode(code)}`; }
 function deviceKey(deviceId: string) { return `jarvis:trading:device:${deviceId}`; }
 function controllerKey(hash: string) { return `jarvis:trading:controller:${hash}`; }
+function queueKey(deviceId: string, kind: CommandKind) { return `jarvis:device:${deviceId}:queue:${kind}`; }
+function resultsKey(deviceId: string, kind: CommandKind) { return `jarvis:device:${deviceId}:results:${kind}`; }
 
 function normalizeCode(value: string) {
   return String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
@@ -116,6 +139,116 @@ function pairingCode() {
   for (const byte of bytes) out += alphabet[byte % alphabet.length];
   return out;
 }
+
+async function cacheGet<T>(key: string): Promise<T | null> {
+  try {
+    return (await getCache().get(key)) as T | null;
+  } catch {
+    return null;
+  }
+}
+
+async function cacheSet(key: string, value: unknown, ttl = DEVICE_TTL_SECONDS, tags = ["jarvis-trading-device"]) {
+  try {
+    await getCache().set(key, value, { ttl, tags });
+  } catch {
+    // Durable storage remains the source of truth.
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Link persistence                                                    */
+/* ------------------------------------------------------------------ */
+
+type DeviceRow = {
+  device_id: string;
+  device_name: string;
+  device_token_hash: string;
+  controller_token_hash: string | null;
+  paired_at: string;
+  last_heartbeat_at: string | null;
+  last_frame_at: string | null;
+  command: string;
+  observer_version: string | null;
+  capabilities: unknown;
+  revoked_at: string | null;
+};
+
+function rowToLink(row: DeviceRow): ObserverDeviceLink | null {
+  if (row.revoked_at || !row.controller_token_hash) return null;
+  return {
+    version: 1,
+    deviceId: row.device_id,
+    deviceName: row.device_name,
+    deviceTokenHash: row.device_token_hash,
+    controllerTokenHash: row.controller_token_hash,
+    pairedAt: row.paired_at,
+    lastHeartbeatAt: row.last_heartbeat_at,
+    lastFrameAt: row.last_frame_at,
+    command: row.command === "WATCH" ? "WATCH" : "PAUSE",
+    observerVersion: row.observer_version,
+    agentCapabilities: Array.isArray(row.capabilities) ? row.capabilities.map(String) : [],
+  };
+}
+
+async function loadDurableLink(column: "device_id" | "controller_token_hash", value: string): Promise<ObserverDeviceLink | null> {
+  const ctx = await durableContext();
+  if (!ctx) return null;
+  try {
+    const { data, error } = await ctx.db.from("jarvis_devices")
+      .select("device_id,device_name,device_token_hash,controller_token_hash,paired_at,last_heartbeat_at,last_frame_at,command,observer_version,capabilities,revoked_at")
+      .eq("workspace_id", ctx.workspaceId)
+      .eq(column, value)
+      .maybeSingle();
+    if (error || !data) return null;
+    return rowToLink(data as DeviceRow);
+  } catch {
+    return null;
+  }
+}
+
+async function saveDurableLink(link: ObserverDeviceLink) {
+  const ctx = await durableContext();
+  if (!ctx) return;
+  try {
+    await ctx.db.from("jarvis_devices").upsert({
+      device_id: link.deviceId,
+      workspace_id: ctx.workspaceId,
+      device_name: link.deviceName,
+      device_token_hash: link.deviceTokenHash,
+      controller_token_hash: link.controllerTokenHash,
+      paired_at: link.pairedAt,
+      last_heartbeat_at: link.lastHeartbeatAt,
+      last_frame_at: link.lastFrameAt,
+      command: link.command,
+      observer_version: link.observerVersion,
+      capabilities: link.agentCapabilities ?? [],
+    }, { onConflict: "device_id" });
+    lastDurableHeartbeat.set(link.deviceId, Date.now());
+  } catch {
+    // Cache copy keeps the link usable; next durable save retries.
+  }
+}
+
+async function loadLink(deviceId: string): Promise<ObserverDeviceLink | null> {
+  const cached = await cacheGet<ObserverDeviceLink>(deviceKey(deviceId));
+  if (cached) return cached;
+  const durable = await loadDurableLink("device_id", deviceId);
+  if (durable) await cacheSet(deviceKey(deviceId), durable);
+  return durable;
+}
+
+async function saveLink(link: ObserverDeviceLink, durable: "always" | "throttled" | "never") {
+  await cacheSet(deviceKey(link.deviceId), link);
+  const last = lastDurableHeartbeat.get(link.deviceId) ?? 0;
+  if (durable === "always" || (durable === "throttled" && Date.now() - last >= DURABLE_HEARTBEAT_MS)) {
+    await saveDurableLink(link);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Pairing                                                             */
+/* ------------------------------------------------------------------ */
 
 export async function startObserverPairing(deviceName = "Dwight Windows PC") {
   const deviceId = `obs_${token(12)}`;
@@ -138,7 +271,7 @@ export async function startObserverPairing(deviceName = "Dwight Windows PC") {
 export async function confirmObserverPairing(code: string) {
   const normalized = normalizeCode(code);
   if (normalized.length < 6) return null;
-  const pending = await getCache().get(pairKey(normalized)) as PendingPair | null;
+  const pending = await cacheGet<PendingPair>(pairKey(normalized));
   if (!pending || Date.parse(pending.expiresAt) <= Date.now()) return null;
 
   const controllerToken = token(32);
@@ -155,25 +288,15 @@ export async function confirmObserverPairing(code: string) {
     command: "PAUSE",
     observerVersion: null,
     agentCapabilities: [],
-    obsidianCommand: null,
-    obsidianResult: null,
-    desktopCommand: null,
-    desktopResult: null,
   };
 
   await Promise.all([
-    getCache().set(deviceKey(link.deviceId), link, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
-    getCache().set(controllerKey(controllerTokenHash), { deviceId: link.deviceId }, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
+    saveLink(link, "always"),
+    cacheSet(controllerKey(controllerTokenHash), { deviceId: link.deviceId }),
   ]);
 
-  // Pairing is already established at this point. Consume the one-time code
-  // best-effort so a cleanup/cache hiccup can never turn a valid pair into a 500.
   try {
-    await getCache().set(
-      pairKey(normalized),
-      { ...pending, expiresAt: new Date(0).toISOString() },
-      { ttl: 1, tags: ["jarvis-trading-pairing"] },
-    );
+    await getCache().set(pairKey(normalized), { ...pending, expiresAt: new Date(0).toISOString() }, { ttl: 1, tags: ["jarvis-trading-pairing"] });
   } catch {
     // The code still expires naturally within PAIR_TTL_SECONDS.
   }
@@ -189,7 +312,7 @@ export async function confirmObserverPairing(code: string) {
 
 export async function authenticateObserverDevice(deviceId: string | null, deviceToken: string | null) {
   if (!deviceId || !deviceToken) return null;
-  const link = await getCache().get(deviceKey(deviceId)) as ObserverDeviceLink | null;
+  const link = await loadLink(deviceId);
   if (!link || link.deviceTokenHash !== hash(deviceToken)) return null;
   return link;
 }
@@ -197,12 +320,168 @@ export async function authenticateObserverDevice(deviceId: string | null, device
 async function resolveController(controllerToken: string | null) {
   if (!controllerToken) return null;
   const controllerTokenHash = hash(controllerToken);
-  const mapping = await getCache().get(controllerKey(controllerTokenHash)) as { deviceId?: string } | null;
-  if (!mapping?.deviceId) return null;
-  const link = await getCache().get(deviceKey(mapping.deviceId)) as ObserverDeviceLink | null;
+  const mapping = await cacheGet<{ deviceId?: string }>(controllerKey(controllerTokenHash));
+  let link = mapping?.deviceId ? await loadLink(mapping.deviceId) : null;
+  if (!link) link = await loadDurableLink("controller_token_hash", controllerTokenHash);
   if (!link || link.controllerTokenHash !== controllerTokenHash) return null;
+  // Sliding renewal: an actively used controller never ages out.
+  await cacheSet(controllerKey(controllerTokenHash), { deviceId: link.deviceId });
   return link;
 }
+
+/* ------------------------------------------------------------------ */
+/* Command queue                                                       */
+/* ------------------------------------------------------------------ */
+
+type CommandRow = {
+  id: string;
+  action: string;
+  payload: Record<string, unknown>;
+  authorization_level: string;
+  status: string;
+  created_at: string;
+  result: unknown;
+};
+
+function rowToCommand(kind: CommandKind, row: CommandRow): QueuedCommand {
+  const payload = row.payload ?? {};
+  if (kind === "OBSIDIAN") {
+    return {
+      id: row.id,
+      action: row.action as LocalAgentObsidianAction,
+      path: (payload.path as string | null) ?? null,
+      content: (payload.content as string | null) ?? null,
+      query: (payload.query as string | null) ?? null,
+      createdAt: row.created_at,
+    };
+  }
+  return {
+    id: row.id,
+    action: row.action as LocalAgentDesktopAction,
+    target: (payload.target as string | null) ?? null,
+    text: (payload.text as string | null) ?? null,
+    args: Array.isArray(payload.args) ? (payload.args as unknown[]).map(String) : [],
+    createdAt: row.created_at,
+    authorization: row.authorization_level === "USER_AUTHORIZED" ? "USER_AUTHORIZED" : "READ_ONLY",
+  };
+}
+
+function commandPayload(command: QueuedCommand): Record<string, unknown> {
+  if ("query" in command) return { path: command.path, content: command.content, query: command.query };
+  return { target: command.target, text: command.text, args: command.args };
+}
+
+async function enqueue(link: ObserverDeviceLink, kind: CommandKind, command: QueuedCommand) {
+  const ctx = await durableContext();
+  if (ctx) {
+    const { error } = await ctx.db.from("jarvis_device_commands").insert({
+      id: command.id,
+      workspace_id: ctx.workspaceId,
+      device_id: link.deviceId,
+      kind,
+      action: command.action,
+      payload: commandPayload(command),
+      authorization_level: "authorization" in command ? command.authorization : "READ_ONLY",
+      status: "PENDING",
+      created_at: command.createdAt,
+    });
+    if (!error) return true;
+    console.warn("[device-link] durable enqueue failed, using cache queue:", error.message);
+  }
+  const queue = (await cacheGet<QueuedCommand[]>(queueKey(link.deviceId, kind))) ?? [];
+  await cacheSet(queueKey(link.deviceId, kind), [...queue, command].slice(-MAX_QUEUE), 60 * 60);
+  return true;
+}
+
+/** Next command to hand the agent. Re-delivers a claimed command until its result arrives. */
+async function nextCommand(deviceId: string, kind: CommandKind): Promise<QueuedCommand | null> {
+  const now = Date.now();
+  const ctx = await durableContext();
+  if (ctx) {
+    try {
+      const { data, error } = await ctx.db.from("jarvis_device_commands")
+        .select("id,action,payload,authorization_level,status,created_at,result")
+        .eq("device_id", deviceId)
+        .eq("kind", kind)
+        .in("status", ["PENDING", "CLAIMED"])
+        .order("created_at", { ascending: true })
+        .limit(5);
+      if (!error && data) {
+        for (const row of data as CommandRow[]) {
+          if (row.status === "PENDING" && now - Date.parse(row.created_at) > COMMAND_EXPIRY_MS) {
+            await ctx.db.from("jarvis_device_commands").update({ status: "EXPIRED", completed_at: new Date().toISOString() }).eq("id", row.id).eq("status", "PENDING");
+            continue;
+          }
+          if (row.status === "PENDING") {
+            await ctx.db.from("jarvis_device_commands").update({ status: "CLAIMED", claimed_at: new Date().toISOString() }).eq("id", row.id).eq("status", "PENDING");
+          }
+          return rowToCommand(kind, row);
+        }
+        return null;
+      }
+    } catch {
+      // Fall through to the cache queue.
+    }
+  }
+  const queue = (await cacheGet<QueuedCommand[]>(queueKey(deviceId, kind))) ?? [];
+  const fresh = queue.filter((command) => now - Date.parse(command.createdAt) <= COMMAND_EXPIRY_MS);
+  if (fresh.length !== queue.length) await cacheSet(queueKey(deviceId, kind), fresh, 60 * 60);
+  return fresh[0] ?? null;
+}
+
+async function completeCommand(deviceId: string, kind: CommandKind, result: CommandResult) {
+  const results = (await cacheGet<CommandResult[]>(resultsKey(deviceId, kind))) ?? [];
+  await cacheSet(resultsKey(deviceId, kind), [result, ...results.filter((item) => item.id !== result.id)].slice(0, MAX_RESULTS), 60 * 60 * 24);
+
+  const queue = (await cacheGet<QueuedCommand[]>(queueKey(deviceId, kind))) ?? [];
+  if (queue.some((command) => command.id === result.id)) {
+    await cacheSet(queueKey(deviceId, kind), queue.filter((command) => command.id !== result.id), 60 * 60);
+  }
+
+  const ctx = await durableContext();
+  if (ctx) {
+    try {
+      await ctx.db.from("jarvis_device_commands")
+        .update({ status: result.ok ? "DONE" : "FAILED", completed_at: result.completedAt, result })
+        .eq("id", result.id)
+        .eq("device_id", deviceId);
+    } catch {
+      // Result is still cached for the UI.
+    }
+  }
+}
+
+async function findResult(deviceId: string, kind: CommandKind, id: string): Promise<{ result: CommandResult | null; pending: boolean }> {
+  const results = (await cacheGet<CommandResult[]>(resultsKey(deviceId, kind))) ?? [];
+  const cached = results.find((item) => item.id === id);
+  if (cached) return { result: cached, pending: false };
+  const ctx = await durableContext();
+  if (ctx) {
+    try {
+      const { data } = await ctx.db.from("jarvis_device_commands").select("status,result").eq("id", id).eq("device_id", deviceId).maybeSingle();
+      if (data) {
+        const row = data as { status: string; result: CommandResult | null };
+        if (row.status === "EXPIRED") {
+          return { result: null, pending: false };
+        }
+        return { result: row.result ?? null, pending: row.status === "PENDING" || row.status === "CLAIMED" };
+      }
+    } catch {
+      // fall through
+    }
+  }
+  const queue = (await cacheGet<QueuedCommand[]>(queueKey(deviceId, kind))) ?? [];
+  return { result: null, pending: queue.some((command) => command.id === id) };
+}
+
+async function latestResult(deviceId: string, kind: CommandKind) {
+  const results = (await cacheGet<CommandResult[]>(resultsKey(deviceId, kind))) ?? [];
+  return results[0] ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Agent-facing                                                        */
+/* ------------------------------------------------------------------ */
 
 export async function pollObserverControl(
   deviceId: string,
@@ -220,29 +499,86 @@ export async function pollObserverControl(
       ? agentCapabilities.map(item => String(item).trim().toUpperCase()).filter(Boolean).slice(0, 20)
       : link.agentCapabilities ?? [],
   };
-  await Promise.all([
-    getCache().set(deviceKey(deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] }),
-    getCache().set(LOCAL_AGENT_PRESENCE_KEY, {
+  const [obsidianCommand, desktopCommand] = await Promise.all([
+    nextCommand(deviceId, "OBSIDIAN"),
+    nextCommand(deviceId, "DESKTOP"),
+    saveLink(next, "throttled"),
+    cacheSet(LOCAL_AGENT_PRESENCE_KEY, {
       deviceId: next.deviceId,
       deviceName: next.deviceName,
       lastHeartbeatAt: next.lastHeartbeatAt,
       lastFrameAt: next.lastFrameAt,
       observerVersion: next.observerVersion,
       agentCapabilities: next.agentCapabilities ?? [],
-    }, { ttl: 60 * 60 * 24, tags: ["jarvis-local-agent"] }),
+    }, 60 * 60 * 24, ["jarvis-local-agent"]),
   ]);
   return {
     ...safeLink(next),
-    obsidianCommand: next.obsidianCommand ?? null,
-    desktopCommand: next.desktopCommand ?? null,
+    obsidianCommand: (obsidianCommand as LocalAgentObsidianCommand | null) ?? null,
+    desktopCommand: (desktopCommand as LocalAgentDesktopCommand | null) ?? null,
   };
 }
+
+export async function markObserverFrame(deviceId: string, deviceToken: string, observerVersion?: string | null) {
+  const link = await authenticateObserverDevice(deviceId, deviceToken);
+  if (!link) return null;
+  const now = new Date().toISOString();
+  const next: ObserverDeviceLink = {
+    ...link,
+    lastHeartbeatAt: now,
+    lastFrameAt: now,
+    observerVersion: observerVersion ? String(observerVersion).slice(0, 30) : link.observerVersion,
+  };
+  await saveLink(next, "throttled");
+  return safeLink(next);
+}
+
+export async function submitObsidianCommandResult(deviceId: string, deviceToken: string, result: LocalAgentObsidianResult) {
+  const link = await authenticateObserverDevice(deviceId, deviceToken);
+  if (!link) return null;
+  if (!result?.id || !result?.action) return null;
+  const normalized: LocalAgentObsidianResult = {
+    id: String(result.id).slice(0, 80),
+    action: result.action,
+    ok: Boolean(result.ok),
+    path: result.path == null ? null : String(result.path).slice(0, 500),
+    data: result.data == null ? null : String(result.data).slice(0, 1_500_000),
+    error: result.error == null ? null : String(result.error).slice(0, 2_000),
+    completedAt: validDate(result.completedAt),
+  };
+  await completeCommand(deviceId, "OBSIDIAN", normalized);
+  await saveLink({ ...link, lastHeartbeatAt: new Date().toISOString() }, "never");
+  return normalized;
+}
+
+export async function submitDesktopCommandResult(deviceId: string, deviceToken: string, result: LocalAgentDesktopResult) {
+  const link = await authenticateObserverDevice(deviceId, deviceToken);
+  if (!link) return null;
+  if (!result?.id || !result?.action) return null;
+  const normalized: LocalAgentDesktopResult = {
+    id: String(result.id).slice(0, 80),
+    action: result.action,
+    ok: Boolean(result.ok),
+    summary: String(result.summary ?? "").slice(0, 2_000),
+    data: result.data == null ? null : String(result.data).slice(0, 200_000),
+    evidence: Array.isArray(result.evidence) ? result.evidence.map(item => String(item).slice(0, 2_000)).slice(0, 20) : [],
+    error: result.error == null ? null : String(result.error).slice(0, 4_000),
+    completedAt: validDate(result.completedAt),
+  };
+  await completeCommand(deviceId, "DESKTOP", normalized);
+  await saveLink({ ...link, lastHeartbeatAt: new Date().toISOString() }, "never");
+  return normalized;
+}
+
+/* ------------------------------------------------------------------ */
+/* Controller-facing                                                   */
+/* ------------------------------------------------------------------ */
 
 export async function setObserverCommand(controllerToken: string, command: ObserverCommand) {
   const link = await resolveController(controllerToken);
   if (!link) return null;
   const next: ObserverDeviceLink = { ...link, command };
-  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
+  await saveLink(next, "always");
   return safeLink(next);
 }
 
@@ -273,53 +609,15 @@ export async function enqueueObsidianCommand(
     query,
     createdAt: new Date().toISOString(),
   };
-
-  const next: ObserverDeviceLink = {
-    ...link,
-    obsidianCommand: command,
-  };
-  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
+  await enqueue(link, "OBSIDIAN", command);
   return command;
-}
-
-export async function submitObsidianCommandResult(
-  deviceId: string,
-  deviceToken: string,
-  result: LocalAgentObsidianResult,
-) {
-  const link = await authenticateObserverDevice(deviceId, deviceToken);
-  if (!link) return null;
-  if (!result?.id || !result?.action) return null;
-
-  const normalized: LocalAgentObsidianResult = {
-    id: String(result.id).slice(0, 80),
-    action: result.action,
-    ok: Boolean(result.ok),
-    path: result.path == null ? null : String(result.path).slice(0, 500),
-    data: result.data == null ? null : String(result.data).slice(0, 1_500_000),
-    error: result.error == null ? null : String(result.error).slice(0, 2_000),
-    completedAt: result.completedAt && Number.isFinite(Date.parse(result.completedAt))
-      ? new Date(result.completedAt).toISOString()
-      : new Date().toISOString(),
-  };
-
-  const matching = link.obsidianCommand?.id === normalized.id;
-  const next: ObserverDeviceLink = {
-    ...link,
-    obsidianCommand: matching ? null : link.obsidianCommand ?? null,
-    obsidianResult: normalized,
-    lastHeartbeatAt: new Date().toISOString(),
-  };
-  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
-  return normalized;
 }
 
 export async function getObsidianCommandResult(controllerToken: string, commandId?: string | null) {
   const link = await resolveController(controllerToken);
   if (!link) return null;
-  const result = link.obsidianResult ?? null;
-  if (commandId && result?.id !== commandId) return { pending: Boolean(link.obsidianCommand?.id === commandId), result: null };
-  return { pending: Boolean(link.obsidianCommand), result };
+  if (commandId) return findResult(link.deviceId, "OBSIDIAN", commandId);
+  return { pending: false, result: await latestResult(link.deviceId, "OBSIDIAN") };
 }
 
 const READ_ONLY_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ", "BROWSER_READ_PAGE"]);
@@ -337,6 +635,10 @@ const USER_AUTHORIZED_DESKTOP_ACTIONS = new Set<LocalAgentDesktopAction>([
   "RUN_CODING_AGENT",
   "RUN_APPROVED_COMMAND",
 ]);
+
+export function desktopActionRequiresApproval(action: LocalAgentDesktopAction) {
+  return USER_AUTHORIZED_DESKTOP_ACTIONS.has(action);
+}
 
 export async function enqueueDesktopCommand(
   controllerToken: string,
@@ -359,9 +661,7 @@ export async function enqueueDesktopCommand(
 
   const target = input.target == null ? null : String(input.target).trim().slice(0, 1000);
   const text = input.text == null ? null : String(input.text).slice(0, 20_000);
-  const args = Array.isArray(input.args)
-    ? input.args.map(item => String(item).slice(0, 1000)).slice(0, 20)
-    : [];
+  const args = Array.isArray(input.args) ? input.args.map(item => String(item).slice(0, 1000)).slice(0, 20) : [];
 
   if (["OPEN_APP", "FOCUS_WINDOW", "OPEN_PATH", "OPEN_URI", "UI_CLICK_TEXT", "BROWSER_NAVIGATE", "BROWSER_SEARCH", "RUN_CODING_AGENT", "RUN_APPROVED_COMMAND"].includes(action) && !target) {
     return null;
@@ -377,66 +677,29 @@ export async function enqueueDesktopCommand(
     createdAt: new Date().toISOString(),
     authorization,
   };
-
-  const next: ObserverDeviceLink = { ...link, desktopCommand: command };
-  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
+  await enqueue(link, "DESKTOP", command);
   return command;
-}
-
-export async function submitDesktopCommandResult(
-  deviceId: string,
-  deviceToken: string,
-  result: LocalAgentDesktopResult,
-) {
-  const link = await authenticateObserverDevice(deviceId, deviceToken);
-  if (!link) return null;
-  if (!result?.id || !result?.action) return null;
-
-  const normalized: LocalAgentDesktopResult = {
-    id: String(result.id).slice(0, 80),
-    action: result.action,
-    ok: Boolean(result.ok),
-    summary: String(result.summary ?? "").slice(0, 2_000),
-    data: result.data == null ? null : String(result.data).slice(0, 200_000),
-    evidence: Array.isArray(result.evidence)
-      ? result.evidence.map(item => String(item).slice(0, 2_000)).slice(0, 20)
-      : [],
-    error: result.error == null ? null : String(result.error).slice(0, 4_000),
-    completedAt: result.completedAt && Number.isFinite(Date.parse(result.completedAt))
-      ? new Date(result.completedAt).toISOString()
-      : new Date().toISOString(),
-  };
-
-  const matching = link.desktopCommand?.id === normalized.id;
-  const next: ObserverDeviceLink = {
-    ...link,
-    desktopCommand: matching ? null : link.desktopCommand ?? null,
-    desktopResult: normalized,
-    lastHeartbeatAt: new Date().toISOString(),
-  };
-  await getCache().set(deviceKey(link.deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
-  return normalized;
 }
 
 export async function getDesktopCommandResult(controllerToken: string, commandId?: string | null) {
   const link = await resolveController(controllerToken);
   if (!link) return null;
-  const result = link.desktopResult ?? null;
-  if (commandId && result?.id !== commandId) {
-    return { pending: Boolean(link.desktopCommand?.id === commandId), result: null, link: safeLink(link) };
+  if (commandId) {
+    const found = await findResult(link.deviceId, "DESKTOP", commandId);
+    return { ...found, link: safeLink(link) };
   }
-  return { pending: Boolean(link.desktopCommand), result, link: safeLink(link) };
+  return { pending: false, result: await latestResult(link.deviceId, "DESKTOP"), link: safeLink(link) };
 }
 
 export async function getLocalAgentPresence() {
-  const presence = await getCache().get(LOCAL_AGENT_PRESENCE_KEY) as {
+  const presence = await cacheGet<{
     deviceId?: string;
     deviceName?: string;
     lastHeartbeatAt?: string | null;
     lastFrameAt?: string | null;
     observerVersion?: string | null;
     agentCapabilities?: string[];
-  } | null;
+  }>(LOCAL_AGENT_PRESENCE_KEY);
   if (!presence) return null;
   const heartbeatAge = presence.lastHeartbeatAt ? Date.now() - Date.parse(presence.lastHeartbeatAt) : Number.POSITIVE_INFINITY;
   const capabilities = new Set((presence.agentCapabilities ?? []).map(item => item.toUpperCase()));
@@ -451,6 +714,11 @@ export async function getLocalAgentPresence() {
   };
 }
 
+export async function getObserverLinkStatus(controllerToken: string) {
+  const link = await resolveController(controllerToken);
+  return link ? safeLink(link) : null;
+}
+
 function versionAtLeast(value: string | null | undefined, major: number, minor: number, patch: number) {
   const parts = String(value ?? "").split(".").map(part => Number.parseInt(part, 10));
   if (parts.some(Number.isNaN)) return false;
@@ -463,23 +731,8 @@ function versionAtLeast(value: string | null | undefined, major: number, minor: 
   return true;
 }
 
-export async function getObserverLinkStatus(controllerToken: string) {
-  const link = await resolveController(controllerToken);
-  return link ? safeLink(link) : null;
-}
-
-export async function markObserverFrame(deviceId: string, deviceToken: string, observerVersion?: string | null) {
-  const link = await authenticateObserverDevice(deviceId, deviceToken);
-  if (!link) return null;
-  const now = new Date().toISOString();
-  const next: ObserverDeviceLink = {
-    ...link,
-    lastHeartbeatAt: now,
-    lastFrameAt: now,
-    observerVersion: observerVersion ? String(observerVersion).slice(0, 30) : link.observerVersion,
-  };
-  await getCache().set(deviceKey(deviceId), next, { ttl: DEVICE_TTL_SECONDS, tags: ["jarvis-trading-device"] });
-  return safeLink(next);
+function validDate(value: string | null | undefined) {
+  return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : new Date().toISOString();
 }
 
 function safeLink(link: ObserverDeviceLink) {

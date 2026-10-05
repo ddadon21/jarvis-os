@@ -6,6 +6,7 @@ import { queueVision, usableVision, enrichLocalFromVision } from "../../../../li
 import { openai } from "@ai-sdk/openai";
 import { getTradingState, ingestTradingObservation, type JournalTrade, type TradingObservationInput } from "../../../../lib/trading-runtime";
 import { authenticateObserverDevice, markObserverFrame } from "../../../../lib/trading-device-link";
+import { cachedTradingRules } from "../../../../lib/trading-rules";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -463,9 +464,8 @@ function mapFrameToObservation(frame: FrameRead, observedAt: string, previousOpe
       detailsObservedAt: frame.detailsObservedAt ?? observedAt,
     },
     provider: "Tradovate via TradingView Desktop",
-    propFirm: "Lucid Trading",
-    accountLabel: "CURRENT PROP ACCOUNT",
-    stage: "PASS CURRENT ACCOUNT",
+    propFirm: cachedTradingRules().propFirm,
+    accountLabel: cachedTradingRules().accountLabel,
     balance: frame.balance,
     equity: frame.equity,
     openPnl: frame.openPnl ?? 0,
