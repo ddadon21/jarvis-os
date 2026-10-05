@@ -1,6 +1,9 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
-import { generateText, streamText } from "ai";
+import { generateText, stepCountIs, streamText } from "ai";
+import { JARVIS_MODELS } from "../../../../lib/jarvis-models";
+import { jarvisChatTools } from "../../../../lib/jarvis-chat-tools";
+import { recallMemory, saveMemoryFacts } from "../../../../lib/jarvis-memory";
 import { getJarvisRuntimeContext } from "../../../../lib/jarvis-context";
 import { getAssistantRuntimeState } from "../../../../lib/jarvis-assistant-runtime";
 import { lookupLiveWorldFallback, lookupWorldKnowledgeFallback, needsLiveWorldSearch, resolveDirectAnswer } from "../../../../lib/jarvis-assistant-tools";
@@ -10,9 +13,9 @@ import type { AgentId, AgentPermission, RuntimeDomain } from "../../../../lib/ja
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const FAST_MODEL = "gpt-5.6-luna";
-const STANDARD_MODEL = "gpt-5.6-sol";
-const DEEP_MODEL = "claude-opus-5";
+const FAST_MODEL = JARVIS_MODELS.gptFast;
+const STANDARD_MODEL = JARVIS_MODELS.gptStandard;
+const DEEP_MODEL = JARVIS_MODELS.claudeDeep;
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Goal = { name: string; value: number; state: string };
@@ -317,10 +320,19 @@ export async function POST(request: Request) {
   const candidates = choices(route);
   if (!candidates.length) return new Response("No reasoning provider is connected.", { status: 503 });
 
-  const [runtimeContext, assistantContext] = await Promise.all([
+  const [runtimeContext, assistantContext, serverMemory] = await Promise.all([
     getJarvisRuntimeContext(),
     getAssistantRuntimeState(),
+    recallMemory(latestUser, 25).catch(() => []),
   ]);
+  // One-time style migration: facts that only lived in this browser are copied server-side (deduplicated).
+  void saveMemoryFacts(memories, "browser-import").catch(() => 0);
+  // Server memory is the system of record; the browser list is merged in for continuity.
+  const knownFacts = new Set(serverMemory.map((item) => item.fact.toLowerCase()));
+  const mergedMemory = [
+    ...serverMemory.map((item) => ({ domain: item.domain, fact: item.fact })),
+    ...memories.filter((item) => item?.fact && !knownFacts.has(String(item.fact).toLowerCase())).slice(-30),
+  ];
   const directAnswer = resolveDirectAnswer(latestUser, runtimeContext, assistantContext);
   const liveWorldAnswer = needsLiveWorldSearch(latestUser)
     ? await lookupLiveWorldFallback(latestUser)
@@ -412,7 +424,8 @@ export async function POST(request: Request) {
     "ROUTE DEPTH: " + route,
     "ACTIVE DOMAIN: " + activeDomain,
     "KNOWN GOALS: " + JSON.stringify(goals),
-    "DURABLE MEMORY: " + JSON.stringify(memories),
+    "DURABLE MEMORY: " + JSON.stringify(mergedMemory),
+    route === "FAST" ? "" : "TOOLS: you can look up Dwight's trades, trade statistics, the learning pipeline, long-term memory, his Obsidian notes and agent tasks, and assign work he asks for. Use them instead of guessing; say when data is unavailable.",
     "CONNECTED RUNTIME STATE: " + JSON.stringify(runtimeContext),
     "Runtime state is the freshest connected context. If a sourceHealth flag is false, that source is unavailable."
   ].join("\n");
@@ -438,6 +451,7 @@ export async function POST(request: Request) {
               system: SYSTEM + "\n\nRUNTIME MODEL\nProvider: " + choice.provider + "\nModel: " + choice.model + "\n\n" + context,
               messages,
               maxOutputTokens: route === "FAST" ? 500 : route === "STANDARD" ? 1200 : 2200,
+              ...(route === "FAST" ? {} : { tools: jarvisChatTools(), stopWhen: stepCountIs(5) }),
             });
 
             for await (const delta of result.textStream) {
@@ -454,7 +468,8 @@ export async function POST(request: Request) {
         }
 
         const metadataChoice = candidates[0] || activeChoice;
-        const metadata = await extractMetadata(metadataChoice, latestUser, reply, activeDomain, memories);
+        const metadata = await extractMetadata(metadataChoice, latestUser, reply, activeDomain, mergedMemory);
+        await saveMemoryFacts(metadata.memoryUpdates, "chat").catch(() => 0);
         sendEvent(controller, encoder, "final", {
           ...metadata,
           route,
