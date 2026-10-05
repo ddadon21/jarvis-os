@@ -1,5 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { JARVIS_MODELS } from "../../../../../lib/jarvis-models";
 
 export const runtime = "nodejs";
 
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
   const localNow = clean(body?.localNow, 80) || new Date().toISOString();
   const timeZone = clean(body?.timeZone, 80) || "America/New_York";
   const result = await generateText({
-    model: openai("gpt-5.6-luna"),
+    model: openai(JARVIS_MODELS.gptFast),
     system: [
       "You are a strict structured action parser for JARVIS.",
       "Never invent an email address, attendee, date, time, subject, title, or location.",

@@ -1,10 +1,11 @@
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { JARVIS_MODELS } from "../../../../../lib/jarvis-models";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const BROWSER_MODEL = "gpt-5.6-luna";
+const BROWSER_MODEL = JARVIS_MODELS.gptFast;
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as {

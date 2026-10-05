@@ -11,6 +11,8 @@ export const JARVIS_MODELS = {
   gptStandard: process.env.JARVIS_GPT_MODEL || "gpt-5.6-sol",
   gptFast: process.env.JARVIS_GPT_FAST_MODEL || "gpt-5.6-luna",
   agent: process.env.JARVIS_AGENT_MODEL || "",
+  /** Vercel AI Gateway model for screen/chart vision, with gateway fallbacks below. */
+  gatewayVision: process.env.JARVIS_GATEWAY_VISION_MODEL || "google/gemini-3.6-flash",
 } as const;
 
 export type AgentModelChoice = { model: LanguageModel; provider: "Anthropic" | "OpenAI"; id: string };

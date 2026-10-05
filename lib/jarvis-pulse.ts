@@ -1,5 +1,6 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { generateText, gateway } from "ai";
+import { JARVIS_MODELS } from "./jarvis-models";
 import {
   JarvisPulse,
   ResearchOpportunity,
@@ -11,7 +12,7 @@ import {
 } from "./jarvis-runtime";
 
 const MAX_OPPORTUNITIES = 5;
-const CLAUDE_RESEARCH_MODEL = "claude-opus-5";
+const CLAUDE_RESEARCH_MODEL = JARVIS_MODELS.claudeDeep;
 
 export async function runJarvisPulse(): Promise<JarvisPulse> {
   const previous = await getLatestPulse();

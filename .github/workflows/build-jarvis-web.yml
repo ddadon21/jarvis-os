@@ -31,7 +31,7 @@ jobs:
           node-version: '24'
 
       - name: Install
-        run: npm install
+        run: npm ci
 
       - name: Verify observer state regressions
         run: node --test tests/*.test.mjs

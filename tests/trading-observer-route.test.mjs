@@ -40,6 +40,7 @@ function harness({ generate, cacheFails = false } = {}) {
       authenticateObserverDevice: async (_id, token) => token === 'test' ? { deviceId: id } : null,
       markObserverFrame: async () => {},
     },
+    '../../../../lib/jarvis-models': { JARVIS_MODELS: { gatewayVision: 'gateway-test', claudeDeep: 'claude-test', gptStandard: 'gpt-test', gptFast: 'gpt-fast-test' } },
     '../../../../lib/trading-rules': {
       cachedTradingRules: () => ({ propFirm: 'Lucid Trading', accountLabel: 'CURRENT PROP ACCOUNT', maxTradesPerDay: 2, riskTargetDollars: 500, pointValues: {} }),
     },

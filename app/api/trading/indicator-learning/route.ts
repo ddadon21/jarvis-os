@@ -3,13 +3,14 @@ import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { appendRuntimeEvent, createRuntimeEvent } from "../../../../lib/jarvis-runtime";
 import { getTradingState } from "../../../../lib/trading-runtime";
+import { JARVIS_MODELS } from "../../../../lib/jarvis-models";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const FALLBACK_URL = "https://cubkgxdhkehmzczbvczy.supabase.co";
 const FALLBACK_PUBLISHABLE_KEY = "sb_publishable_90f_kCgqpgfC8NvoviAyXg_anParHd2";
-const GATEWAY_PRIMARY_MODEL = "google/gemini-3.6-flash";
+const GATEWAY_PRIMARY_MODEL = JARVIS_MODELS.gatewayVision;
 const GATEWAY_FALLBACK_MODELS = ["openai/gpt-5.6-sol", "anthropic/claude-opus-5"] as const;
 
 type LearningResult = {
@@ -233,7 +234,7 @@ Return ONLY JSON:
   let raw = "";
   if (process.env.OPENAI_API_KEY) {
     const result = await generateText({
-      model: openai(process.env.JARVIS_INDICATOR_RESEARCH_MODEL || "gpt-5.6-sol"),
+      model: openai(process.env.JARVIS_INDICATOR_RESEARCH_MODEL || JARVIS_MODELS.gptStandard),
       abortSignal: AbortSignal.timeout(30_000),
       maxOutputTokens: 1600,
       maxRetries: 0,

@@ -7,13 +7,14 @@ import { openai } from "@ai-sdk/openai";
 import { getTradingState, ingestTradingObservation, type JournalTrade, type TradingObservationInput } from "../../../../lib/trading-runtime";
 import { authenticateObserverDevice, markObserverFrame } from "../../../../lib/trading-device-link";
 import { cachedTradingRules } from "../../../../lib/trading-rules";
+import { JARVIS_MODELS } from "../../../../lib/jarvis-models";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const GATEWAY_PRIMARY_MODEL = "google/gemini-3.6-flash";
+const GATEWAY_PRIMARY_MODEL = JARVIS_MODELS.gatewayVision;
 const GATEWAY_FALLBACK_MODELS = ["openai/gpt-5.6-sol", "anthropic/claude-opus-5"] as const;
-const DIRECT_ANTHROPIC_MODEL = "claude-opus-5";
+const DIRECT_ANTHROPIC_MODEL = JARVIS_MODELS.claudeDeep;
 const MAX_BASE64_CHARS = 8_000_000;
 
 const FRAME_READ_SCHEMA = {
@@ -299,7 +300,7 @@ Rules:
   if (process.env.OPENAI_API_KEY) {
     try {
       const result = await generateText({
-        model: openai(process.env.JARVIS_OBSERVER_OPENAI_MODEL || "gpt-5.6-sol"),
+        model: openai(process.env.JARVIS_OBSERVER_OPENAI_MODEL || JARVIS_MODELS.gptStandard),
         abortSignal: AbortSignal.timeout(12_000),
         maxOutputTokens: 1600,
         maxRetries: 0,

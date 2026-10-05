@@ -1,6 +1,7 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
+import { JARVIS_MODELS } from "../../../../lib/jarvis-models";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -9,7 +10,7 @@ async function probe(name: "OpenAI" | "Anthropic") {
   const configured = name === "OpenAI"
     ? Boolean(process.env.OPENAI_API_KEY)
     : Boolean(process.env.ANTHROPIC_API_KEY);
-  const model = name === "OpenAI" ? "gpt-5.6-sol" : "claude-opus-5";
+  const model = name === "OpenAI" ? JARVIS_MODELS.gptStandard : JARVIS_MODELS.claudeDeep;
   if (!configured) return { provider: name, configured: false, ok: false, model, latencyMs: null, error: "credential_missing" };
 
   const started = Date.now();
