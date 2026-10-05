@@ -1,3 +1,4 @@
+import { cronAuthorized } from "../../../../lib/owner-auth";
 import { runWorkforceCycle } from "../../../../lib/jarvis-workforce";
 
 export const runtime = "nodejs";
@@ -18,16 +19,5 @@ export async function GET(request: Request) {
 }
 
 function isAuthorized(request: Request) {
-  const configuredSecret = process.env.CRON_SECRET;
-  const authorization = request.headers.get("authorization");
-
-  if (configuredSecret) return authorization === `Bearer ${configuredSecret}`;
-  if (request.headers.get("x-vercel-cron-schedule")) return true;
-
-  if (process.env.VERCEL_ENV !== "production") {
-    const url = new URL(request.url);
-    return url.searchParams.get("manual") === "1";
-  }
-
-  return false;
+  return cronAuthorized(request);
 }

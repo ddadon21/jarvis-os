@@ -1,3 +1,4 @@
+import { requestIsOwner } from "../../../../lib/owner-auth";
 import { addWorkforceObjective, getOrSeedWorkforceState } from "../../../../lib/jarvis-workforce";
 import { RuntimeDomain } from "../../../../lib/jarvis-runtime";
 
@@ -35,16 +36,8 @@ export async function POST(request: Request) {
 }
 
 function isAuthorized(request: Request) {
-  const configuredSecret = process.env.JARVIS_OBJECTIVE_SECRET || process.env.JARVIS_EVENT_SECRET;
-  const authorization = request.headers.get("authorization");
-  if (configuredSecret) return authorization === `Bearer ${configuredSecret}`;
-
-  if (process.env.VERCEL_ENV !== "production") {
-    const url = new URL(request.url);
-    return url.searchParams.get("manual") === "1";
-  }
-
-  return false;
+  // Middleware verified the owner session or an automation secret.
+  return requestIsOwner(request);
 }
 
 function normalizeDomain(value: unknown): RuntimeDomain {

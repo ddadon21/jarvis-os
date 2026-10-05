@@ -4,6 +4,9 @@ import {
   type LocalAgentDesktopAction,
 } from "../../../../lib/trading-device-link";
 
+import { requestIsOwner } from "../../../../lib/owner-auth";
+import { recordApproval } from "../../../../lib/approvals";
+
 export const runtime = "nodejs";
 
 function bearer(request: Request) {
@@ -33,6 +36,7 @@ const ACTIONS: LocalAgentDesktopAction[] = [
 const READ_ONLY = new Set<LocalAgentDesktopAction>(["GET_CONTEXT", "SCREEN_CAPTURE", "CLIPBOARD_READ", "BROWSER_READ_PAGE"]);
 
 export async function POST(request: Request) {
+  if (!requestIsOwner(request)) return Response.json({ ok: false, error: "Owner login required." }, { status: 401 });
   const controllerToken = bearer(request);
   if (!controllerToken) return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
@@ -67,6 +71,11 @@ export async function POST(request: Request) {
 
   if (!command) {
     return Response.json({ ok: false, error: "Local Agent is not paired or command is invalid." }, { status: 401 });
+  }
+
+  if (!READ_ONLY.has(body.action)) {
+    // Audit trail: the verified owner session approved this specific action.
+    await recordApproval({ subjectType: "DESKTOP_ACTION", subjectId: command.id, decision: "APPROVED", reason: `${body.action} ${String(body.target ?? "").slice(0, 120)}` });
   }
 
   return Response.json({ ok: true, command }, {

@@ -1,3 +1,4 @@
+import { cronAuthorized } from "../../../../lib/owner-auth";
 import { runWorkforceCycle } from "../../../../lib/jarvis-workforce";
 import { getLastPulseAt, shouldRunPulse } from "../../../../lib/jarvis-runtime";
 
@@ -28,20 +29,6 @@ export async function GET(request: Request) {
   return Response.json({ ok: workforce.status !== "DEGRADED", skipped: false, workforce });
 }
 
-function isAuthorized(request: Request): boolean {
-  const configuredSecret = process.env.CRON_SECRET;
-  const authorization = request.headers.get("authorization");
-
-  if (configuredSecret) {
-    return authorization === `Bearer ${configuredSecret}`;
-  }
-
-  if (request.headers.get("x-vercel-cron-schedule")) return true;
-
-  if (process.env.VERCEL_ENV !== "production") {
-    const url = new URL(request.url);
-    return url.searchParams.get("manual") === "1";
-  }
-
-  return false;
+function isAuthorized(request: Request) {
+  return cronAuthorized(request);
 }

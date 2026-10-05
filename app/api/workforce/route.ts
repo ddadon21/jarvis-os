@@ -1,3 +1,4 @@
+import { requestIsOwner } from "../../../lib/owner-auth";
 import { addWorkforceTask, getOrSeedWorkforceState, runWorkforceCycle } from "../../../lib/jarvis-workforce";
 import { getRecentEvents, type AgentId, type AgentPermission, type AgentTaskPriority, type RuntimeDomain } from "../../../lib/jarvis-runtime";
 
@@ -65,19 +66,6 @@ export async function POST(request: Request) {
 }
 
 function isAuthorized(request: Request) {
-  const configuredSecret = process.env.JARVIS_WORKFORCE_SECRET || process.env.JARVIS_OBJECTIVE_SECRET || process.env.JARVIS_EVENT_SECRET;
-  const authorization = request.headers.get("authorization");
-  if (configuredSecret && authorization === `Bearer ${configuredSecret}`) return true;
-
-  const url = new URL(request.url);
-  const origin = request.headers.get("origin");
-  const fetchSite = request.headers.get("sec-fetch-site");
-  const sameOriginUi = origin === url.origin && (fetchSite === "same-origin" || fetchSite === "same-site");
-  if (sameOriginUi) return true;
-
-  if (process.env.VERCEL_ENV !== "production") {
-    return url.searchParams.get("manual") === "1";
-  }
-
-  return false;
+  // Middleware verified the owner session or an automation secret.
+  return requestIsOwner(request);
 }
