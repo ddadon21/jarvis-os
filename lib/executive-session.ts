@@ -57,7 +57,7 @@ function configured(brain: ExecutiveBrain) {
 }
 
 function modelFor(brain: ExecutiveBrain) {
-  return brain === "GPT" ? openai(JARVIS_MODELS.gptStandard) : anthropic(JARVIS_MODELS.claudeDeep);
+  return brain === "GPT" ? openai(JARVIS_MODELS.gptExecutive) : anthropic(JARVIS_MODELS.claudeDeep);
 }
 
 async function ask(brain: ExecutiveBrain, system: string, prompt: string) {
