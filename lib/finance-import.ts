@@ -12,10 +12,10 @@ export const FINANCE_IMPORT = {
       "subtype": "checking",
       "ownership": "PERSONAL",
       "role": "PERSONAL CONTROL",
-      "current": 3.25,
-      "available": 3.25,
+      "current": 2.3,
+      "available": 2.3,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:23.428957Z",
+      "balanceUpdatedAt": "2026-10-05T04:49:43.194637Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -27,10 +27,10 @@ export const FINANCE_IMPORT = {
       "subtype": "checking",
       "ownership": "PERSONAL",
       "role": "TEMPORARY SUBSCRIPTIONS",
-      "current": 1.64,
-      "available": 1.64,
+      "current": 14.49,
+      "available": 9.49,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:26.550322Z",
+      "balanceUpdatedAt": "2026-10-05T04:49:43.413789Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -42,10 +42,10 @@ export const FINANCE_IMPORT = {
       "subtype": "checking",
       "ownership": "BUSINESS",
       "role": "CAPITAL GENERATION",
-      "current": 528.1,
-      "available": 4.74,
+      "current": -11.26,
+      "available": -11.26,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:28.094359Z",
+      "balanceUpdatedAt": "2026-10-05T04:49:43.512590Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -60,7 +60,7 @@ export const FINANCE_IMPORT = {
       "current": 0.93,
       "available": 0.93,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:30.032396Z",
+      "balanceUpdatedAt": "2026-10-04T13:28:17.245721Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -75,7 +75,7 @@ export const FINANCE_IMPORT = {
       "current": 1.78,
       "available": 1.78,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:30.032396Z",
+      "balanceUpdatedAt": "2026-10-04T13:28:17.245721Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -87,10 +87,10 @@ export const FINANCE_IMPORT = {
       "subtype": "savings",
       "ownership": "PERSONAL",
       "role": "LIQUIDITY / RESERVE",
-      "current": 0.74,
-      "available": 0.74,
+      "current": 0.76,
+      "available": 0.76,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:32.507394Z",
+      "balanceUpdatedAt": "2026-10-04T12:21:08.621635Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -102,10 +102,10 @@ export const FINANCE_IMPORT = {
       "subtype": "checking",
       "ownership": "PERSONAL",
       "role": "LIFESTYLE",
-      "current": 0.05,
-      "available": 0.05,
+      "current": 7.43,
+      "available": 7.43,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:34.336732Z",
+      "balanceUpdatedAt": "2026-10-05T04:49:44.484169Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -120,7 +120,7 @@ export const FINANCE_IMPORT = {
       "current": 3.99,
       "available": 2.99,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:34.336732Z",
+      "balanceUpdatedAt": "2026-10-04T16:29:37.119176Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -132,10 +132,10 @@ export const FINANCE_IMPORT = {
       "subtype": "credit card",
       "ownership": "AUTHORIZED_USER",
       "role": "CREDIT CONTEXT",
-      "current": 8205.97,
-      "available": 4294,
+      "current": 8332.66,
+      "available": 4153,
       "limit": 12500,
-      "balanceUpdatedAt": "2026-09-25T04:14:34.336732Z",
+      "balanceUpdatedAt": "2026-10-05T04:49:44.484169Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -147,10 +147,10 @@ export const FINANCE_IMPORT = {
       "subtype": "credit card",
       "ownership": "PERSONAL",
       "role": "LIABILITY",
-      "current": 598.12,
-      "available": 1,
+      "current": 592.14,
+      "available": 7,
       "limit": 600,
-      "balanceUpdatedAt": "2026-09-25T04:14:34.336732Z",
+      "balanceUpdatedAt": "2026-10-04T16:29:37.119176Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     },
@@ -165,7 +165,7 @@ export const FINANCE_IMPORT = {
       "current": 540.19,
       "available": null,
       "limit": null,
-      "balanceUpdatedAt": "2026-09-25T04:14:35.949195Z",
+      "balanceUpdatedAt": "2026-10-04T23:34:24.233747Z",
       "balanceAsOf": null,
       "balanceFreshness": "unknown"
     }
@@ -201,11 +201,11 @@ export const FINANCE_IMPORT = {
   ],
   "mode": "SYNCED_SNAPSHOT",
   "source": "CHATGPT FINANCES · REFRESHED SNAPSHOT",
-  "asOf": "2026-09-25T04:14:35.949Z",
+  "asOf": "2026-10-05T04:49:48.938Z",
   "connectionCount": 7,
   "transactionHistory": "FULL HISTORY IN CHATGPT; NOT IMPORTED",
   "recurringHistory": "FULL HISTORY IN CHATGPT; NOT IMPORTED",
-  "note": "Refreshed all 7 connections on Sep 24 at 11:14 PM Central. These are the latest provider-returned balances, not guaranteed real-time bank values. Provider balance freshness is unconfirmed. Capital One Platinum and Roth IRA are absent from this 11-account set; no balance assumed."
+  "note": "Refresh requested for all 7 connections on Oct 5. Snapshot uses the latest provider-returned balances re-read after that request; provider effective balance times remain unconfirmed, and several connections reported partial account coverage immediately after the refresh request. Platinum Premier remains AUTHORIZED_USER and is excluded from personal debt. Capital One Platinum and Roth IRA are absent from this connected account set; no balance assumed."
 } satisfies {
  accounts: FinanceAccountState[]; liabilities: FinanceLiabilityState[];
  mode: "SYNCED_SNAPSHOT"; source: string; asOf: string; connectionCount: number;
