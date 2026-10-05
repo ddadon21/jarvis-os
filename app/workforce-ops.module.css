@@ -1,0 +1,105 @@
+/* Below-the-floor operations: decisions, work, outcomes, brief. Jarvis crimson HUD. */
+
+.approvals, .panel, .drawer {
+  position: relative;
+  z-index: 2;
+  border: 1px solid rgba(183, 31, 38, .28);
+  background: rgba(8, 6, 7, .9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.approvals { margin-top: 10px; padding: 12px }
+
+.sectionHead { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; margin: 2px 0 8px }
+.sectionHead > div { display: grid; gap: 2px }
+.sectionHead span { font-size: 8px; letter-spacing: .16em; color: #a5686d }
+.sectionHead strong { font-size: 11px; letter-spacing: .14em; color: #fff }
+.sectionHead small { font-size: 8px; letter-spacing: .1em; color: #8d7a7c; text-align: right }
+.sectionHead small a { color: #ff8a90; text-decoration: none }
+
+.approvalList { display: grid; gap: 8px }
+.approval { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px; border: 1px solid rgba(224, 160, 64, .45); background: rgba(224, 160, 64, .05) }
+.approvalBody { display: grid; gap: 4px; min-width: 0 }
+.approvalBody b { font-size: 8px; letter-spacing: .14em; color: #e0a040 }
+.approvalBody strong { font-size: 12px; line-height: 1.35 }
+.approvalBody small { font-size: 9.5px; line-height: 1.4; color: #b9a7a9 }
+.approvalBody input { margin-top: 2px; height: 30px; padding: 0 8px; background: #050405; border: 1px solid rgba(183, 31, 38, .35); color: #fff; font: inherit; font-size: 11px }
+.approvalActions { display: flex; flex-direction: column; gap: 6px }
+.approve, .deny {
+  min-width: 96px; height: 32px; border: 1px solid; font: inherit; font-size: 10px; letter-spacing: .14em; font-weight: 700; cursor: pointer;
+}
+.approve { border-color: #54d8a4; background: rgba(84, 216, 164, .12); color: #d9fff0 }
+.deny { border-color: rgba(255, 255, 255, .3); background: transparent; color: #fff }
+.approve:disabled, .deny:disabled { opacity: .45; cursor: not-allowed }
+
+.workGrid { margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.15fr) minmax(260px, .8fr); gap: 10px; align-items: start }
+.panel { padding: 12px; display: grid; gap: 6px; min-width: 0 }
+
+.assign { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr) auto; gap: 6px; margin-bottom: 8px }
+.assign select, .assign input { height: 34px; padding: 0 8px; background: #050405; border: 1px solid rgba(183, 31, 38, .4); color: #fff; font: inherit; font-size: 11px; min-width: 0 }
+.assign button { height: 34px; padding: 0 14px; border: 1px solid #b71f26; background: rgba(183, 31, 38, .25); color: #fff; font: inherit; font-size: 10px; letter-spacing: .14em; font-weight: 700; cursor: pointer }
+.assign button:disabled { opacity: .45; cursor: not-allowed }
+
+.list { display: grid; gap: 5px; margin-bottom: 8px }
+.task { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px; border: 1px solid rgba(183, 31, 38, .14); background: rgba(183, 31, 38, .03) }
+.task > i { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: #6f6264 }
+.task > div:nth-child(2) { display: grid; gap: 3px; min-width: 0 }
+.task strong { font-size: 11px; line-height: 1.35 }
+.task span { font-size: 8.5px; letter-spacing: .06em; color: #8d7a7c }
+.task small { font-size: 10px; line-height: 1.45; color: #c9bfc0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical }
+.taskSide { display: flex; flex-direction: column; align-items: flex-end; gap: 5px }
+.taskSide button { padding: 4px 8px; border: 1px solid rgba(255, 59, 68, .6); background: rgba(183, 31, 38, .15); color: #fff; font: inherit; font-size: 8.5px; letter-spacing: .12em; cursor: pointer; white-space: nowrap }
+.taskSide button:disabled { opacity: .45; cursor: not-allowed }
+.taskSide b { font-size: 7.5px; letter-spacing: .12em; padding: 2px 5px; border: 1px solid currentColor; white-space: nowrap }
+
+.statusRUNNING { background: #ff3b44 !important; box-shadow: 0 0 6px #ff3b44 }
+.statusQUEUED { background: #fff !important }
+.statusBLOCKED, .statusWAITING_APPROVAL { background: #e0a040 !important }
+.statusFAILED { background: #ff2d2d !important }
+.statusDONE { background: #54d8a4 !important }
+.statusCANCELLED { background: #4a4344 !important }
+
+.proofVERIFIED { color: #54d8a4; background: #54d8a4 }
+.proofOBSERVED { color: #9fc1ff; background: #9fc1ff }
+.proofCLAIMED { color: #e0a040; background: #e0a040 }
+.taskSide b.proofVERIFIED, .taskSide b.proofOBSERVED, .taskSide b.proofCLAIMED { background: transparent }
+.legend { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end }
+.legend i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-left: 6px }
+
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px }
+.check { display: grid; gap: 3px; padding: 7px; border: 1px solid; min-width: 0 }
+.check b { font-size: 8.5px; letter-spacing: .12em }
+.check span { font-size: 9px; line-height: 1.35; color: #c9bfc0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical }
+.checkOk { border-color: rgba(84, 216, 164, .35) }
+.checkOk b { color: #54d8a4 }
+.checkBad { border-color: rgba(255, 59, 68, .45) }
+.checkBad b { color: #ff3b44 }
+
+.brief { margin: 0 0 4px; font-size: 12px; line-height: 1.45; color: #fff }
+.subtle { margin: 0 0 8px; font-size: 10px; line-height: 1.5; color: #9b8b8d }
+.objective { display: grid; gap: 3px; padding: 8px; border-left: 2px solid #b71f26; background: rgba(183, 31, 38, .04); margin-bottom: 5px }
+.objective strong { font-size: 10.5px; line-height: 1.35 }
+.objective span { font-size: 9.5px; line-height: 1.4; color: #9b8b8d }
+.events { display: grid; gap: 5px }
+.events > div { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 6px; font-size: 9.5px; line-height: 1.4 }
+.events b { color: #ff3b44; font-weight: 500; font-size: 8.5px }
+.events span { color: #c9bfc0 }
+
+.empty { margin: 0; font-size: 10px; line-height: 1.5; color: #8d7a7c }
+
+.drawer { margin-top: 10px; padding: 0 12px }
+.drawer summary { padding: 12px 0; cursor: pointer; font-size: 10px; letter-spacing: .16em; color: #ff8a90 }
+.drawerGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding-bottom: 14px }
+.drawerGrid h3 { margin: 6px 0; font-size: 9px; letter-spacing: .14em; color: #a5686d; font-weight: 600 }
+.drawerGrid ol, .drawerGrid ul { margin: 0; padding-left: 16px; font-size: 10.5px; line-height: 1.55; color: #cbbfc1 }
+
+@media (max-width: 1100px) {
+  .workGrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) }
+  .workGrid > aside { grid-column: 1 / -1 }
+}
+@media (max-width: 760px) {
+  .workGrid, .drawerGrid { grid-template-columns: 1fr }
+  .assign { grid-template-columns: 1fr }
+  .approval { grid-template-columns: 1fr }
+  .approvalActions { flex-direction: row }
+  .approve, .deny { flex: 1 }
+}

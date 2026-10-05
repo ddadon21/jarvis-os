@@ -30,6 +30,7 @@ export type WorkforceTask = {
   status: "QUEUED" | "RUNNING" | "DONE" | "BLOCKED" | "FAILED" | "WAITING_APPROVAL" | "CANCELLED";
   priority: string;
   updatedAt: string;
+  source?: string;
   result: string | null;
   evidence: string[];
   blockedReason: string | null;
