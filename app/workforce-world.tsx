@@ -454,6 +454,7 @@ export default function WorkforceWorld() {
       WAITING_APPROVAL: 3,
       DONE: 4,
       FAILED: 5,
+      CANCELLED: 6,
     };
     return agents.map((agent) => {
       const activeTask = tasks

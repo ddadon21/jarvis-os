@@ -27,7 +27,7 @@ export type WorkforceTask = {
   title: string;
   domain: string;
   assignedTo: string;
-  status: "QUEUED" | "RUNNING" | "DONE" | "BLOCKED" | "FAILED" | "WAITING_APPROVAL";
+  status: "QUEUED" | "RUNNING" | "DONE" | "BLOCKED" | "FAILED" | "WAITING_APPROVAL" | "CANCELLED";
   priority: string;
   updatedAt: string;
   result: string | null;

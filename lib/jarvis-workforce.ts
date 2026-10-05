@@ -4,6 +4,9 @@ import { runJarvisPulse } from "./jarvis-pulse";
 import { getTradingState } from "./trading-runtime";
 import { getJarvisIntegrationRegistry } from "./jarvis-integration-registry";
 import { JARVIS_BALANCED_GOVERNANCE, JARVIS_OPERATING_DOCTRINE } from "./jarvis-core-policy";
+import { infrastructureCheck, integrationsCheck, securityCheck } from "./workforce-checks";
+import { runAgentTask } from "./workforce-agents";
+import { recordApproval } from "./approvals";
 import {
   AgentId,
   AgentPermission,
@@ -508,81 +511,31 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
   tasks = updateTask(tasks, integrationsTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
 
   const integrationRegistry = await getJarvisIntegrationRegistry();
-  const coreIntegrationIds = new Set(["SUPABASE", "OBSIDIAN", "TRADING_OBSERVER"]);
-  const coreIntegrations = integrationRegistry.filter((item) => coreIntegrationIds.has(item.id));
-  const degradedCore = coreIntegrations.filter((item) => item.state === "DEGRADED");
-  const unattachedCore = coreIntegrations.filter((item) => item.state === "NEEDS_CONNECTION");
-  const activeIntegrations = integrationRegistry.filter((item) => item.state !== "NEEDS_APP_SETUP" && item.state !== "NEEDS_CONNECTION");
-  const degradedConfigured = activeIntegrations.filter((item) => item.state === "DEGRADED");
-
-  const infraResult = degradedCore.length
-    ? "Infrastructure check found degraded core dependencies: " + degradedCore.map((item) => item.label).join(", ") + "."
-    : unattachedCore.length
-      ? "Infrastructure is operational. Unattached preview-only mirrors: " + unattachedCore.map((item) => item.label).join(", ") + ". Vercel Runtime Cache remains active for the workforce."
-      : "Infrastructure check passed for core persistence, Obsidian bridge registration, and Trading Observer registration.";
-  agents = setAgent(agents, "IT_INFRA", {
-    status: degradedCore.length ? "ERROR" : "DONE",
-    lastRanAt: now,
-    lastResult: infraResult,
-    currentWork: degradedCore.length
-      ? "Restore degraded core infrastructure before expanding automation."
-      : "Keep core runtime, persistence, and scheduled work healthy.",
-  });
-  tasks = updateTask(tasks, infraTaskResult.task.id, {
-    status: degradedCore.length ? "FAILED" : "DONE",
-    result: infraResult,
-    evidence: coreIntegrations.map((item) => item.id + "=" + item.state),
-    blockedReason: degradedCore.length ? infraResult : null,
-  });
-
-  const securityFindings: string[] = [];
-  const productionRuntime = process.env.VERCEL_ENV === "production";
-  if (productionRuntime && !process.env.CRON_SECRET) securityFindings.push("CRON_SECRET missing in production");
-  if (productionRuntime && !process.env.SUPABASE_SERVICE_ROLE_KEY) securityFindings.push("Supabase service role unavailable to production server runtime");
-  const securityResult = securityFindings.length
-    ? "Security audit found production configuration risks: " + securityFindings.join("; ") + "."
-    : "Security audit passed baseline checks. Preview-only missing service credentials are treated as environment configuration, not security incidents.";
-  agents = setAgent(agents, "IT_SECURITY", {
-    status: securityFindings.length ? "ERROR" : "DONE",
-    lastRanAt: now,
-    lastResult: securityResult,
-    currentWork: securityFindings.length
-      ? "Resolve the reported production configuration risks without exposing secret values."
-      : "Watch authorization boundaries and prevent agents from exceeding permission ceilings.",
-  });
-  tasks = updateTask(tasks, securityTaskResult.task.id, {
-    status: securityFindings.length ? "FAILED" : "DONE",
-    result: securityResult,
-    evidence: [
-      "environment=" + (process.env.VERCEL_ENV || "local"),
-      "cronSecret=" + (process.env.CRON_SECRET ? "configured" : productionRuntime ? "missing" : "optional-preview"),
-      "supabaseServiceRole=" + (process.env.SUPABASE_SERVICE_ROLE_KEY ? "configured" : productionRuntime ? "missing" : "optional-preview"),
-    ],
-    blockedReason: securityFindings.length ? securityResult : null,
-  });
-
-  const previewUnattached = integrationRegistry.filter((item) => item.state === "NEEDS_CONNECTION" && item.id === "SUPABASE");
-  const integrationsResult = degradedConfigured.length
-    ? "Integration check found degraded configured services: " + degradedConfigured.map((item) => item.label).join(", ") + "."
-    : previewUnattached.length
-      ? "Connected services are healthy. Supabase server mirroring is not attached to this preview deployment, so JARVIS is using Runtime Cache without reporting a false integration failure."
-      : "Integration check found no degraded connected or authorization-ready services. Unused providers are ignored.";
-  agents = setAgent(agents, "IT_INTEGRATIONS", {
-    status: degradedConfigured.length ? "ERROR" : "DONE",
-    lastRanAt: now,
-    lastResult: integrationsResult,
-    currentWork: degradedConfigured.length
-      ? "Repair or isolate degraded connected services."
-      : "Watch active connectors, Local Agent bridges, and provider handoffs.",
-  });
-  tasks = updateTask(tasks, integrationsTaskResult.task.id, {
-    status: degradedConfigured.length ? "FAILED" : "DONE",
-    result: integrationsResult,
-    evidence: integrationRegistry
-      .filter((item) => item.state !== "NEEDS_APP_SETUP")
-      .map((item) => item.id + "=" + item.state),
-    blockedReason: degradedConfigured.length ? integrationsResult : null,
-  });
+  // IT agents run measured checks; evidence lines prefixed "check:" are what QA can verify.
+  const [infra, security, integrations] = await Promise.all([
+    infrastructureCheck().catch((error) => ({ ok: false, degraded: true, summary: "Infrastructure check crashed: " + (error instanceof Error ? error.message : "unknown"), findings: [], evidence: ["check:infra=crashed"] })),
+    Promise.resolve(securityCheck()),
+    integrationsCheck().catch((error) => ({ ok: false, degraded: true, summary: "Integration check crashed: " + (error instanceof Error ? error.message : "unknown"), findings: [], evidence: ["check:integrations=crashed"] })),
+  ]);
+  const itLanes: Array<[AgentId, string, typeof infra, string, string]> = [
+    ["IT_INFRA", infraTaskResult.task.id, infra, "Restore degraded infrastructure before expanding automation.", "Keep core runtime, persistence, and scheduled work healthy."],
+    ["IT_SECURITY", securityTaskResult.task.id, security, "Resolve the reported configuration risks without exposing secret values.", "Watch authorization boundaries and keep agents inside their permission ceilings."],
+    ["IT_INTEGRATIONS", integrationsTaskResult.task.id, integrations, "Repair the reported data feeds and Local Agent link.", "Watch the Local Agent, the trade journal sync and the market data feed."],
+  ];
+  for (const [id, taskId, check, fixWork, steadyWork] of itLanes) {
+    agents = setAgent(agents, id, {
+      status: check.degraded ? "ERROR" : "DONE",
+      lastRanAt: now,
+      lastResult: check.summary,
+      currentWork: check.degraded ? fixWork : steadyWork,
+    });
+    tasks = updateTask(tasks, taskId, {
+      status: check.degraded ? "FAILED" : "DONE",
+      result: check.summary,
+      evidence: check.evidence,
+      blockedReason: check.degraded ? check.findings.join(" ") || check.summary : null,
+    });
+  }
 
   const activeBuildObjective = previous.objectives.find(
     (objective) =>
@@ -644,6 +597,10 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
       currentWork: "Stand by for validated product work or new trading evidence from Observer + journal images/notes.",
     });
   }
+
+  const executed = await executeQueuedTasks(tasks, agents, now);
+  tasks = executed.tasks;
+  agents = executed.agents;
 
   tasks = applyTruthVerification(tasks, now);
   tasks = updateTask(tasks, qaTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
@@ -1020,6 +977,12 @@ function defaultDefinitionOfDone(input: { title: string; assignedTo?: string; do
   ].join(", ") + ".";
 }
 
+/**
+ * Honest proof states:
+ * - VERIFIED: the outcome rests on a measured machine check (evidence "check:…").
+ * - OBSERVED: grounded in tool output or recorded evidence, but not machine-verified.
+ * - CLAIMED: completion without evidence.
+ */
 function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
   return tasks.map((task) => {
     if (task.status !== "DONE") {
@@ -1030,7 +993,7 @@ function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
             state: "DISPUTED" as const,
             checkedBy: task.assignedTo === "JARVIS_QA" ? "EXECUTIVE" as const : "JARVIS_QA" as const,
             checkedAt,
-            rationale: "The attempted outcome did not complete cleanly; the result is retained as failure evidence rather than accepted as verified success.",
+            rationale: "The outcome did not complete cleanly; the result is kept as failure evidence, not success.",
             evidenceCount: task.evidence.length,
           },
         };
@@ -1039,11 +1002,11 @@ function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
     }
 
     const evidence = task.evidence.filter((item) => item.trim().length > 0);
+    const measured = evidence.some((item) => item.startsWith("check:"));
     const hasResult = Boolean(task.result?.trim());
-    const hasDefinition = Boolean(task.definitionOfDone?.trim());
     const state =
-      hasResult && hasDefinition && evidence.length > 0 ? "VERIFIED" as const :
-      evidence.length > 0 ? "OBSERVED" as const :
+      measured && hasResult ? "VERIFIED" as const :
+      evidence.length > 0 && hasResult ? "OBSERVED" as const :
       "CLAIMED" as const;
     const checkedBy = task.assignedTo === "JARVIS_QA" ? "EXECUTIVE" as const : "JARVIS_QA" as const;
 
@@ -1055,14 +1018,22 @@ function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
         checkedAt,
         rationale:
           state === "VERIFIED"
-            ? "Verifier found a recorded outcome, a definition of done, and supporting evidence. External facts remain bounded by the freshness and quality of their cited source."
+            ? "Outcome rests on a measured machine check recorded as evidence."
             : state === "OBSERVED"
-              ? "Evidence exists, but the outcome or completion standard is incomplete."
-              : "The agent reported completion without enough recorded evidence for independent verification.",
+              ? "Outcome is grounded in tool output or recorded evidence, but no machine check confirms it."
+              : "Completion was reported without evidence; treat it as a claim.",
         evidenceCount: evidence.length,
       },
     };
   });
+}
+
+/** Share of recent completions that are grounded (VERIFIED or OBSERVED), used for unattended readiness. */
+function groundedRate(tasks: AgentTask[]) {
+  const done = tasks.filter((task) => task.status === "DONE");
+  if (!done.length) return 100;
+  const grounded = done.filter((task) => task.verification?.state === "VERIFIED" || task.verification?.state === "OBSERVED").length;
+  return Math.round((grounded / done.length) * 100);
 }
 
 function riskRank(value: WorkforceGap["risk"]) {
@@ -1352,7 +1323,7 @@ function buildContinuity(input: {
   if (agentErrors.length) blockingReasons.push(`${agentErrors.length} agent error${agentErrors.length === 1 ? "" : "s"} remain unresolved.`);
   if (criticalGaps.length) blockingReasons.push(`${criticalGaps.length} critical gap${criticalGaps.length === 1 ? "" : "s"} remain open.`);
   if (stale.length) blockingReasons.push(`${stale.length} open task${stale.length === 1 ? "" : "s"} have been stale for more than 24 hours.`);
-  if (input.truthRate < 90) blockingReasons.push(`Completion verification is ${input.truthRate}%; unattended operation requires at least 90% of recorded completions to be independently verified.`);
+  if (input.truthRate < 90) blockingReasons.push(`Only ${input.truthRate}% of recorded completions are grounded in checks or tool evidence; unattended operation requires at least 90%.`);
 
   const closed = recent.filter(task => ["DONE", "FAILED"].includes(task.status)).length;
   const verified = recent.filter(task => task.status === "DONE" && task.verification?.state === "VERIFIED").length;
@@ -1478,7 +1449,7 @@ function buildOperatingSystem(input: {
     agents: input.agents,
     tasks: input.tasks,
     gaps: gapList,
-    truthRate: truth.verificationRate,
+    truthRate: groundedRate(input.tasks),
   });
 
   return {
@@ -1553,7 +1524,7 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[], objective: Workfor
   );
   const recentUnverified = tasks.filter((task) =>
     task.status === "DONE" &&
-    task.verification?.state !== "VERIFIED" &&
+    task.verification?.state === "CLAIMED" &&
     Number.isFinite(Date.parse(task.updatedAt)) &&
     Date.now() - Date.parse(task.updatedAt) <= 24 * 60 * 60 * 1000
   );
@@ -1587,7 +1558,7 @@ function auditCycle(agents: AgentState[], tasks: AgentTask[], objective: Workfor
     return {
       hasErrors: false,
       hasBlockers: true,
-      summary: `QA rejected ${recentUnverified.length} recent completion claim${recentUnverified.length === 1 ? "" : "s"} because the proof state is not VERIFIED. ${adversarialCheck}`,
+      summary: `QA rejected ${recentUnverified.length} recent completion claim${recentUnverified.length === 1 ? "" : "s"} made without any evidence. ${adversarialCheck}`,
       nextCheck: "Attach evidence or restore the definition of done, then let QA re-check the completion claim.",
       evidence,
       blockedReason: recentUnverified.map((task) => `${task.assignedTo}: ${task.title} [${task.verification?.state ?? "CLAIMED"}]`).join(" | "),
@@ -1678,4 +1649,114 @@ function chooseExecutiveFocus(
   if (finance.metrics.personalDebt > 0) return financeDirective(finance);
   if (sentryStatus !== "ERROR" && sentryNext) return sentryNext;
   return "Keep the financial path moving while waiting for the next evidence-backed specialist action.";
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Task execution and owner decisions                                   */
+/* ------------------------------------------------------------------ */
+
+const MAX_TASKS_PER_CYCLE = 2;
+const PRIORITY_RANK: Record<AgentTaskPriority, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+
+/**
+ * Runs queued, governance-cleared tasks (not the recurring cycle checks) through
+ * the assigned agent. At most two per cycle so a cycle stays inside its time budget.
+ */
+async function executeQueuedTasks(tasks: AgentTask[], agents: AgentState[], now: string, onlyTaskId?: string): Promise<{ tasks: AgentTask[]; agents: AgentState[] }> {
+  const runnable = tasks
+    .filter((task) => onlyTaskId ? task.id === onlyTaskId : true)
+    .filter((task) =>
+      task.status === "QUEUED" &&
+      (onlyTaskId !== undefined || task.source !== "workforce.cycle") &&
+      (task.governance?.action === "AUTO_PROCEED" || task.governance?.action === "USER_AUTHORIZED"))
+    .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .slice(0, MAX_TASKS_PER_CYCLE);
+
+  let nextTasks = tasks;
+  let nextAgents = agents;
+  for (const task of runnable) {
+    const agent = nextAgents.find((item) => item.id === task.assignedTo);
+    if (!agent) continue;
+    nextTasks = updateTask(nextTasks, task.id, { status: "RUNNING", blockedReason: null });
+    nextAgents = setAgent(nextAgents, agent.id, { status: "RUNNING", currentWork: task.title });
+    const context = [
+      `Agent last result: ${agent.lastResult}`,
+      `Other open tasks: ${nextTasks.filter((t) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(t.status) && t.id !== task.id).slice(0, 6).map((t) => `${t.assignedTo}: ${t.title}`).join(" | ") || "none"}`,
+    ].join("\n");
+    const run = await runAgentTask(agent, task, context);
+    nextTasks = updateTask(nextTasks, task.id, {
+      status: run.ok ? "DONE" : "FAILED",
+      result: run.result,
+      evidence: [...run.evidence, ...(run.model ? [`model:${run.model}`] : [])],
+      blockedReason: run.ok ? null : run.result,
+    });
+    nextAgents = setAgent(nextAgents, agent.id, {
+      status: run.ok ? "DONE" : "ERROR",
+      lastRanAt: now,
+      lastResult: run.result.slice(0, 600),
+      currentWork: run.ok ? agent.currentWork : "Recover from the failed task run.",
+    });
+    for (const followup of run.followups) {
+      nextTasks = ensureTask(nextTasks, {
+        title: followup.title,
+        domain: nextAgents.find((item) => item.id === followup.assignedTo)?.domain ?? "CORE",
+        assignedTo: followup.assignedTo as AgentId,
+        priority: "MEDIUM",
+        permissionRequired: "ANALYZE",
+        objectiveId: task.objectiveId,
+        source: `agent.${agent.id.toLowerCase()}`,
+        definitionOfDone: followup.rationale,
+      }).tasks;
+    }
+    await appendRuntimeEvent(createRuntimeEvent({
+      type: run.ok ? "workforce.task_completed" : "workforce.task_failed",
+      domain: task.domain,
+      source: `jarvis.agent.${agent.id.toLowerCase()}`,
+      importance: run.ok ? "NORMAL" : "IMPORTANT",
+      summary: `${agent.id}: ${task.title} · ${run.ok ? "done" : "failed"} · ${run.toolCalls} tool call${run.toolCalls === 1 ? "" : "s"}`,
+    }));
+  }
+  return { tasks: nextTasks, agents: nextAgents };
+}
+
+/** Run one specific task now (owner action from the floor). */
+export async function runWorkforceTaskNow(taskId: string): Promise<AgentTask | null> {
+  const state = await getOrSeedWorkforceState();
+  const task = (state.tasks ?? []).find((item) => item.id === taskId);
+  if (!task || !["QUEUED", "FAILED"].includes(task.status)) return null;
+  if (task.governance?.action !== "AUTO_PROCEED" && task.governance?.action !== "USER_AUTHORIZED") return null;
+  const now = new Date().toISOString();
+  const queued = updateTask(state.tasks ?? [], taskId, { status: "QUEUED" });
+  const executed = await executeQueuedTasks(queued, state.agents, now, taskId);
+  const tasks = applyTruthVerification(executed.tasks, now);
+  await setWorkforceState({ ...state, tasks: pruneTasks(tasks), agents: executed.agents });
+  return tasks.find((item) => item.id === taskId) ?? null;
+}
+
+/** Dwight approves or denies a task that is waiting on him. Recorded server-side. */
+export async function decideWorkforceTask(taskId: string, decision: "APPROVED" | "DENIED", reason?: string | null): Promise<AgentTask | null> {
+  const state = await getOrSeedWorkforceState();
+  const task = (state.tasks ?? []).find((item) => item.id === taskId);
+  if (!task || task.status !== "WAITING_APPROVAL") return null;
+  if (task.governance?.action === "BLOCKED") return null;
+  await recordApproval({ subjectType: "WORKFORCE_TASK", subjectId: taskId, decision, reason });
+  const evaluatedAt = new Date().toISOString();
+  const patch: Partial<AgentTask> = decision === "APPROVED"
+    ? {
+        status: "QUEUED",
+        blockedReason: null,
+        governance: { risk: task.governance?.risk ?? "MEDIUM", scope: task.governance?.scope ?? "EXECUTE", action: "USER_AUTHORIZED", reason: "Approved by Dwight" + (reason ? `: ${reason}` : "."), evaluatedAt },
+      }
+    : { status: "CANCELLED", blockedReason: "Denied by Dwight" + (reason ? `: ${reason}` : "."), result: "Denied by Dwight." };
+  const tasks = updateTask(state.tasks ?? [], taskId, patch);
+  await setWorkforceState({ ...state, tasks: pruneTasks(tasks) });
+  await appendRuntimeEvent(createRuntimeEvent({
+    type: decision === "APPROVED" ? "workforce.task_approved" : "workforce.task_denied",
+    domain: task.domain,
+    source: "dwight.approval",
+    importance: "IMPORTANT",
+    summary: `${decision === "APPROVED" ? "Approved" : "Denied"}: ${task.assignedTo} · ${task.title}`,
+  }));
+  return tasks.find((item) => item.id === taskId) ?? null;
 }

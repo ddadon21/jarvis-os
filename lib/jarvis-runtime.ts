@@ -69,6 +69,7 @@ export type AgentState = {
 };
 
 export type AgentTaskStatus =
+  | "CANCELLED"
   | "QUEUED"
   | "RUNNING"
   | "DONE"

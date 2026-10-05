@@ -681,6 +681,33 @@ export async function enqueueDesktopCommand(
   return command;
 }
 
+/**
+ * Server-side enqueue to the currently present Local Agent, used only for work
+ * Dwight already approved (the caller must have recorded that approval).
+ */
+export async function enqueueApprovedDesktopCommandForPresentDevice(input: {
+  action: LocalAgentDesktopAction;
+  target: string;
+  text: string;
+  args?: string[];
+}) {
+  const presence = await cacheGet<{ deviceId?: string }>(LOCAL_AGENT_PRESENCE_KEY);
+  if (!presence?.deviceId) return null;
+  const link = await loadLink(presence.deviceId);
+  if (!link) return null;
+  const command: LocalAgentDesktopCommand = {
+    id: `desk_${token(12)}`,
+    action: input.action,
+    target: input.target.slice(0, 1000),
+    text: input.text.slice(0, 20_000),
+    args: (input.args ?? []).map((item) => String(item).slice(0, 1000)).slice(0, 20),
+    createdAt: new Date().toISOString(),
+    authorization: "USER_AUTHORIZED",
+  };
+  await enqueue(link, "DESKTOP", command);
+  return command;
+}
+
 export async function getDesktopCommandResult(controllerToken: string, commandId?: string | null) {
   const link = await resolveController(controllerToken);
   if (!link) return null;

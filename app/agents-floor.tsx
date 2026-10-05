@@ -872,7 +872,7 @@ function AgentMainScreen({ agent, tasks, profile }: { agent: WorkforceAgent; tas
 }
 
 function TaskScreen({ tasks }: { tasks: WorkforceTask[] }) {
-  const order: Record<WorkforceTask["status"], number> = { RUNNING: 0, QUEUED: 1, WAITING_APPROVAL: 2, BLOCKED: 3, FAILED: 4, DONE: 5 };
+  const order: Record<WorkforceTask["status"], number> = { RUNNING: 0, QUEUED: 1, WAITING_APPROVAL: 2, BLOCKED: 3, FAILED: 4, DONE: 5, CANCELLED: 6 };
   const rows = [...tasks]
     .sort((a, b) => order[a.status] - order[b.status] || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
     .slice(0, 9);

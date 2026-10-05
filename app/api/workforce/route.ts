@@ -1,12 +1,15 @@
 import { requestIsOwner } from "../../../lib/owner-auth";
-import { addWorkforceTask, getOrSeedWorkforceState, runWorkforceCycle } from "../../../lib/jarvis-workforce";
+import { addWorkforceTask, decideWorkforceTask, getOrSeedWorkforceState, runWorkforceCycle, runWorkforceTaskNow } from "../../../lib/jarvis-workforce";
 import { getRecentEvents, type AgentId, type AgentPermission, type AgentTaskPriority, type RuntimeDomain } from "../../../lib/jarvis-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 type WorkforceBody = {
-  action?: "RUN_CYCLE" | "ADD_TASK";
+  action?: "RUN_CYCLE" | "ADD_TASK" | "DECIDE" | "RUN_TASK";
+  taskId?: string;
+  decision?: "APPROVED" | "DENIED";
+  reason?: string;
   title?: string;
   domain?: RuntimeDomain;
   assignedTo?: AgentId;
@@ -59,6 +62,22 @@ export async function POST(request: Request) {
       objectiveId: body.objectiveId,
       source: "jarvis.workforce.ui",
     });
+    return Response.json({ ok: true, task });
+  }
+
+  if (body.action === "DECIDE") {
+    if (!body.taskId || (body.decision !== "APPROVED" && body.decision !== "DENIED")) {
+      return Response.json({ ok: false, error: "taskId and decision (APPROVED|DENIED) are required" }, { status: 400 });
+    }
+    const task = await decideWorkforceTask(body.taskId, body.decision, body.reason ?? null);
+    if (!task) return Response.json({ ok: false, error: "Task is not waiting for approval." }, { status: 409 });
+    return Response.json({ ok: true, task });
+  }
+
+  if (body.action === "RUN_TASK") {
+    if (!body.taskId) return Response.json({ ok: false, error: "taskId is required" }, { status: 400 });
+    const task = await runWorkforceTaskNow(body.taskId);
+    if (!task) return Response.json({ ok: false, error: "Task cannot run now (not queued, or needs approval)." }, { status: 409 });
     return Response.json({ ok: true, task });
   }
 
