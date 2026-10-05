@@ -23,6 +23,7 @@ Personal executive operating system for Dwight / Himie Johnson Ventures: Trading
 5. Trade normally. The Observer journals every trade; the learning job runs weekdays after the close.
 
 ## Docs
+- `docs/company/operating-structure.md` — future operating structure (direction only, not authorized to build)
 - `docs/trading/learning-pipeline.md` — how learning works
 - `docs/trading/ea-roadmap.md` — gates from candidate to any automation
 - `docs/trading/deviant-learning-objective.md` — the objective
