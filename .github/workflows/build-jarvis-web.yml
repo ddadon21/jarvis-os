@@ -10,6 +10,7 @@ on:
       - 'lib/**'
       - 'tests/**'
       - 'package.json'
+      - 'package-lock.json'
       - 'tsconfig.json'
       - 'next.config.ts'
       - '.github/workflows/build-jarvis-web.yml'
