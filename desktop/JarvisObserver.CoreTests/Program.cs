@@ -133,6 +133,29 @@ ledger.Complete("cmd1", "{\"ok\":true}");
 var restarted = new CommandLedger(ledgerPath);
 Check("ledger survives restart", !restarted.TryBegin("cmd1", out var done) && done?.ResultJson == "{\"ok\":true}");
 
+// ---- Vault bridge ----
+var vault = Path.Combine(tmp, "vault");
+Directory.CreateDirectory(Path.Combine(vault, ".obsidian"));
+Directory.CreateDirectory(Path.Combine(vault, "Trading"));
+File.WriteAllText(Path.Combine(vault, "Trading", "plan.md"), "my plan");
+File.WriteAllText(Path.Combine(vault, ".obsidian", "app.md"), "config");
+Check("unsafe paths rejected", VaultBridge.SafeRelative("../evil.md") is null && VaultBridge.SafeRelative(".obsidian/x.md") is null && VaultBridge.SafeRelative("a/b.txt") is null);
+Check("safe path normalized", VaultBridge.SafeRelative("Daily\\2026-10-05.md") == "Daily/2026-10-05.md");
+Check("writes changed notes", VaultBridge.WriteManaged(vault, new[] { ("Daily/today.md", "generated v1") }) == 1);
+var managed = Path.Combine(vault, "JARVIS", "Daily", "today.md");
+Check("managed notes live under JARVIS/", File.Exists(managed));
+File.AppendAllText(managed, "\nDwight's own line\n");
+Check("unchanged content is not rewritten", VaultBridge.WriteManaged(vault, new[] { ("Daily/today.md", "generated v1") }) == 0);
+VaultBridge.WriteManaged(vault, new[] { ("JARVIS/Daily/today.md", "generated v2") });
+var text = File.ReadAllText(managed);
+Check("regeneration replaces only the marked block", text.Contains("generated v2") && !text.Contains("generated v1") && text.Contains("Dwight's own line"), text);
+Check("cannot escape the JARVIS folder", VaultBridge.WriteManaged(vault, new[] { ("../../outside.md", "x") }) == 0 && !File.Exists(Path.Combine(tmp, "outside.md")));
+var changedNotes = VaultBridge.ScanChanged(vault, DateTime.MinValue, Array.Empty<string>());
+Check("index scan skips .obsidian and JARVIS", changedNotes.Count == 1 && changedNotes[0].Path == "Trading/plan.md", string.Join(",", changedNotes.Select(n => n.Path)));
+Check("index scan respects folder allowlist", VaultBridge.ScanChanged(vault, DateTime.MinValue, new[] { "Daily" }).Count == 0);
+var tradeNote = TradeNotes.RenderGenerated(closedTrade, events);
+Check("generated trade note excludes the review questions", !tradeNote.Contains("Why I took it") && TradeNotes.Template().Contains("Why I took it"));
+
 try { Directory.Delete(tmp, true); } catch { }
 Console.WriteLine($"Observer core tests: {passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;

@@ -28,7 +28,7 @@ const SELF_AUTHENTICATED = [
   /^\/api\/trading\/market-webhook$/,
   /^\/api\/desktop\/result$/,
   /^\/api\/obsidian\/result$/,
-  /^\/api\/vault\/sync$/,
+  /^\/api\/vault\/(sync|pull)$/,
   /^\/api\/cron\//,
   /^\/\.well-known\/workflow\//,
   /^\/sentryops-landing-preview$/,

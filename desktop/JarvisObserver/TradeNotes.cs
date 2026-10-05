@@ -19,7 +19,11 @@ internal static class TradeNotes
     public static double? Points(JournalTrade trade, double? price) =>
         trade.EntryPrice is double entry && price is double p ? (trade.Side == "LONG" ? p - entry : entry - p) : null;
 
-    public static string Render(JournalTrade trade, IReadOnlyList<JournalEvent> events)
+    public static string Render(JournalTrade trade, IReadOnlyList<JournalEvent> events) =>
+        RenderGenerated(trade, events) + "\n" + Template();
+
+    /// <summary>Facts JARVIS measured (frontmatter, table, timeline).</summary>
+    public static string RenderGenerated(JournalTrade trade, IReadOnlyList<JournalEvent> events)
     {
         var risk = RiskPoints(trade);
         double? R(double? points) => points is double pts && risk is double r && r > 0 ? pts / r : null;
@@ -76,7 +80,13 @@ internal static class TradeNotes
             };
             sb.AppendLine($"- `{e.At.ToLocalTime():HH:mm:ss}` **{e.Type.Replace('_', ' ')}** {detail}");
         }
-        sb.AppendLine();
+        return sb.ToString();
+    }
+
+    /// <summary>Questions for Dwight. Written once, outside JARVIS's markers, so answers are never overwritten.</summary>
+    public static string Template()
+    {
+        var sb = new StringBuilder();
         sb.AppendLine("## Why I took it");
         sb.AppendLine("- HTF zone (4H / 1D):");
         sb.AppendLine("- Trend:");

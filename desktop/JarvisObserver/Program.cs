@@ -36,6 +36,8 @@ internal sealed class ObserverContext : ApplicationContext
     private readonly System.Threading.Timer _controlTimer;
     private readonly System.Threading.Timer _semanticTimer;
     private readonly System.Threading.Timer _syncTimer;
+    private readonly System.Threading.Timer _vaultTimer;
+    private int _vaultBusy;
     private readonly LocalExecutionOcr _executionOcr = new();
     private readonly HttpClient _http = CreateHttpClient();
     private readonly UIA3Automation _automation = new();
@@ -131,6 +133,7 @@ internal sealed class ObserverContext : ApplicationContext
         menu.Items.Add("Set / replace Vercel access key", null, (_, _) => PromptAndStoreVercelBypassSecret(showSuccess: true));
         menu.Items.Add("Set JARVIS server address", null, (_, _) => PromptServerUrl());
         menu.Items.Add("Open trade journal folder", null, (_, _) => OpenFolder(Path.Combine(_root, "trades")));
+        menu.Items.Add("Obsidian: Choose vault folder (direct sync)", null, (_, _) => ChooseVaultFolder());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Obsidian: Set / replace API key", null, (_, _) => PromptAndStoreObsidianApiKey(showSuccess: true));
         menu.Items.Add("Obsidian: Test connection", null, async (_, _) => await TestObsidianConnectionAsync(showSuccess: true));
@@ -162,6 +165,7 @@ internal sealed class ObserverContext : ApplicationContext
         _controlTimer = new System.Threading.Timer(async _ => await ControlTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
         _semanticTimer = new System.Threading.Timer(async _ => await SemanticTickAsync(), null, TimeSpan.Zero, TimeSpan.FromMilliseconds(_config.SemanticPollMs));
         _syncTimer = new System.Threading.Timer(async _ => await SyncTickAsync(), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        _vaultTimer = new System.Threading.Timer(async _ => await VaultTickAsync(), null, TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(10));
         Log(new { type = "observer.local_ocr", at = DateTime.UtcNow, available = _executionOcr.Available });
     }
 
@@ -171,6 +175,7 @@ internal sealed class ObserverContext : ApplicationContext
         _controlTimer.Dispose();
         _semanticTimer.Dispose();
         _syncTimer.Dispose();
+        _vaultTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
@@ -1254,6 +1259,85 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
+    /// <summary>
+    /// Direct vault sync (no Obsidian plugin): write JARVIS's notes into vault/JARVIS (inside markers only),
+    /// then upload notes changed in the allowed folders so Jarvis can search them.
+    /// </summary>
+    private async Task VaultTickAsync()
+    {
+        if (Interlocked.Exchange(ref _vaultBusy, 1) == 1) return;
+        try
+        {
+            var vault = _config.ObsidianVaultPath;
+            if (string.IsNullOrWhiteSpace(vault) || !Directory.Exists(vault)) return;
+            if (string.IsNullOrWhiteSpace(_config.ServerUrl) || string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken)) return;
+
+            using (var req = new HttpRequestMessage(HttpMethod.Get, _config.ServerUrl.TrimEnd('/') + "/api/vault/pull"))
+            {
+                ApplyVercelBypassHeaders(req);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.DeviceToken);
+                req.Headers.Add("x-jarvis-device-id", _config.DeviceId);
+                req.Headers.Add("x-jarvis-observer-version", ObserverInfo.Version);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var res = await _http.SendAsync(req, cts.Token);
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cts.Token));
+                    var notes = doc.RootElement.GetProperty("notes").EnumerateArray()
+                        .Select(n => (n.GetProperty("path").GetString() ?? "", n.GetProperty("content").GetString() ?? ""))
+                        .Where(n => n.Item1.Length > 0)
+                        .ToList();
+                    var changed = VaultBridge.WriteManaged(vault, notes);
+                    if (changed > 0) Log(new { type = "vault.notes_written", at = DateTime.UtcNow, changed });
+                }
+            }
+
+            var since = _config.VaultIndexedAt ?? DateTime.MinValue;
+            var startedAt = DateTime.UtcNow;
+            var changedNotes = VaultBridge.ScanChanged(vault, since, _config.VaultIndexFolders ?? Array.Empty<string>());
+            var uploadedAll = true;
+            foreach (var batch in changedNotes.Chunk(25))
+            {
+                var body = JsonSerializer.Serialize(new { notes = batch.Select(n => new { path = n.Path, title = n.Title, content = n.Content, modifiedAt = n.ModifiedUtc }) });
+                using var res = await PostDeviceJsonAsync("/api/vault/sync", body, TimeSpan.FromSeconds(30));
+                if (res is null || !res.IsSuccessStatusCode) { uploadedAll = false; break; }
+            }
+            if (uploadedAll)
+            {
+                _config.VaultIndexedAt = changedNotes.Count == 200 ? changedNotes[^1].ModifiedUtc : startedAt;
+                SaveConfig();
+                if (changedNotes.Count > 0) Log(new { type = "vault.indexed", at = DateTime.UtcNow, notes = changedNotes.Count });
+            }
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("vault.tick.error:" + ex.GetType().Name, TimeSpan.FromMinutes(5));
+        }
+        finally
+        {
+            Volatile.Write(ref _vaultBusy, 0);
+        }
+    }
+
+    private void ChooseVaultFolder()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose your Obsidian vault folder. JARVIS writes only inside its JARVIS subfolder and indexes your notes for search.",
+            UseDescriptionForTitle = true,
+            SelectedPath = _config.ObsidianVaultPath ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+        if (dialog.ShowDialog() != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
+        _config.ObsidianVaultPath = dialog.SelectedPath;
+        _config.VaultIndexedAt = null;
+        SaveConfig();
+        Log(new { type = "vault.folder_set", at = DateTime.UtcNow });
+        _ = Task.Run(VaultTickAsync);
+        MessageBox.Show(
+            "Vault saved. JARVIS will keep its notes in the JARVIS folder and index your notes for search every 10 minutes.\n\nTo index only some folders, list them in config.json under \"vaultIndexFolders\".",
+            "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
     /// <summary>Human-readable trade note next to the frames (and in the Obsidian vault when configured).</summary>
     private void WriteTradeNote(JournalTrade trade, IReadOnlyList<JournalEvent> events, string folder)
     {
@@ -1263,9 +1347,12 @@ internal sealed class ObserverContext : ApplicationContext
         if (string.IsNullOrWhiteSpace(vault) || !Directory.Exists(vault)) return;
         try
         {
-            var dir = Path.Combine(vault, "JARVIS", "Trading", "Trades", trade.OpenedAt.ToLocalTime().ToString("yyyy-MM"));
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(Path.Combine(dir, TradeNotes.FileName(trade)), note);
+            var relative = $"{VaultBridge.ManagedFolder}/Trading/Trades/{trade.OpenedAt.ToLocalTime():yyyy-MM}/{TradeNotes.FileName(trade)}";
+            var full = Path.Combine(vault, relative.Replace('/', Path.DirectorySeparatorChar));
+            var isNew = !File.Exists(full);
+            VaultBridge.WriteManaged(vault, new[] { (relative, TradeNotes.RenderGenerated(trade, events)) });
+            // The review questions are added once, below JARVIS's block, and never touched again.
+            if (isNew && File.Exists(full)) File.AppendAllText(full, "\n" + TradeNotes.Template());
         }
         catch (Exception ex)
         {
@@ -2343,6 +2430,13 @@ internal sealed class ObserverConfig
     /// <summary>Optional: absolute path of the Obsidian vault folder. Trade notes are written to JARVIS/Trading/Trades.</summary>
     [JsonPropertyName("obsidianVaultPath")]
     public string? ObsidianVaultPath { get; set; }
+
+    /// <summary>Vault folders to index for Jarvis search (empty = whole vault except .obsidian and JARVIS).</summary>
+    [JsonPropertyName("vaultIndexFolders")]
+    public string[]? VaultIndexFolders { get; set; }
+
+    [JsonPropertyName("vaultIndexedAt")]
+    public DateTime? VaultIndexedAt { get; set; }
 
     [JsonIgnore]
     public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && (!string.IsNullOrWhiteSpace(DeviceToken) || !string.IsNullOrWhiteSpace(TradingSecret));

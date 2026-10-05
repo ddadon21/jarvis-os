@@ -8,7 +8,14 @@ Windows x64 companion for JARVIS. It contains the read-only TradingView Observer
 3. Keep the existing configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
 4. Refresh JARVIS. The paired Local Agent should report 1.0.0 after the new agent reconnects.
 
-## Obsidian bridge
+## Obsidian direct vault sync (1.0, recommended)
+Tray → "Obsidian: Choose vault folder (direct sync)". No Obsidian plugin is needed:
+- Every 10 minutes the Local Agent writes JARVIS's notes (daily trading summaries, last-14-days stats, learning status, workforce report, decision log, SentryOps pulse, what Jarvis remembers) into `<vault>/JARVIS/`.
+- JARVIS only replaces text between its `jarvis:start` / `jarvis:end` markers. Anything you write below the end marker stays.
+- Each trade gets a note in `JARVIS/Trading/Trades/<month>/` with measured facts, plus "Why I took it" / "Review" questions that are written once and never overwritten.
+- Notes you change elsewhere in the vault are indexed for Jarvis chat search. To limit it, set `"vaultIndexFolders": ["Trading", "Ideas"]` in config.json. `.obsidian` and `JARVIS/` are never uploaded.
+
+## Obsidian bridge (Local REST API plugin, legacy)
 JARVIS keeps Supabase as the authoritative structured database. Obsidian is the long-form knowledge vault.
 
 1. In Obsidian, install and enable the community plugin **Local REST API** by Adam Coddington.

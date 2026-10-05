@@ -11,5 +11,6 @@
     <Compile Include="../JarvisObserver/TradeJournal.cs" Link="TradeJournal.cs" />
     <Compile Include="../JarvisObserver/ObserverStorage.cs" Link="ObserverStorage.cs" />
     <Compile Include="../JarvisObserver/TradeNotes.cs" Link="TradeNotes.cs" />
+    <Compile Include="../JarvisObserver/VaultBridge.cs" Link="VaultBridge.cs" />
   </ItemGroup>
 </Project>
