@@ -23,6 +23,7 @@ const SELF_AUTHENTICATED = [
   /^\/api\/trading\/device\/control$/,
   /^\/api\/trading\/observer-events$/,
   /^\/api\/trading\/observer-frames$/,
+  /^\/api\/trading\/observer-diagnostics$/,
   /^\/api\/trading\/pair\/start$/,
   /^\/api\/trading\/ingest$/,
   /^\/api\/trading\/market-webhook$/,

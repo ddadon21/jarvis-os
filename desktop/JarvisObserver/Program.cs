@@ -26,7 +26,7 @@ internal static class Program
 
 internal static class ObserverInfo
 {
-    public const string Version = "1.0.0";
+    public const string Version = "1.1.0";
 }
 
 internal sealed class ObserverContext : ApplicationContext
@@ -59,6 +59,11 @@ internal sealed class ObserverContext : ApplicationContext
     private DateTime _lastOcrStartUtc = DateTime.MinValue;
     private IntPtr _cachedWindow;
     private DateTime _lastWindowScanUtc = DateTime.MinValue;
+    private readonly PhaseTracker _phase = new();
+    private readonly ObserverDiagnostics _diagnostics = new();
+    private ObserverHud? _hud;
+    private DateTime _lastDiagnosticsSavedUtc = DateTime.MinValue;
+    private DateTime _lastDiagnosticsUploadUtc = DateTime.MinValue;
 
     private sealed record PendingBundle(JournalTrade Trade, List<JournalEvent> Events, DateTime DueAt);
 
@@ -139,6 +144,8 @@ internal sealed class ObserverContext : ApplicationContext
         menu.Items.Add("Obsidian: Test connection", null, async (_, _) => await TestObsidianConnectionAsync(showSuccess: true));
         menu.Items.Add("Obsidian: Write Local Agent test note", null, async (_, _) => await WriteObsidianAgentTestNoteAsync(showSuccess: true));
         menu.Items.Add("Pause / Resume local recording", null, (_, _) => TogglePause());
+        menu.Items.Add("Show / Hide Observer HUD (Ctrl+Alt+J)", null, (_, _) => ToggleHud());
+        menu.Items.Add("Open Observer diagnostics", null, (_, _) => OpenFolder(Path.Combine(_root, "diagnostics")));
         menu.Items.Add("Open config", null, (_, _) => OpenFile(_configPath));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
@@ -152,6 +159,14 @@ internal sealed class ObserverContext : ApplicationContext
         };
 
         EnsureConfigExists();
+        _hud = new ObserverHud(new Point(_config.HudX, _config.HudY), OpenJarvisTrading, location =>
+        {
+            lock (_configGate) { _config.HudX = location.X; _config.HudY = location.Y; }
+            SaveConfig();
+        });
+        _hud.ToggleRequested += ToggleHud;
+        _ = _hud.Handle; // registers the global hotkeys even while hidden
+        if (_config.HudEnabled) _hud.Show();
         Log(new { type = "observer.started", at = DateTime.UtcNow, version = ObserverInfo.Version, mode = _config.CloudEnabled ? "CLOUD" : "PAIRING" });
         _ = Task.Run(async () =>
         {
@@ -176,6 +191,7 @@ internal sealed class ObserverContext : ApplicationContext
         _semanticTimer.Dispose();
         _syncTimer.Dispose();
         _vaultTimer.Dispose();
+        _hud?.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
@@ -261,7 +277,10 @@ internal sealed class ObserverContext : ApplicationContext
             Point? pointer = null;
             if (GetCursorPos(out var cursor) && GetWindowRect(target, out var rect))
                 pointer = new Point(cursor.X - rect.Left, cursor.Y - rect.Top);
-            var ocr = await _executionOcr.ReadAsync(frame, pointer);
+            var titleSymbol = InstrumentCatalog.FromWindowTitle(WindowTitle(target));
+            var watch = Stopwatch.StartNew();
+            var ocr = await _executionOcr.ReadAsync(frame, pointer, titleSymbol);
+            var readMs = watch.Elapsed.TotalMilliseconds;
             if (string.IsNullOrWhiteSpace(ocr)) return;
             var readAt = DateTime.UtcNow;
 
@@ -294,7 +313,7 @@ internal sealed class ObserverContext : ApplicationContext
                 }
             }
 
-            ObserveExecution(ocr, readAt);
+            ObserveExecution(ocr, readAt, readMs, titleSymbol);
 
             if (changed)
             {
@@ -314,14 +333,30 @@ internal sealed class ObserverContext : ApplicationContext
     }
 
     /// <summary>Feeds the local trade journal. Works fully offline; events sync later.</summary>
-    private void ObserveExecution(string ocr, DateTime at)
+    private void ObserveExecution(string ocr, DateTime at, double readMs, string? titleSymbol)
     {
         var read = ExecutionRead.Parse(ocr, at);
-        if (read is null) return;
         List<JournalEvent> events;
+        PhaseTransition? transition;
         lock (_journalGate)
         {
+            _diagnostics.RecordRead(read, readMs, titleSymbol, at);
+            if (read is null)
+            {
+                transition = _phase.Tick(_lifecycle.ConfirmedStatus, at);
+                if (transition is not null) RecordPhase(transition);
+                _hud?.Render(_phase.Phase, _phase.LastRead, at);
+                return;
+            }
             events = _lifecycle.Observe(read);
+            foreach (var item in events)
+            {
+                if (item.Type == "ENTRY") _diagnostics.RecordFill(item.Symbol, item.At, at);
+                if (item.Type == "EXIT" && _lifecycle.LastClosedTrade is { } exited) _diagnostics.RecordExit(exited.Symbol, exited.OpenedAt, item.At);
+            }
+            transition = _phase.Update(read, _lifecycle.ConfirmedStatus, at);
+            if (transition is not null) RecordPhase(transition);
+            _hud?.Render(_phase.Phase, read, at);
             foreach (var item in events)
             {
                 if (item.Type == "ORDER_CANCELLED")
@@ -348,6 +383,56 @@ internal sealed class ObserverContext : ApplicationContext
         }
         if (events.Any(e => e.Type == "ENTRY"))
             _tray.ShowBalloonTip(1800, "JARVIS TRADE JOURNAL", "Entry recorded. The setup before it is being kept.", ToolTipIcon.Info);
+    }
+
+    /// <summary>Caller holds _journalGate.</summary>
+    private void RecordPhase(PhaseTransition transition)
+    {
+        _diagnostics.RecordTransition(transition);
+        try
+        {
+            var dir = Path.Combine(_root, "diagnostics");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, $"transitions-{transition.DetectedAt.ToLocalTime():yyyy-MM-dd}.jsonl"), JsonSerializer.Serialize(new
+            {
+                from = transition.From,
+                to = transition.To,
+                at = transition.At,
+                detectedAt = transition.DetectedAt,
+                symbol = transition.Symbol,
+            }) + Environment.NewLine);
+        }
+        catch (IOException) { }
+        Log(new { type = "observer.phase", from = transition.From, to = transition.To, at = transition.At, transition.Symbol });
+    }
+
+    /// <summary>Writes the day's diagnostics locally every minute and uploads them every five minutes (latest wins).</summary>
+    private async Task DiagnosticsTickAsync(DateTime now)
+    {
+        if (now - _lastDiagnosticsSavedUtc < TimeSpan.FromMinutes(1)) return;
+        _lastDiagnosticsSavedUtc = now;
+        DiagnosticsSnapshot snapshot;
+        lock (_journalGate) snapshot = _diagnostics.Snapshot(ObserverInfo.Version, now);
+        var json = JsonSerializer.Serialize(snapshot);
+        try
+        {
+            var dir = Path.Combine(_root, "diagnostics");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, $"summary-{snapshot.Day}.json"), json);
+        }
+        catch (IOException) { }
+
+        if (now - _lastDiagnosticsUploadUtc < TimeSpan.FromMinutes(5) || !_config.CloudEnabled) return;
+        _lastDiagnosticsUploadUtc = now;
+        try
+        {
+            using var response = await PostDeviceJsonAsync("/api/trading/observer-diagnostics", json, TimeSpan.FromSeconds(15));
+            if (response is null || !response.IsSuccessStatusCode) _lastDiagnosticsUploadUtc = now - TimeSpan.FromMinutes(4);
+        }
+        catch (Exception ex)
+        {
+            LogRateLimited("diagnostics.upload.error:" + ex.GetType().Name, TimeSpan.FromMinutes(5));
+        }
     }
 
     private async Task TickAsync()
@@ -1248,6 +1333,8 @@ internal sealed class ObserverContext : ApplicationContext
                     }
                 }
             }
+
+            await DiagnosticsTickAsync(now);
         }
         catch (Exception ex)
         {
@@ -1988,6 +2075,22 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
+    private void ToggleHud()
+    {
+        if (_hud is null || _hud.IsDisposed) return;
+        if (_hud.Visible) _hud.Hide(); else _hud.Show();
+        lock (_configGate) _config.HudEnabled = _hud.Visible;
+        SaveConfig();
+    }
+
+    private void OpenJarvisTrading()
+    {
+        var server = _config.ServerUrl?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(server)) return;
+        try { Process.Start(new ProcessStartInfo(server + "/work") { UseShellExecute = true }); }
+        catch (Exception ex) { LogRateLimited("hud.open_jarvis.error:" + ex.GetType().Name, TimeSpan.FromSeconds(30)); }
+    }
+
     private void TogglePause()
     {
         _localPaused = !_localPaused;
@@ -2335,6 +2438,15 @@ internal sealed class ObserverContext : ApplicationContext
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+
+    private static string? WindowTitle(IntPtr hwnd)
+    {
+        var buffer = new StringBuilder(256);
+        return GetWindowText(hwnd, buffer, buffer.Capacity) > 0 ? buffer.ToString() : null;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
     {
@@ -2437,6 +2549,16 @@ internal sealed class ObserverConfig
 
     [JsonPropertyName("vaultIndexedAt")]
     public DateTime? VaultIndexedAt { get; set; }
+
+    /// <summary>Optional on-screen Observer HUD (off by default). Ctrl+Alt+J toggles it.</summary>
+    [JsonPropertyName("hudEnabled")]
+    public bool HudEnabled { get; set; }
+
+    [JsonPropertyName("hudX")]
+    public int HudX { get; set; } = 40;
+
+    [JsonPropertyName("hudY")]
+    public int HudY { get; set; } = 120;
 
     [JsonIgnore]
     public bool CloudEnabled => Uri.TryCreate(ServerUrl, UriKind.Absolute, out _) && (!string.IsNullOrWhiteSpace(DeviceToken) || !string.IsNullOrWhiteSpace(TradingSecret));
