@@ -447,18 +447,18 @@ async function defaultPersistAudit(result: ExecutiveSessionResult) {
     call.role[0] + ":" + call.brain[0] + ":" + call.model + ":" + call.finishReason
   ).join("|");
 
-  const summary = JSON.stringify({
-    cv: result.constitutionVersion,
-    av: result.agreementVersion,
-    sv: result.sopVersion,
-    status: result.status,
-    decision: result.decision,
-    independentReview: result.independentReview,
-    models,
-    usage: { inputTokens, outputTokens, totalTokens },
-    contextFingerprint: result.contextFingerprint,
-    degradation: result.degradationReason?.slice(0, 120) ?? null,
-  }).slice(0, 490);
+  const summary = [
+    "cv=" + result.constitutionVersion,
+    "av=" + result.agreementVersion,
+    "sv=" + result.sopVersion,
+    "status=" + result.status,
+    "decision=" + result.decision,
+    "independentReview=" + String(result.independentReview),
+    "models=" + models,
+    "tokens=" + inputTokens + "/" + outputTokens + "/" + totalTokens,
+    "context=" + (result.contextFingerprint ?? "none"),
+    "degradation=" + (result.degradationReason?.slice(0, 80) ?? "none"),
+  ].join(" | ");
 
   const event = createRuntimeEvent({
     type: "executive.session",
@@ -469,7 +469,8 @@ async function defaultPersistAudit(result: ExecutiveSessionResult) {
     summary,
   });
   event.id = result.id;
-  await appendRuntimeEvent(event);
+  const durable = await appendRuntimeEvent(event);
+  if (!durable) throw new Error("Supabase did not acknowledge the executive audit event.");
 }
 
 async function fingerprint(value: string) {

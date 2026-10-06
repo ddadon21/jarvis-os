@@ -408,11 +408,11 @@ export async function getRecentEvents(): Promise<RuntimeEvent[]> {
   return durable;
 }
 
-export async function appendRuntimeEvent(event: RuntimeEvent): Promise<void> {
+export async function appendRuntimeEvent(event: RuntimeEvent): Promise<boolean> {
   const current = (await readValue<RuntimeEvent[]>(RECENT_EVENTS_KEY)) ?? [];
   const next = [event, ...current.filter((item) => item.id !== event.id)].slice(0, 100);
   await writeValue(RECENT_EVENTS_KEY, next);
-  await durableWrite("jarvis_runtime_events", ({ db, workspaceId }) =>
+  return durableWrite("jarvis_runtime_events", ({ db, workspaceId }) =>
     db.from("jarvis_runtime_events").upsert({
       id: event.id,
       workspace_id: workspaceId,

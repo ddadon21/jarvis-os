@@ -36,7 +36,7 @@ function loadExecutiveModule() {
       };
       if (name === './executive-decision') return decisionExports;
       if (name === './jarvis-runtime') return {
-        appendRuntimeEvent: async () => {},
+        appendRuntimeEvent: async () => true,
         createRuntimeEvent: input => ({ id: 'event', type: input.type, domain: 'CORE', source: input.source, importance: input.importance, occurredAt: input.occurredAt, receivedAt: input.occurredAt, summary: input.summary }),
       };
       throw new Error('Unexpected require: ' + name);
@@ -195,4 +195,24 @@ test('Constitution document version matches runtime version', () => {
   const docVersion = doc.match(/\*\*Version:\*\*\s*([^\s]+)/)?.[1];
   const codeVersion = policy.match(/HJV_CONSTITUTION_VERSION\s*=\s*"([^"]+)"/)?.[1];
   assert.equal(docVersion, codeVersion);
+});
+
+
+test('audit persistence failure degrades a completed recommendation and escalates', async () => {
+  const { exports } = loadExecutiveModule();
+  const result = await exports.runExecutiveSession(
+    { objective: 'Decide whether to ship this architecture', preferredLead: 'GPT' },
+    {
+      isConfigured: () => true,
+      persistAudit: async () => { throw new Error('durable write rejected'); },
+      runModel: queuedRunner([
+        ok('proposal', 'GPT', 'LEAD', 'gpt-6-astra'),
+        ok('review\nREVIEW: PASS', 'CLAUDE', 'REVIEWER', 'claude-opus-5'),
+        ok('reconcile\nDECISION: APPROVE', 'GPT', 'RECONCILER', 'gpt-6-astra'),
+      ]),
+    },
+  );
+  assert.equal(result.status, 'DEGRADED');
+  assert.equal(result.decision, 'ESCALATE_DWIGHT');
+  assert.match(result.degradationReason, /Audit persistence failed/);
 });
