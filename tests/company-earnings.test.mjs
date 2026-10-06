@@ -75,6 +75,16 @@ test('an unreadable source is unavailable, never $0', () => {
   assert.equal(partial.coverage, 'PARTIAL');
 });
 
+test('paid rows with an unrecognized amount column are UNAVAILABLE, never $0', () => {
+  const all = earned([{ id: 'x1', payout: 900, status: 'PAID' }, { id: 'x2', payout: 525, status: 'PAID' }]);
+  assert.equal(all.total, null);
+  assert.equal(all.coverage, 'UNAVAILABLE');
+  assert.match(all.sources[0].note, /2 paid records without a readable amount/);
+  const some = earned([...PAID_ROWS, { id: 'x3', payout: 100, status: 'PAID' }]);
+  assert.equal(some.total, 3281.78);
+  assert.equal(some.coverage, 'PARTIAL');
+});
+
 test('payout rows resolve the amount column by name', () => {
   assert.equal(payoutRowToRecord({ id: 1, amount: 99.5, status: 'PAID' }).amount, 99.5);
   assert.equal(payoutRowToRecord({ id: 2, net_amount: '1,051.85', gross_amount: 1300, status: 'PAID' }).amount, 1051.85);

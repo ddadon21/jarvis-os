@@ -90,11 +90,17 @@ export function summarizeLifetimeEarned(sources: EarnedSourceState[], now = new 
   const seenIds = new Set<string>();
   const seenDedupe = new Set<string>();
   const perSource = new Map<EarnedSourceId, { total: number; count: number }>();
+  // Settled records whose amount could not be read: the source is not trustworthy as a total.
+  const unreadable = new Map<EarnedSourceId, number>();
 
   for (const state of [...sources].sort((a, b) => a.priority - b.priority)) {
     if (state.status !== "CONNECTED") continue;
     for (const record of state.records) {
-      if (!Number.isFinite(record.amount) || record.amount <= 0) { excluded.invalid++; continue; }
+      if (!Number.isFinite(record.amount) || record.amount <= 0) {
+        excluded.invalid++;
+        if (record.settled && !Number.isFinite(record.amount)) unreadable.set(record.source, (unreadable.get(record.source) ?? 0) + 1);
+        continue;
+      }
       if (record.kind !== "REVENUE") { excluded.transfers++; continue; }
       if (!record.settled) { excluded.unsettled++; continue; }
       const identity = `${record.source}:${record.id}`;
@@ -109,8 +115,11 @@ export function summarizeLifetimeEarned(sources: EarnedSourceState[], now = new 
     }
   }
 
-  const connected = sources.filter((state) => state.status === "CONNECTED");
-  const unavailable = sources.filter((state) => state.status === "UNAVAILABLE");
+  // A source whose paid records have no readable amount is effectively unavailable, never $0.
+  const effective = (state: EarnedSourceState): EarnedSourceState["status"] =>
+    state.status === "CONNECTED" && (unreadable.get(state.source) ?? 0) > 0 && !perSource.has(state.source) ? "UNAVAILABLE" : state.status;
+  const connected = sources.filter((state) => effective(state) === "CONNECTED");
+  const unavailable = sources.filter((state) => effective(state) === "UNAVAILABLE" || (state.status === "CONNECTED" && (unreadable.get(state.source) ?? 0) > 0));
   // Not-yet-existing sources do not make the total partial; a failed read does.
   const coverage: LifetimeEarned["coverage"] = connected.length === 0 ? "UNAVAILABLE" : unavailable.length > 0 ? "PARTIAL" : "COMPLETE";
   const total = connected.length === 0 ? null : roundCents(counted.reduce((sum, record) => sum + record.amount, 0));
@@ -123,14 +132,18 @@ export function summarizeLifetimeEarned(sources: EarnedSourceState[], now = new 
     asOf: now.toISOString(),
     counted: counted.sort((a, b) => Date.parse(b.occurredAt ?? "") - Date.parse(a.occurredAt ?? "") || 0),
     excluded,
-    sources: sources.map((state) => ({
-      source: state.source,
-      label: state.label,
-      status: state.status,
-      total: roundCents(perSource.get(state.source)?.total ?? 0),
-      count: perSource.get(state.source)?.count ?? 0,
-      ...(state.note ? { note: state.note } : {}),
-    })),
+    sources: sources.map((state) => {
+      const missing = unreadable.get(state.source) ?? 0;
+      const note = missing > 0 ? `${missing} paid record${missing === 1 ? "" : "s"} without a readable amount column.` : state.note;
+      return {
+        source: state.source,
+        label: state.label,
+        status: effective(state),
+        total: roundCents(perSource.get(state.source)?.total ?? 0),
+        count: perSource.get(state.source)?.count ?? 0,
+        ...(note ? { note } : {}),
+      };
+    }),
     definition: LIFETIME_EARNED_DEFINITION,
   };
 }
