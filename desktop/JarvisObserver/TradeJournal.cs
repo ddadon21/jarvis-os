@@ -39,6 +39,14 @@ internal sealed record ExecutionRead(
         double? Number(string key) => fields.TryGetValue(key, out var v) && double.TryParse(v.Replace(",", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out var n) && double.IsFinite(n) ? n : null;
         var side = Text("SIDE");
         if (side is not (null or "LONG" or "SHORT")) side = null;
+        // FLAT is only emitted after several clean scans; SINCE is the first of
+        // them, so a cancel/exit is time-stamped when the order actually vanished.
+        if (status == "FLAT" && fields.TryGetValue("SINCE", out var since) &&
+            DateTime.TryParse(since, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var sinceAt) &&
+            sinceAt <= at.ToUniversalTime() && at.ToUniversalTime() - sinceAt < TimeSpan.FromMinutes(1))
+        {
+            at = sinceAt;
+        }
         return new ExecutionRead(status, Text("SYMBOL"), side, Number("QTY"), Text("TYPE"), Number("ENTRY"), Number("CURRENT"), Number("STOP"), Number("TARGET"), Number("PNL"), at);
     }
 }

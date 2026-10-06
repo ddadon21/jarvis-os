@@ -156,6 +156,8 @@ Check("index scan respects folder allowlist", VaultBridge.ScanChanged(vault, Dat
 var tradeNote = TradeNotes.RenderGenerated(closedTrade, events);
 Check("generated trade note excludes the review questions", !tradeNote.Contains("Why I took it") && TradeNotes.Template().Contains("Why I took it"));
 
+ReaderTests.Run(Check);
+
 try { Directory.Delete(tmp, true); } catch { }
 Console.WriteLine($"Observer core tests: {passed} passed, {failures} failed");
 return failures == 0 ? 0 : 1;

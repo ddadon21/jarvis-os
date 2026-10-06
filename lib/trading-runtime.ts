@@ -3,6 +3,7 @@ import { appendRuntimeEvent, createRuntimeEvent } from "./jarvis-runtime";
 import { estimatePnl, pointValue, sessionDay } from "./trading-session";
 import { cachedTradingRules, getTradingRules } from "./trading-rules";
 import { persistTradingTransition } from "./trading-store";
+import { nextFilledAt } from "./trading-phase";
 
 export type TradingConnectionState = "DISCONNECTED" | "CONNECTING" | "OBSERVING" | "DEGRADED";
 export type TradingStage = "PASS CURRENT ACCOUNT" | "FIRST PAYOUT" | "REPEAT PAYOUTS" | "SCALE FUNDED CAPITAL";
@@ -53,6 +54,8 @@ export type TradingObserverState = {
   orderTicketVisible?: boolean;
   readingIssue?: string | null;
   detailsObservedAt?: string | null;
+  /** When the current position first became visible (drives the short ORDER_FILLED phase). */
+  filledAt?: string | null;
 };
 
 export type TradingAccountState = {
@@ -507,6 +510,7 @@ function normalizeObserver(
         : previous?.orderTicketVisible ?? false,
     readingIssue: input?.readingIssue === undefined ? previous?.readingIssue ?? null : nullableClean(input.readingIssue, 200),
     detailsObservedAt: normalizeDate(input?.detailsObservedAt ?? input?.observedAt ?? observedAt ?? null),
+    filledAt: nextFilledAt(previous, status, normalizeDate(input?.observedAt ?? observedAt ?? null)),
   };
 }
 

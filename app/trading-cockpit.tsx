@@ -3,6 +3,7 @@
 import { Activity, Crosshair, Eye, Gauge, Radio, ShieldCheck, TriangleAlert, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import TradingAccountManager, { TradingAccountView } from "./trading-account-manager";
+import { observerPhase, phaseLabel, type ObserverPhase } from "../lib/trading-phase";
 
 type ObserverState = {
   status: "FLAT" | "PENDING" | "OPEN" | "UNKNOWN";
@@ -21,6 +22,24 @@ type ObserverState = {
   intentState?: "NONE" | "PREPARING" | "ORDER_WORKING" | "POSITION_OPEN" | "UNKNOWN";
   orderTicketVisible?: boolean;
   readingIssue?: string | null;
+  phase?: ObserverPhase;
+  filledAt?: string | null;
+};
+
+type ObserverDiagnostics = {
+  day: string;
+  observerVersion: string;
+  generatedAt: string;
+  reads: number;
+  readMsP95: number | null;
+  activeReads: number;
+  missingFieldRate: Record<string, number | null>;
+  wrongSymbolRate: number | null;
+  suspectedFalseOrderEvents: number;
+  suspectedFalseTrades: number;
+  cancelClears: number;
+  cancelClearMsP95: number | null;
+  perSymbol: Record<string, { activeReads: number; completeReads: number; episodes: number; fills: number; suspect: number }>;
 };
 
 type Trade = {
@@ -92,7 +111,7 @@ type TradingState = {
   note: string;
 };
 
-type ApiResponse = { state: TradingState; observing: boolean };
+type ApiResponse = { state: TradingState; observing: boolean; observerDiagnostics?: ObserverDiagnostics | null };
 
 type PayoutRange = "30D" | "6M" | "ALL";
 
@@ -273,25 +292,23 @@ export default function TradingCockpit() {
   const observationAgeMs = Date.now() - Date.parse(observer?.observedAt ?? "");
   const observationFresh = Number.isFinite(observationAgeMs) && observationAgeMs >= 0 && observationAgeMs < 45_000;
   const liveStateFresh = paired && Boolean(link?.online) && controlWatching && observing && frameFresh;
-  const intentState = observer?.intentState ?? "UNKNOWN";
-  const executionActive = status === "PENDING" || status === "OPEN" || intentState === "PREPARING";
-  const displayStatus = !paired
+  // Exactly one of the five Observer phases. Link problems are reported
+  // separately so a stale connection never masquerades as a trading state.
+  const phase: ObserverPhase = observer?.phase ?? observerPhase(observer);
+  const executionActive = phase !== "WAITING";
+  const linkIssue = !paired
     ? "UNLINKED"
     : !link?.online
-      ? "OFFLINE"
+      ? "DESKTOP OFFLINE"
       : !controlWatching
-        ? "PAUSED"
+        ? "OBSERVER PAUSED"
         : !observing || !frameFresh
-          ? "WAITING"
-          : !observationFresh
+          ? "NO FRESH FRAMES"
+          : !observationFresh || (observer?.readingIssue && !executionActive)
             ? "READING UNAVAILABLE"
-            : status === "OPEN"
-            ? "TRADE IN PROGRESS"
-            : status === "PENDING"
-              ? "PREPARING ORDER"
-              : intentState === "PREPARING"
-                ? "PREPARING ORDER"
-                : observer?.readingIssue ? "READING UNAVAILABLE" : "WAITING";
+            : null;
+  const displayStatus = phaseLabel(phase);
+  const diagnostics = data?.observerDiagnostics ?? null;
   const showExecutionDetails = liveStateFresh && observationFresh && executionActive;
   const guardrails = state?.guardrails;
   const activeAlert = liveStateFresh ? guardrails?.activeAlert ?? null : null;
@@ -326,13 +343,9 @@ export default function TradingCockpit() {
     if (!paired) return "PAIR DESKTOP OBSERVER";
     if (!link?.online) return "DESKTOP OFFLINE";
     if (!controlWatching) return "OBSERVER PAUSED";
-    if (controlWatching && (!observing || !frameFresh)) return "WAITING";
-    if (!observationFresh) return "READING UNAVAILABLE";
-    if (status === "PENDING") return "PREPARING ORDER";
-    if (status === "OPEN") return "TRADE IN PROGRESS";
-    if (intentState === "PREPARING") return "PREPARING ORDER";
-    return observer?.readingIssue ? "READING UNAVAILABLE" : "WAITING";
-  }, [controlWatching, error, frameFresh, observationFresh, intentState, link?.online, observing, paired, status, observer?.readingIssue]);
+    if (linkIssue) return linkIssue;
+    return phaseLabel(phase);
+  }, [controlWatching, error, linkIssue, link?.online, paired, phase]);
 
   async function confirmPairing() {
     const code = pairCode.trim().toUpperCase();
@@ -473,8 +486,9 @@ export default function TradingCockpit() {
         <article className="trading-card trading-primary">
           <div className="trading-card-head">
             <span>CURRENT STATE</span>
-            <b>{displayStatus}</b>
+            <b data-phase={phase}>{displayStatus}</b>
           </div>
+          {linkIssue ? <small role="status" style={{ fontSize: 11, letterSpacing: ".08em", color: "#c9a0a4" }}>LINK · {linkIssue} — showing the last known state</small> : null}
           {liveStateFresh && observer?.readingIssue ? <small role="status">{observer.readingIssue}</small> : null}
           <div className="trading-symbol-row">
             <div>
@@ -505,7 +519,7 @@ export default function TradingCockpit() {
               value={showExecutionDetails && status === "OPEN" ? money(observer?.openPnl) : showExecutionDetails ? "NOT OPEN" : "—"}
               strong
             />
-            <Metric label="VISION CONF." value={showExecutionDetails ? `${confidence}%` : "—"} />
+            <Metric label="READ CONF." value={showExecutionDetails ? `${confidence}%` : "—"} />
           </div>
         </article>
 
@@ -566,6 +580,26 @@ export default function TradingCockpit() {
               <b>{guardrails?.eventsToday.length ?? 0}</b>
             </div>
           </div>
+        </article>
+
+        <article className="trading-card">
+          <div className="trading-card-head">
+            <span>OBSERVER RELIABILITY</span>
+            <b>{diagnostics ? `${diagnostics.day} · v${diagnostics.observerVersion}` : "NO DATA YET"}</b>
+          </div>
+          {diagnostics ? (
+            <div className="trading-lines">
+              <Line label="Reads / active" value={`${diagnostics.reads} / ${diagnostics.activeReads}`} />
+              <Line label="Read latency p95" value={ms(diagnostics.readMsP95)} />
+              <Line label="Worst missing field" value={worstMissing(diagnostics.missingFieldRate)} />
+              <Line label="Symbol vs. window title" value={diagnostics.wrongSymbolRate == null ? "NOT COMPARABLE YET" : `${pct(diagnostics.wrongSymbolRate)} MISMATCH`} />
+              <Line label="Cancel → waiting p95" value={diagnostics.cancelClears ? `${ms(diagnostics.cancelClearMsP95)} (${diagnostics.cancelClears})` : "NO CANCELS YET"} />
+              <Line label="Suspected false events" value={`${diagnostics.suspectedFalseOrderEvents} order · ${diagnostics.suspectedFalseTrades} trade`} />
+              <Line label="Complete reads by symbol" value={symbolCompleteness(diagnostics.perSymbol)} />
+            </div>
+          ) : (
+            <small>Observer 1.1 uploads a daily reliability snapshot every 5 minutes while TradingView is open.</small>
+          )}
         </article>
 
         <article className="trading-card trading-payouts">
@@ -632,6 +666,25 @@ export default function TradingCockpit() {
       </div>
     </section>
   );
+}
+
+function ms(value: number | null | undefined) {
+  return value == null ? "—" : value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
+}
+
+function pct(value: number) {
+  return `${(value * 100).toFixed(value < 0.1 ? 1 : 0)}%`;
+}
+
+function worstMissing(rates: Record<string, number | null>) {
+  const worst = Object.entries(rates).filter((entry): entry is [string, number] => entry[1] != null).sort((a, b) => b[1] - a[1])[0];
+  return worst ? (worst[1] === 0 ? "NONE MISSING" : `${worst[0].toUpperCase()} ${pct(worst[1])}`) : "NO ACTIVE READS";
+}
+
+function symbolCompleteness(perSymbol: ObserverDiagnostics["perSymbol"]) {
+  const entries = Object.entries(perSymbol).filter(([, stats]) => stats.activeReads > 0);
+  if (!entries.length) return "NO ACTIVE READS";
+  return entries.map(([symbol, stats]) => `${symbol} ${pct(stats.completeReads / stats.activeReads)}`).join(" · ");
 }
 
 function Metric({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {

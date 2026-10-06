@@ -1,4 +1,4 @@
-# JARVIS Local Agent 1.0.0
+# JARVIS Local Agent 1.1.0
 
 Windows x64 companion for JARVIS. It contains the read-only TradingView Observer, the local Obsidian bridge, the JARVIS Desktop Action Runtime, controlled Chrome/Edge browser actions, and workspace-scoped Codex / Claude Code execution.
 
@@ -6,7 +6,7 @@ Windows x64 companion for JARVIS. It contains the read-only TradingView Observer
 1. Right-click the existing JARVIS / Observer tray icon and choose Exit.
 2. Extract this ZIP to a new folder and run JarvisObserver.exe.
 3. Keep the existing configuration in %LOCALAPPDATA%\JarvisObserver. Do not delete that folder.
-4. Refresh JARVIS. The paired Local Agent should report 1.0.0 after the new agent reconnects.
+4. Refresh JARVIS. The paired Local Agent should report 1.1.0 after the new agent reconnects.
 
 ## Obsidian direct vault sync (1.0, recommended)
 Tray → "Obsidian: Choose vault folder (direct sync)". No Obsidian plugin is needed:
@@ -94,17 +94,28 @@ Without broker API access, the Observer is the record of every trade. Version 1.
 
 Disk use: about 45 minutes of full-rate frames, one frame per minute for 30 days (`retentionDays`), plus trade folders (kept until you delete them).
 
-## Trading Observer
-- Waiting: no visible order setup or position.
-- Preparing order: an on-chart draft/hover widget or an order awaiting a fill.
-- Trade in progress: a visibly confirmed open position.
+## What's new in 1.1 — explicit states, faster cancel, week-one evidence
+- **Five explicit states** (Jarvis shows exactly these):
+  - `WAITING` — no draft, working order or position visible.
+  - `PREPARING_ORDER` — an on-chart draft or the order widget is open/being dragged, before submission. Shown on the first read.
+  - `PENDING_ORDER` — a submitted working order (TradingView's full order text is visible and no draft editors are open).
+  - `ORDER_FILLED` — shown for 4 seconds after a confirmed fill.
+  - `TRADE_IN_PROGRESS` — a confirmed open position.
+- **Cancel clears faster.** Two clean scans (about 1.3 s) clear a draft or working order back to `WAITING`; a live position needs four, because a false exit is worse than a slow one. The cancel/exit is time-stamped at the first clean scan.
+- **One bad read still never creates a trade.** Fills and exits come from the journal's two-read confirmation; drafts only flicker the display.
+- **Right pane, right symbol.** Split screens use the pane that contains the active order. Symbol order of trust: that pane's header → the TradingView window title → other text in the pane. Recognition covers NQ, MNQ, ES, MES, YM, MYM, GC, MGC and the broader list (RTY/M2K, CL/MCL, SI/SIL, HG, ZB/ZN/ZF/ZT) through one shared catalog.
+- **Optional HUD.** Tray → "Show / Hide Observer HUD" or Ctrl+Alt+J: a small, movable, always-on-top panel with the state, the eight Current State Chart fields, completeness and read age. It never takes focus and is not part of the captured frame. Ctrl+Alt+K opens Jarvis.
+- **Week-one diagnostics.** `diagnostics\summary-<day>.json` (every minute) and `diagnostics\transitions-<day>.jsonl`: OCR read latency (p50/p95), missing-field rate per field, symbol vs. window-title mismatch rate, suspected false events (orders that vanish within 1.5 s, trades shorter than 10 s), cancel→WAITING latency, fill-confirmation latency and per-symbol completeness. The daily snapshot is uploaded every 5 minutes and shown on the Trading page under OBSERVER RELIABILITY.
 
+No cloud model is in the order-state path on the PC: the five states, the journal and the HUD come from local OCR, the window title and the journal's confirmation. On the server, cloud vision is still a background fallback that can fill missing fields or read a frame when no local reading arrived; it never writes trades.
+
+## Trading Observer
 The reader captures the active TradingView chart pane and supplies symbol, direction, contracts, order type, entry, current chart price, stop and target. It is read-only: it never clicks, places, cancels, changes, or closes orders.
 
 Local calibration frames remain under %LOCALAPPDATA%\JarvisObserver\sessions.
 
 ## Build
 ```powershell
-dotnet run --project .\desktop\JarvisObserver.Tests\JarvisObserver.Tests.csproj -c Release
+dotnet run --project .\desktop\JarvisObserver.CoreTests\JarvisObserver.CoreTests.csproj -c Release
 dotnet publish .\desktop\JarvisObserver\JarvisObserver.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```

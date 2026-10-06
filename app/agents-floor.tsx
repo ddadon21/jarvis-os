@@ -4,6 +4,7 @@ import { Activity, Crosshair, Radio, ShieldAlert, TriangleAlert, X } from "lucid
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import styles from "./agents-floor.module.css";
+import { observerPhase, phaseLabel, type ObserverPhase } from "../lib/trading-phase";
 import {
   profileFor,
   quickEvent,
@@ -34,6 +35,8 @@ type ObserverRead = {
   evidence: string[];
   intentState?: "NONE" | "PREPARING" | "ORDER_WORKING" | "POSITION_OPEN" | "UNKNOWN";
   readingIssue?: string | null;
+  phase?: ObserverPhase;
+  filledAt?: string | null;
 };
 
 type TradeRow = {
@@ -297,11 +300,9 @@ function observerIsLive(state: TradingSnapshot | null) {
 function observerHeadline(state: TradingSnapshot | null) {
   const observer = state?.observer;
   if (!state || !observer) return "NO OBSERVER READ";
-  if (observer.status === "OPEN") return `${observer.side ?? "POSITION"} ${observer.quantity ?? ""} ${observer.symbol ?? ""}`.replace(/\s+/g, " ").trim();
-  if (observer.status === "PENDING") return `WORKING ${observer.side ?? "ORDER"} ${observer.symbol ?? ""}`.trim();
-  if (observer.intentState === "PREPARING") return `PREPARING ${observer.side ?? "ORDER"} ${observer.symbol ?? ""}`.trim();
-  if (observer.status === "FLAT") return `FLAT${observer.symbol ? " · " + observer.symbol : ""}`;
-  return "READING CHART";
+  const phase = observer.phase ?? observerPhase(observer);
+  if (phase === "WAITING") return "WAITING";
+  return `${phaseLabel(phase)} · ${observer.side ?? ""} ${observer.quantity ?? ""} ${observer.symbol ?? ""}`.replace(/\s+/g, " ").trim();
 }
 
 function eventsForAgent(events: WorkforceEvent[], agent: WorkforceAgent, profile: AgentProfile) {
@@ -701,7 +702,7 @@ function DeskView({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const isTrading = agent.id === "TRADING_OBSERVER";
-  const focused = isTrading && (trading.state?.observer?.status === "OPEN" || trading.state?.observer?.status === "PENDING");
+  const focused = isTrading && (trading.state?.observer?.status === "OPEN" || trading.state?.observer?.status === "PENDING" || trading.state?.observer?.intentState === "PREPARING");
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -918,12 +919,12 @@ function TradingMainScreen({ state, ticks, failed }: { state: TradingSnapshot | 
   const observer = state?.observer;
   const live = observerIsLive(state);
   const alert = state?.guardrails?.activeAlert ?? null;
-  const status = observer?.intentState === "PREPARING" && observer.status !== "OPEN" ? "PREPARING" : observer?.status ?? "UNKNOWN";
+  const phase = observer?.phase ?? observerPhase(observer);
   return (
     <div className={styles.screen}>
       <div className={styles.screenHead}>
         <span>{observer?.symbol ?? "NO SYMBOL"} · LIVE READ · OBSERVER</span>
-        <b className={styles["status_" + status]}>{status}</b>
+        <b className={styles["phase_" + phase]}>{phaseLabel(phase)}</b>
       </div>
       {alert ? (
         <div className={alert.severity === "VIOLATION" ? styles.alertViolation : styles.alertWarning}>

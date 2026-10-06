@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Platform-neutral tests for the Observer's pure logic (journal, outbox, frames, ledger). Runs on Linux and Windows. -->
+  <!-- Platform-neutral tests for the Observer's pure logic (journal, outbox, frames, ledger, order reader, phases, diagnostics). Runs on Linux and Windows. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -12,5 +12,8 @@
     <Compile Include="../JarvisObserver/ObserverStorage.cs" Link="ObserverStorage.cs" />
     <Compile Include="../JarvisObserver/TradeNotes.cs" Link="TradeNotes.cs" />
     <Compile Include="../JarvisObserver/VaultBridge.cs" Link="VaultBridge.cs" />
+    <Compile Include="../JarvisObserver/ExecutionParser.cs" Link="ExecutionParser.cs" />
+    <Compile Include="../JarvisObserver/ObserverPhase.cs" Link="ObserverPhase.cs" />
+    <Compile Include="../JarvisObserver/ObserverDiagnostics.cs" Link="ObserverDiagnostics.cs" />
   </ItemGroup>
 </Project>
