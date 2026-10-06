@@ -13,7 +13,7 @@ as $$
     select 1 from public.jarvis_workspace_members m
     where m.workspace_id = ws and m.user_id = auth.uid()
   );
-$;
+$$;
 
 -- SECURITY DEFINER helpers in an exposed schema must not remain executable by PUBLIC.
 revoke all on function public.jarvis_is_member(uuid) from public;
