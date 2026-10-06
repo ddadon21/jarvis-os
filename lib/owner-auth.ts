@@ -24,9 +24,9 @@ export function ownerAuthConfigured() {
   return Boolean(process.env.JARVIS_OWNER_PASSCODE);
 }
 
-/** Production must never run without an owner login. Preview/dev may (Vercel protection still applies). */
+/** Production and Vercel previews must never run without owner auth. Local development may opt out. */
 export function ownerAuthRequired() {
-  return ownerAuthConfigured() || process.env.VERCEL_ENV === "production";
+  return ownerAuthConfigured() || process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview";
 }
 
 function toHex(buffer: ArrayBuffer) {

@@ -8,6 +8,20 @@ on:
     paths:
       - 'app/**'
       - 'lib/**'
+      - 'docs/company/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - '.github/workflows/build-jarvis-web.yml'
+  pull_request:
+    branches:
+      - claude/jarvis-ai-backend-Iw0x3
+    paths:
+      - 'app/**'
+      - 'lib/**'
+      - 'docs/company/**'
       - 'tests/**'
       - 'package.json'
       - 'package-lock.json'
@@ -34,7 +48,7 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Verify observer state regressions
+      - name: Verify core regressions
         run: node --test tests/*.test.mjs
 
       - name: Build

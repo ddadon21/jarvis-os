@@ -23,7 +23,10 @@ Personal executive operating system for Dwight / Himie Johnson Ventures: Trading
 5. Trade normally. The Observer journals every trade; the learning job runs weekdays after the close.
 
 ## Docs
-- `docs/company/operating-structure.md` — future operating structure (direction only, not authorized to build)
+- `docs/company/constitution.md` — controlling HJV Company Constitution
+- `docs/company/executive-operating-agreement.md` — GPT ↔ Claude executive partnership rules
+- `docs/company/sop-001-executive-session.md` — current bounded executive-session SOP
+- `docs/company/operating-structure.md` — orientation map; controlling details live in the Constitution/SOPs
 - `docs/trading/learning-pipeline.md` — how learning works
 - `docs/trading/ea-roadmap.md` — gates from candidate to any automation
 - `docs/trading/deviant-learning-objective.md` — the objective

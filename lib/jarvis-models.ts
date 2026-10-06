@@ -9,6 +9,7 @@ import type { LanguageModel } from "ai";
 export const JARVIS_MODELS = {
   claudeDeep: process.env.JARVIS_CLAUDE_MODEL || "claude-opus-5",
   gptStandard: process.env.JARVIS_GPT_MODEL || "gpt-5.6-sol",
+  gptExecutive: process.env.JARVIS_GPT_EXECUTIVE_MODEL || "gpt-6-astra",
   gptFast: process.env.JARVIS_GPT_FAST_MODEL || "gpt-5.6-luna",
   agent: process.env.JARVIS_AGENT_MODEL || "",
   /** Vercel AI Gateway model for screen/chart vision, with gateway fallbacks below. */

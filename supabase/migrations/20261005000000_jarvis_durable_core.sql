@@ -1,19 +1,7 @@
 -- JARVIS durable core: trading lifecycle, learning data, events, device command queue.
 -- Apply in Supabase SQL editor (or `supabase db push`). Safe to re-run.
--- Assumes existing tables: jarvis_workspaces(id uuid), jarvis_workspace_members(workspace_id, user_id).
-
-create or replace function public.jarvis_is_member(ws uuid)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.jarvis_workspace_members m
-    where m.workspace_id = ws and m.user_id = auth.uid()
-  );
-$$;
+-- Assumes existing tables: jarvis_workspaces(id uuid), jarvis_workspace_members(workspace_id, user_id),
+-- and the hardened jarvis_private.is_workspace_member(uuid) helper from the persistence foundation.
 
 -- ---------------------------------------------------------------------------
 -- Runtime events (replaces the 100-item cache list as the system of record)
@@ -107,7 +95,6 @@ create table if not exists public.trading_observer_snapshots (
   evidence jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
-create index if not exists trading_observer_snapshots_ws_time on public.trading_observer_snapshots (workspace_id, observed_at desc);
 
 -- ---------------------------------------------------------------------------
 -- Learning data: market bars (TradingView webhook feed), model versions, shadow signals
@@ -234,17 +221,82 @@ create index if not exists jarvis_vault_notes_fts on public.jarvis_vault_notes u
 
 -- ---------------------------------------------------------------------------
 -- Row level security: members can read their workspace; the server writes with the service role.
+-- Explicit statements are used here so the migration is portable through hosted migration runners.
 -- ---------------------------------------------------------------------------
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'jarvis_runtime_events','trading_trades','trading_trade_events','trading_observer_snapshots',
-    'trading_bars','trading_model_versions','trading_signals','jarvis_devices',
-    'jarvis_device_commands','jarvis_approvals','jarvis_memory_facts','jarvis_vault_notes'
-  ] loop
-    execute format('alter table public.%I enable row level security', t);
-    execute format('drop policy if exists %I on public.%I', t || '_member_read', t);
-    execute format('create policy %I on public.%I for select using (public.jarvis_is_member(workspace_id))', t || '_member_read', t);
-  end loop;
-end $$;
+alter table public.jarvis_runtime_events enable row level security;
+drop policy if exists jarvis_runtime_events_member_read on public.jarvis_runtime_events;
+create policy jarvis_runtime_events_member_read on public.jarvis_runtime_events for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.trading_trades enable row level security;
+drop policy if exists trading_trades_member_read on public.trading_trades;
+create policy trading_trades_member_read on public.trading_trades for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.trading_trade_events enable row level security;
+drop policy if exists trading_trade_events_member_read on public.trading_trade_events;
+create policy trading_trade_events_member_read on public.trading_trade_events for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.trading_bars enable row level security;
+drop policy if exists trading_bars_member_read on public.trading_bars;
+create policy trading_bars_member_read on public.trading_bars for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.trading_model_versions enable row level security;
+drop policy if exists trading_model_versions_member_read on public.trading_model_versions;
+create policy trading_model_versions_member_read on public.trading_model_versions for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.trading_signals enable row level security;
+drop policy if exists trading_signals_member_read on public.trading_signals;
+create policy trading_signals_member_read on public.trading_signals for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.jarvis_devices enable row level security;
+drop policy if exists jarvis_devices_member_read on public.jarvis_devices;
+create policy jarvis_devices_member_read on public.jarvis_devices for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.jarvis_device_commands enable row level security;
+drop policy if exists jarvis_device_commands_member_read on public.jarvis_device_commands;
+create policy jarvis_device_commands_member_read on public.jarvis_device_commands for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.jarvis_approvals enable row level security;
+drop policy if exists jarvis_approvals_member_read on public.jarvis_approvals;
+create policy jarvis_approvals_member_read on public.jarvis_approvals for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.jarvis_memory_facts enable row level security;
+drop policy if exists jarvis_memory_facts_member_read on public.jarvis_memory_facts;
+create policy jarvis_memory_facts_member_read on public.jarvis_memory_facts for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+alter table public.jarvis_vault_notes enable row level security;
+drop policy if exists jarvis_vault_notes_member_read on public.jarvis_vault_notes;
+create policy jarvis_vault_notes_member_read on public.jarvis_vault_notes for select to authenticated using (jarvis_private.is_workspace_member(workspace_id));
+
+-- Explicit Data API privileges. RLS still controls authenticated rows; the
+-- service role is used only by trusted server-side JARVIS code.
+grant select on table
+  public.jarvis_runtime_events,
+  public.trading_trades,
+  public.trading_trade_events,
+  public.trading_observer_snapshots,
+  public.trading_bars,
+  public.trading_model_versions,
+  public.trading_signals,
+  public.jarvis_devices,
+  public.jarvis_device_commands,
+  public.jarvis_approvals,
+  public.jarvis_memory_facts,
+  public.jarvis_vault_notes
+to authenticated;
+
+grant all privileges on table
+  public.jarvis_runtime_events,
+  public.trading_trades,
+  public.trading_trade_events,
+  public.trading_observer_snapshots,
+  public.trading_bars,
+  public.trading_model_versions,
+  public.trading_signals,
+  public.jarvis_devices,
+  public.jarvis_device_commands,
+  public.jarvis_approvals,
+  public.jarvis_memory_facts,
+  public.jarvis_vault_notes
+to service_role;
+
+grant usage, select on sequence public.trading_trade_events_id_seq to service_role;
