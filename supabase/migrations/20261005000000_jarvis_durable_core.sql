@@ -13,7 +13,11 @@ as $$
     select 1 from public.jarvis_workspace_members m
     where m.workspace_id = ws and m.user_id = auth.uid()
   );
-$$;
+$;
+
+-- SECURITY DEFINER helpers in an exposed schema must not remain executable by PUBLIC.
+revoke all on function public.jarvis_is_member(uuid) from public;
+grant execute on function public.jarvis_is_member(uuid) to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- Runtime events (replaces the 100-item cache list as the system of record)
@@ -248,3 +252,39 @@ begin
     execute format('create policy %I on public.%I for select using (public.jarvis_is_member(workspace_id))', t || '_member_read', t);
   end loop;
 end $$;
+
+
+-- Explicit Data API privileges. RLS still controls authenticated rows; the
+-- service role is used only by trusted server-side JARVIS code.
+grant select on table
+  public.jarvis_runtime_events,
+  public.trading_trades,
+  public.trading_trade_events,
+  public.trading_observer_snapshots,
+  public.trading_bars,
+  public.trading_model_versions,
+  public.trading_signals,
+  public.jarvis_devices,
+  public.jarvis_device_commands,
+  public.jarvis_approvals,
+  public.jarvis_memory_facts,
+  public.jarvis_vault_notes
+to authenticated;
+
+grant all privileges on table
+  public.jarvis_runtime_events,
+  public.trading_trades,
+  public.trading_trade_events,
+  public.trading_observer_snapshots,
+  public.trading_bars,
+  public.trading_model_versions,
+  public.trading_signals,
+  public.jarvis_devices,
+  public.jarvis_device_commands,
+  public.jarvis_approvals,
+  public.jarvis_memory_facts,
+  public.jarvis_vault_notes
+to service_role;
+
+grant usage, select on sequence public.trading_trade_events_id_seq to service_role;
+grant usage, select on sequence public.trading_observer_snapshots_id_seq to service_role;

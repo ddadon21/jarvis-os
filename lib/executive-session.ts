@@ -40,6 +40,7 @@ export type ExecutiveModelCall = {
 
 export type ExecutiveSessionResult = {
   id: string;
+  objective: string;
   constitutionVersion: string;
   agreementVersion: string;
   sopVersion: string;
@@ -214,6 +215,7 @@ export async function runExecutiveSession(
 
   const result: ExecutiveSessionResult = {
     id: "exec_" + crypto.randomUUID(),
+    objective,
     constitutionVersion: HJV_CONSTITUTION_VERSION,
     agreementVersion: HJV_EXECUTIVE_AGREEMENT_VERSION,
     sopVersion: HJV_EXECUTIVE_SOP_VERSION,
@@ -451,6 +453,7 @@ async function defaultPersistAudit(result: ExecutiveSessionResult) {
     "cv=" + result.constitutionVersion,
     "av=" + result.agreementVersion,
     "sv=" + result.sopVersion,
+    "objective=" + result.objective.replace(/\|/g, "/").slice(0, 150),
     "status=" + result.status,
     "decision=" + result.decision,
     "independentReview=" + String(result.independentReview),

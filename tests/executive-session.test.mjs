@@ -216,3 +216,22 @@ test('audit persistence failure degrades a completed recommendation and escalate
   assert.equal(result.decision, 'ESCALATE_DWIGHT');
   assert.match(result.degradationReason, /Audit persistence failed/);
 });
+
+
+test('executive result preserves a normalized objective for durable audit traceability', async () => {
+  const { exports, source } = loadExecutiveModule();
+  const result = await exports.runExecutiveSession(
+    { objective: '  Decide   whether\nthis architecture should ship  ', preferredLead: 'GPT' },
+    {
+      isConfigured: () => true,
+      persistAudit: noAudit,
+      runModel: queuedRunner([
+        ok('proposal', 'GPT', 'LEAD', 'gpt-6-astra'),
+        ok('review\nREVIEW: PASS', 'CLAUDE', 'REVIEWER', 'claude-opus-5'),
+        ok('reconcile\nDECISION: APPROVE', 'GPT', 'RECONCILER', 'gpt-6-astra'),
+      ]),
+    },
+  );
+  assert.equal(result.objective, 'Decide whether this architecture should ship');
+  assert.match(source, /"objective=" \+ result\.objective/);
+});
