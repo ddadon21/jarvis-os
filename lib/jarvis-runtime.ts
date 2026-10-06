@@ -1,7 +1,7 @@
 import { getCache } from "@vercel/functions";
 import type { JarvisGovernancePolicy } from "./jarvis-core-policy";
 import { createClient } from "@supabase/supabase-js";
-import { durableRead, durableWrite } from "./jarvis-db";
+import { durableRead, durableWrite, supabaseServerKey, supabaseServerUrl } from "./jarvis-db";
 
 export type RuntimeDomain = "TRADING" | "FINANCE" | "SENTRYOPS" | "LIFE" | "CORE";
 
@@ -474,11 +474,10 @@ export async function setWorkforceState(state: WorkforceState): Promise<void> {
 }
 
 async function workforceServiceClient() {
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceRole) return null;
+  const serverKey = supabaseServerKey();
+  if (!serverKey) return null;
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_FALLBACK_URL;
-  return createClient(url, serviceRole, {
+  return createClient(supabaseServerUrl(), serverKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
