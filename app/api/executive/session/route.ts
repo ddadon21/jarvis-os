@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       objective,
       context: typeof body.context === "string" ? body.context : "",
       preferredLead,
+      signal: request.signal,
     });
     return Response.json({ ok: true, session }, {
       headers: { "Cache-Control": "no-store" },

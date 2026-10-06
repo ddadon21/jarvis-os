@@ -16,23 +16,27 @@ Use an Executive Session when a task is material enough to benefit from GPT + Cl
 
 Do not use two models for trivial routine work.
 
-## Procedure
+## v1 procedure — implemented now
 
-1. JARVIS creates a session ID and freezes the evidence/context package.
-2. JARVIS identifies authority class and whether Founder approval is required.
-3. JARVIS routes Lead based on task type and measured model health.
-4. Lead produces a proposal with evidence, risks, definition of done, and rollback.
-5. Reviewer challenges the proposal using the Executive Operating Agreement.
-6. Lead reconciles only the unresolved objections.
-7. JARVIS produces one of:
-   - APPROVE
-   - APPROVE_WITH_CONDITIONS
-   - TEST_FIRST
-   - REJECT
-   - ESCALATE_DWIGHT
-8. No action executes merely because models agree. Existing governance and permissions still apply.
-9. Session record is written to the audit trail before consequential execution.
-10. If a provider fails, the session is marked degraded. Two-model review may not be falsely claimed.
+1. JARVIS creates a unique session ID and fingerprints the caller-supplied objective/context without storing the raw context in the audit event.
+2. JARVIS chooses a default Lead by a simple task classifier, or honors an explicit Lead preference.
+3. Lead produces a proposal with evidence, risks, definition of done and rollback thinking.
+4. Reviewer independently challenges the proposal and must end with a strict REVIEW protocol line.
+5. Lead reconciles the objections and must end with a strict DECISION protocol line.
+6. **JARVIS deterministically adjudicates the final result from both outputs. The Lead cannot approve over a rejecting/escalating Reviewer.**
+7. Ambiguous, malformed or truncated protocol output becomes ESCALATE_DWIGHT / degraded rather than approval.
+8. No action executes merely because models agree. v1 is recommendation-only and gives models no tools.
+9. One durable `jarvis_runtime_events` audit entry is written for every session with policy versions, model calls, status, decision, token usage and context fingerprint.
+10. Provider failure is explicit. A single-provider fallback is marked DEGRADED and `independentReview=false`.
+
+## Planned v2 — not implemented yet
+
+These are requirements for the next stage, not claims about current behavior:
+- freeze a canonical evidence package from Jarvis world state rather than accepting only caller-supplied context;
+- assign a formal authority class before model calls;
+- route by measured provider/model health and historical task performance;
+- send ESCALATE_DWIGHT results into the Founder approvals/notification path;
+- add bounded session/cost quotas and tested Founder Away behavior.
 
 ## Stop conditions
 
@@ -40,10 +44,10 @@ Stop the session when:
 - the dispute is resolved;
 - a safe test is the next action;
 - Founder authority is required;
-- maximum rounds are reached;
+- three model exchanges are complete;
 - evidence is insufficient;
 - provider failure prevents required review.
 
 ## Definition of done
 
-The session is done when there is one explicit decision state, unresolved assumptions are recorded, next authority is known, and the evidence package is preserved.
+The session is done when there is one explicit decision state, unresolved assumptions are recorded, next authority is known, the audit event is durable, and no unsupported claim of dual review is made.

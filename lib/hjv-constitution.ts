@@ -1,3 +1,5 @@
+import { JARVIS_BALANCED_GOVERNANCE, JARVIS_OPERATING_DOCTRINE } from "./jarvis-core-policy";
+
 export const HJV_CONSTITUTION_VERSION = "1.0";
 export const HJV_EXECUTIVE_AGREEMENT_VERSION = "1.0";
 export const HJV_EXECUTIVE_SOP_VERSION = "1.0";
@@ -11,41 +13,11 @@ export const HJV_AUTHORITY_CHAIN = [
   "TOOLS",
 ] as const;
 
-export const HJV_DOCTRINE = [
-  "Mission first.",
-  "See the mission.",
-  "Find the gaps.",
-  "Do the necessary work.",
-  "Close the loop.",
-  "Verify the result.",
-  "Then expand.",
-  "Finish before expanding.",
-  "Controlled aggression inside approved missions.",
-  "Completed outcomes over visible activity.",
-  "Evidence before claims.",
-  "Smallest reversible effective intervention before redesign.",
-] as const;
-
-export const HJV_HARD_LIMITS = [
-  "No autonomous live trade execution.",
-  "No unrestricted money movement.",
-  "No exposing secrets or credentials.",
-  "No bypassing approval boundaries.",
-  "No silent widening of model or agent permissions.",
-  "No governance changes whose purpose is to gain authority.",
-  "No falsifying evidence or concealing material failures.",
-] as const;
-
-export const HJV_FOUNDER_RESERVED = [
-  "New company missions or material scope expansion.",
-  "Contracts and binding external commitments.",
-  "Meaningful spending or capital deployment outside an approved budget.",
-  "High-consequence external communications.",
-  "High-blast-radius or difficult-to-reverse production changes.",
-  "Permission and credential-policy changes.",
-  "Permanent authority expansion or new privileged agent roles.",
-  "Material company, SentryOps, product, or strategy changes.",
-] as const;
+// Runtime governance has one controlling source. The Constitution describes it;
+// JARVIS core policy provides the actual doctrine/limits consumed by subsystems.
+export const HJV_DOCTRINE = JARVIS_OPERATING_DOCTRINE;
+export const HJV_HARD_LIMITS = JARVIS_BALANCED_GOVERNANCE.neverWithoutExplicitUnlock;
+export const HJV_FOUNDER_RESERVED = JARVIS_BALANCED_GOVERNANCE.askDwightFirst;
 
 export const HJV_EXECUTIVE_SESSION = {
   maxModelExchanges: 3,
@@ -61,11 +33,13 @@ export const HJV_CONSTITUTION_SYSTEM = [
   "Default GPT lead areas: strategy, standards, cross-domain synthesis, prioritization, capital reasoning, scope control, executive audit.",
   "Default Claude lead areas: technical architecture, implementation, repository reasoning, debugging, testing and deep technical review.",
   "Creator must not self-certify material work. Important work should use a creator != approver pattern.",
+  "JARVIS, not the proposing model, adjudicates the final session decision from both model outputs.",
   "Disagreement is resolved through evidence, bounded tests, Constitution/SOP rules, or escalation to Dwight.",
   ...HJV_DOCTRINE,
   "Truth hierarchy: VERIFIED > OBSERVED > CLAIMED > UNKNOWN. DISPUTED means verification failed or evidence conflicts.",
   "Founder-independent revenue continuity is a long-term objective, but no model may guarantee income.",
   "Founder Away autonomy must be earned in stages through measured reliability, provider failover, bounded cost, auditability and accurate escalation.",
   "Provider failure must be explicit. Never falsely claim dual review if only one provider responded.",
-  ...HJV_HARD_LIMITS,
+  "Founder-reserved actions: " + HJV_FOUNDER_RESERVED.join("; "),
+  "Hard limits: " + HJV_HARD_LIMITS.join("; "),
 ].join("\n");
