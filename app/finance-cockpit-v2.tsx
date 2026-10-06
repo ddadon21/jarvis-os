@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowUpRight, ArrowDownRight, RefreshCw, ShieldCheck, Wallet, Target, CircleAlert, Landmark, SlidersHorizontal } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, RefreshCw, ShieldCheck, Wallet, Target, CircleAlert, Landmark, SlidersHorizontal, History } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { FinanceRuntimeState, FinanceAccountState } from "../lib/jarvis-runtime";
 import { FINANCE_IMPORT } from "../lib/finance-import";
 import { FINANCE_STAGES, getNextNetWorthMilestone } from "../lib/finance-snapshot";
 import { financeTotals, payoutMath, EMPTY_PAYOUT_PLAN, PLAN_FIELDS, type PayoutPlan } from "../lib/finance-math";
 import s from "./finance-capital.module.css";
+import { useLifetimeEarned } from "./lifetime-earned";
 
 const money = (v: number | null) => v == null ? "UNKNOWN" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
 const stamp = (v?: string | null) => v && Number.isFinite(Date.parse(v)) ? new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(v)) + " CT" : "Not supplied";
@@ -173,6 +174,8 @@ export default function FinanceCockpitV2() {
     catch { setSaved("Storage unavailable. Your draft remains open but is not saved."); }
   }
 
+  const lifetime = useLifetimeEarned();
+
   return <section className={s.finance} aria-label="Finance capital control">
     <header className={s.header}>
       <div><span className={s.eyebrow}>FINANCE</span><h2>CAPITAL CONTROL</h2><p>Protect the base. Clear the debt. Build ownership.</p></div>
@@ -211,6 +214,7 @@ export default function FinanceCockpitV2() {
           <Action number="03" title="Assign the next received payout" text="Use the planner to give each dollar a job. A saved plan never changes your actual balances." />
         </section>
       </div>
+      <HistoricalFlows earned={lifetime.earned} failed={lifetime.failed} />
       <section className={s.panel}>
         <div className={s.panelHead}><h3><ArrowDownRight size={13} />DEBT CONTROL</h3><span>{personal.length} OWN · {debts.length - personal.length} AUTHORIZED USER</span></div>
         <div className={s.debts}>{debts.map(a => {
@@ -304,6 +308,27 @@ export default function FinanceCockpitV2() {
     <footer className={s.footer}><ShieldCheck size={12} /><span>{bankFreshnessUnknown ? "Bank effective times unconfirmed" : "Source times shown per account"} · {runtime?.mode === "DIRECT" ? "Direct provider data" : "Latest imported snapshot"} · Plans never execute payments.</span></footer>
   </section>;
 }
+/**
+ * Money that moved over time, kept apart from what Dwight holds today.
+ * Only verified sources show a number; flows Jarvis cannot see yet say so
+ * instead of showing $0 or inferring from balance changes.
+ */
+function HistoricalFlows({ earned, failed }: { earned: ReturnType<typeof useLifetimeEarned>["earned"]; failed: boolean }) {
+  const earnedNote = earned?.total != null
+    ? `${earned.counted.length} paid payouts · public.trading_payouts · ${earned.coverage === "COMPLETE" ? "all connected sources read" : earned.coverage.toLowerCase() + " coverage"} · as of ${stamp(earned.asOf)}`
+    : failed || earned ? "Source unavailable · nothing is assumed" : "Loading verified records";
+  return <section className={s.panel}>
+    <div className={s.panelHead}><h3><History size={13} />HISTORICAL FLOWS</h3><span>EARNED IS NOT CASH</span></div>
+    <div className={s.flows}>
+      <Flow label="VERIFIED LIFETIME EARNED" value={earned?.total != null ? earned.exact : failed || earned ? "UNAVAILABLE" : "…"} note={earnedNote} tracked={earned?.total != null} />
+      <Flow label="TRACKED SPENDING / OUTFLOWS" value="NOT TRACKED YET" note="Coverage unavailable · transactions are not imported" />
+      <Flow label="TRADING REALIZED LOSSES" value="NOT TRACKED YET" note="Coverage unavailable · no verified loss, fee or reset records" />
+      <Flow label="INTEREST + FEES" value="NOT TRACKED YET" note="Coverage unavailable · card statements are not imported" />
+    </div>
+    <p className={s.muted}>Lifetime earned is money produced over time. It is not the cash available today, debt, or net worth — those are the balances above.</p>
+  </section>;
+}
+function Flow({ label, value, note, tracked = false }: { label: string; value: string; note: string; tracked?: boolean }) { return <div className={tracked ? s.flowTracked : s.flowUntracked}><span>{label}</span><b>{value}</b><small>{note}</small></div>; }
 function Metric({ label, value, note, accent = false }: { label: string; value: string; note: string; accent?: boolean }) { return <div className={accent ? s.metricAccent : ""}><span>{label}</span><b>{value}</b><small>{note}</small></div>; }
 function Action({ number, title, text }: { number: string; title: string; text: string }) { return <div className={s.action}><span>{number}</span><div><h4>{title}</h4><p>{text}</p></div></div>; }
 function Goal({ name, value, target, percent, note }: { name: string; value: string; target: string; percent: number | null; note: string }) { return <article><span>{name}</span><strong>{value}</strong><small>Target {target}</small>{percent != null && <div className={s.track}><i style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} /></div>}<p>{percent == null ? "" : `${Math.max(0, Math.min(100, percent)).toFixed(1)}% · `}{note}</p></article>; }

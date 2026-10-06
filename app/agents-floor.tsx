@@ -4,6 +4,7 @@ import { Activity, Crosshair, Radio, ShieldAlert, TriangleAlert, X } from "lucid
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import styles from "./agents-floor.module.css";
+import { LifetimeEarnedStat } from "./lifetime-earned";
 import {
   profileFor,
   quickEvent,
@@ -379,6 +380,7 @@ export default function AgentsFloor({ agents, tasks, events, floorActive, select
           <strong>HIMIE JOHNSON VENTURES</strong>
         </div>
         <div className={styles.frameStats}>
+          <LifetimeEarnedStat />
           <span><i className={styles.dotOnline} /> {counts.working} ON DUTY</span>
           <span><i className={styles.dotBlocked} /> {counts.blocked} BLOCKED</span>
           <span><i className={styles.dotError} /> {counts.incidents} INCIDENT</span>
