@@ -15,15 +15,22 @@ let client: SupabaseClient | null | undefined;
 let workspaceCache: { id: string; at: number } | null = null;
 const warned = new Set<string>();
 
+export function supabaseServerKey(): string | null {
+  return process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || null;
+}
+
+export function supabaseServerUrl(): string {
+  return process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_FALLBACK_URL;
+}
+
 export function durableDb(): SupabaseClient | null {
   if (client !== undefined) return client;
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!serviceRole) {
+  const serverKey = supabaseServerKey();
+  if (!serverKey) {
     client = null;
     return client;
   }
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_FALLBACK_URL;
-  client = createClient(url, serviceRole, {
+  client = createClient(supabaseServerUrl(), serverKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return client;
