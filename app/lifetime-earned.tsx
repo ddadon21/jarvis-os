@@ -30,7 +30,8 @@ export function useLifetimeEarned() {
 
 function dateLabel(value: string | null) {
   if (!value) return "date not recorded";
-  return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  // Payout dates are calendar dates (stored as UTC midnight); render in UTC so they never shift a day back in US time zones.
+  return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
 type LifetimeEarnedFeed = ReturnType<typeof useLifetimeEarned>;

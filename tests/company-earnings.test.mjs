@@ -92,6 +92,17 @@ test('payout rows resolve the amount column by name', () => {
   assert.equal(Number.isNaN(payoutRowToRecord({ id: 3, status: 'PAID' }).amount), true);
 });
 
+test('payout dates use the live column names ahead of the row insert time', () => {
+  // Shape of the live public.trading_payouts rows: approval_date / request_date / created_at.
+  const live = (id, approval, request) => ({
+    id, firm: 'Lucid Trading', payout_amount: 901, status: 'PAID',
+    approval_date: approval, request_date: request, created_at: '2026-09-26T15:00:00Z',
+  });
+  assert.equal(payoutRowToRecord(live('a', '2026-07-16', '2026-07-14')).occurredAt, '2026-07-16T00:00:00.000Z');
+  assert.equal(payoutRowToRecord(live('b', null, '2026-07-28')).occurredAt, '2026-07-28T00:00:00.000Z', 'request_date when not yet approved');
+  assert.equal(payoutRowToRecord(live('c', null, null)).occurredAt, '2026-09-26T15:00:00.000Z', 'created_at only as a last resort');
+});
+
 test('compact money format', () => {
   assert.equal(formatCompactUsd(3281.78), '$3.3K');
   assert.equal(formatCompactUsd(3249.99), '$3.2K');

@@ -153,7 +153,9 @@ export function summarizeLifetimeEarned(sources: EarnedSourceState[], now = new 
 /* ---------------------------------------------------------------------- */
 
 const AMOUNT_COLUMNS = ["payout_amount", "amount", "paid_amount", "amount_usd", "trader_net_amount", "net_amount", "gross_amount"] as const;
-const DATE_COLUMNS = ["paid_at", "approved_at", "payout_date", "requested_at", "created_at"] as const;
+// Live table uses approval_date / request_date; the others are kept as future-compatible aliases.
+// created_at is the row's insert time, so it is only the last resort.
+const DATE_COLUMNS = ["paid_at", "approved_at", "approval_date", "payout_date", "requested_at", "request_date", "created_at"] as const;
 const PARTY_COLUMNS = ["firm", "prop_firm", "provider", "platform"] as const;
 
 function finiteNumber(value: unknown): number | null {
