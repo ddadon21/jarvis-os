@@ -238,21 +238,55 @@ create index if not exists jarvis_vault_notes_fts on public.jarvis_vault_notes u
 
 -- ---------------------------------------------------------------------------
 -- Row level security: members can read their workspace; the server writes with the service role.
+-- Explicit statements are used here so the migration is portable through hosted migration runners.
 -- ---------------------------------------------------------------------------
-do $$
-declare t text;
-begin
-  foreach t in array array[
-    'jarvis_runtime_events','trading_trades','trading_trade_events','trading_observer_snapshots',
-    'trading_bars','trading_model_versions','trading_signals','jarvis_devices',
-    'jarvis_device_commands','jarvis_approvals','jarvis_memory_facts','jarvis_vault_notes'
-  ] loop
-    execute format('alter table public.%I enable row level security', t);
-    execute format('drop policy if exists %I on public.%I', t || '_member_read', t);
-    execute format('create policy %I on public.%I for select using (public.jarvis_is_member(workspace_id))', t || '_member_read', t);
-  end loop;
-end $$;
+alter table public.jarvis_runtime_events enable row level security;
+drop policy if exists jarvis_runtime_events_member_read on public.jarvis_runtime_events;
+create policy jarvis_runtime_events_member_read on public.jarvis_runtime_events for select to authenticated using (public.jarvis_is_member(workspace_id));
 
+alter table public.trading_trades enable row level security;
+drop policy if exists trading_trades_member_read on public.trading_trades;
+create policy trading_trades_member_read on public.trading_trades for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.trading_trade_events enable row level security;
+drop policy if exists trading_trade_events_member_read on public.trading_trade_events;
+create policy trading_trade_events_member_read on public.trading_trade_events for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.trading_observer_snapshots enable row level security;
+drop policy if exists trading_observer_snapshots_member_read on public.trading_observer_snapshots;
+create policy trading_observer_snapshots_member_read on public.trading_observer_snapshots for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.trading_bars enable row level security;
+drop policy if exists trading_bars_member_read on public.trading_bars;
+create policy trading_bars_member_read on public.trading_bars for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.trading_model_versions enable row level security;
+drop policy if exists trading_model_versions_member_read on public.trading_model_versions;
+create policy trading_model_versions_member_read on public.trading_model_versions for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.trading_signals enable row level security;
+drop policy if exists trading_signals_member_read on public.trading_signals;
+create policy trading_signals_member_read on public.trading_signals for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.jarvis_devices enable row level security;
+drop policy if exists jarvis_devices_member_read on public.jarvis_devices;
+create policy jarvis_devices_member_read on public.jarvis_devices for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.jarvis_device_commands enable row level security;
+drop policy if exists jarvis_device_commands_member_read on public.jarvis_device_commands;
+create policy jarvis_device_commands_member_read on public.jarvis_device_commands for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.jarvis_approvals enable row level security;
+drop policy if exists jarvis_approvals_member_read on public.jarvis_approvals;
+create policy jarvis_approvals_member_read on public.jarvis_approvals for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.jarvis_memory_facts enable row level security;
+drop policy if exists jarvis_memory_facts_member_read on public.jarvis_memory_facts;
+create policy jarvis_memory_facts_member_read on public.jarvis_memory_facts for select to authenticated using (public.jarvis_is_member(workspace_id));
+
+alter table public.jarvis_vault_notes enable row level security;
+drop policy if exists jarvis_vault_notes_member_read on public.jarvis_vault_notes;
+create policy jarvis_vault_notes_member_read on public.jarvis_vault_notes for select to authenticated using (public.jarvis_is_member(workspace_id));
 
 -- Explicit Data API privileges. RLS still controls authenticated rows; the
 -- service role is used only by trusted server-side JARVIS code.
