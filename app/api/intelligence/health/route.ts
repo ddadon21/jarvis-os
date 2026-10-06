@@ -18,7 +18,7 @@ async function probe(name: "OpenAI" | "Anthropic") {
     const result = await generateText({
       model: name === "OpenAI" ? openai(model) : anthropic(model),
       prompt: "Reply with exactly: OK",
-      maxOutputTokens: 8,
+      maxOutputTokens: 16,
     });
     return {
       provider: name,
