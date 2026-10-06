@@ -14,4 +14,4 @@ create table if not exists public.trading_trade_frames (
 );
 alter table public.trading_trade_frames enable row level security;
 drop policy if exists trading_trade_frames_member_read on public.trading_trade_frames;
-create policy trading_trade_frames_member_read on public.trading_trade_frames for select using (public.jarvis_is_member(workspace_id));
+create policy trading_trade_frames_member_read on public.trading_trade_frames for select using (jarvis_private.is_workspace_member(workspace_id));
