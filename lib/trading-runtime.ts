@@ -3,7 +3,7 @@ import { appendRuntimeEvent, createRuntimeEvent } from "./jarvis-runtime";
 import { estimatePnl, pointValue, sessionDay } from "./trading-session";
 import { cachedTradingRules, getTradingRules } from "./trading-rules";
 import { persistTradingTransition } from "./trading-store";
-import { nextFilledAt } from "./trading-phase";
+import { gateOpenRead, nextFilledAt, type OpenCandidate } from "./trading-phase";
 
 export type TradingConnectionState = "DISCONNECTED" | "CONNECTING" | "OBSERVING" | "DEGRADED";
 export type TradingStage = "PASS CURRENT ACCOUNT" | "FIRST PAYOUT" | "REPEAT PAYOUTS" | "SCALE FUNDED CAPITAL";
@@ -56,6 +56,8 @@ export type TradingObserverState = {
   detailsObservedAt?: string | null;
   /** When the current position first became visible (drives the short ORDER_FILLED phase). */
   filledAt?: string | null;
+  /** A single OPEN read awaiting confirmation; it is not shown as a fill until confirmed. */
+  openCandidate?: OpenCandidate | null;
 };
 
 export type TradingAccountState = {
@@ -465,7 +467,7 @@ function normalizeObserver(
   previous: TradingObserverState | undefined,
   observedAt: string | null,
 ): TradingObserverState {
-  const status: TradingObserverStatus =
+  const rawStatus: TradingObserverStatus =
     input?.status === "FLAT" || input?.status === "PENDING" || input?.status === "OPEN" || input?.status === "UNKNOWN"
       ? input.status
       : previous?.status ?? "UNKNOWN";
@@ -484,9 +486,19 @@ function normalizeObserver(
         ? null
         : previous?.orderType ?? null;
 
+  const symbol = normalizeObserverSymbol(input?.symbol === null ? null : nullableClean(input?.symbol ?? previous?.symbol ?? null, 40));
+  const rawIntent: TradingIntentState =
+    input?.intentState === "NONE" || input?.intentState === "PREPARING" || input?.intentState === "ORDER_WORKING" || input?.intentState === "POSITION_OPEN" || input?.intentState === "UNKNOWN"
+      ? input.intentState
+      : previous?.intentState ?? "UNKNOWN";
+  const readAt = normalizeDate(input?.observedAt ?? observedAt ?? null);
+  // Confirmed-fill boundary: one OPEN read (from any source) is held until a second coherent read confirms it.
+  const gated = gateOpenRead({ status: rawStatus, intentState: rawIntent, symbol, side }, previous, readAt);
+  const status = gated.status;
+
   return {
     status,
-    symbol: normalizeObserverSymbol(input?.symbol === null ? null : nullableClean(input?.symbol ?? previous?.symbol ?? null, 40)),
+    symbol,
     side,
     quantity: input?.quantity === null ? null : safeNullable(input?.quantity ?? previous?.quantity ?? null),
     orderType,
@@ -500,17 +512,15 @@ function normalizeObserver(
     evidence: Array.isArray(input?.evidence)
       ? input.evidence.filter((x): x is string => typeof x === "string").slice(0, 8).map((x) => x.slice(0, 160))
       : previous?.evidence ?? [],
-    intentState:
-      input?.intentState === "NONE" || input?.intentState === "PREPARING" || input?.intentState === "ORDER_WORKING" || input?.intentState === "POSITION_OPEN" || input?.intentState === "UNKNOWN"
-        ? input.intentState
-        : previous?.intentState ?? "UNKNOWN",
+    intentState: gated.intentState,
     orderTicketVisible:
       typeof input?.orderTicketVisible === "boolean"
         ? input.orderTicketVisible
         : previous?.orderTicketVisible ?? false,
     readingIssue: input?.readingIssue === undefined ? previous?.readingIssue ?? null : nullableClean(input.readingIssue, 200),
     detailsObservedAt: normalizeDate(input?.detailsObservedAt ?? input?.observedAt ?? observedAt ?? null),
-    filledAt: nextFilledAt(previous, status, normalizeDate(input?.observedAt ?? observedAt ?? null)),
+    filledAt: nextFilledAt(previous, status, readAt),
+    openCandidate: gated.openCandidate,
   };
 }
 
