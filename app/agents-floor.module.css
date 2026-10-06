@@ -169,6 +169,7 @@
 .roomName { fill: #fff; font-weight: 700; letter-spacing: .1em }
 .roomState { fill: var(--crimson-hot, #ff3b44); text-anchor: end; letter-spacing: .12em }
 .roomWork { fill: #8d7a7c; letter-spacing: .04em }
+.roomEarned { fill: var(--crimson-hot); font-weight: 700; letter-spacing: .04em; cursor: help }
 
 .equip { fill: rgba(183, 31, 38, .1); stroke: rgba(183, 31, 38, .32); stroke-width: .8 }
 .equipLit { fill: rgba(255, 59, 68, .5); stroke: rgba(255, 120, 126, .7); stroke-width: .8; animation: blink 3.2s ease-in-out infinite }
@@ -463,6 +464,8 @@
 .statGrid > div { display: grid; gap: 3px; padding: 6px 5px; border: 1px solid rgba(183, 31, 38, .18); background: rgba(183, 31, 38, .04); min-width: 0 }
 .statGrid span { font-size: 6.8px; letter-spacing: .12em; color: #9b7f82 }
 .statGrid strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.earnedRow { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 7.5px; letter-spacing: .1em; color: #9b7f82; padding: 2px 0 6px; cursor: help }
+.earnedRow b { color: var(--crimson-hot); font-size: 10px; font-weight: 700 }
 .guardRow { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; font-size: 7.5px; letter-spacing: .08em; color: #c3aeb1; padding: 4px 0; border-bottom: 1px dashed rgba(183, 31, 38, .22) }
 .tradeRow { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 2px 6px; align-items: center; padding: 4px 5px; border: 1px solid rgba(183, 31, 38, .12); font-size: 8.5px }
 .tradeRow b { color: #a48e91; font-weight: 500; grid-row: span 2 }

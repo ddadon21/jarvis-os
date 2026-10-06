@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { createPortal } from "react-dom";
 import styles from "./agents-floor.module.css";
 import { observerPhase, phaseLabel, type ObserverPhase } from "../lib/trading-phase";
+import { LifetimeEarnedStat, lifetimeEarnedTitle, lifetimeEarnedValue, useLifetimeEarned } from "./lifetime-earned";
 import {
   profileFor,
   quickEvent,
@@ -342,6 +343,7 @@ export default function AgentsFloor({ agents, tasks, events, floorActive, select
   const [calm, setCalm] = useState(true);
   const [deskId, setDeskId] = useState<string | null>(null);
   const trading = useTradingFeed(deskId === "TRADING_OBSERVER");
+  const earned = useLifetimeEarned();
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 760px)");
@@ -380,6 +382,7 @@ export default function AgentsFloor({ agents, tasks, events, floorActive, select
           <strong>HIMIE JOHNSON VENTURES</strong>
         </div>
         <div className={styles.frameStats}>
+          <LifetimeEarnedStat feed={earned} />
           <span><i className={styles.dotOnline} /> {counts.working} ON DUTY</span>
           <span><i className={styles.dotBlocked} /> {counts.blocked} BLOCKED</span>
           <span><i className={styles.dotError} /> {counts.incidents} INCIDENT</span>
@@ -475,6 +478,7 @@ export default function AgentsFloor({ agents, tasks, events, floorActive, select
                   tone={toneFor(agent, floorActive)}
                   selected={selectedId === agent.id}
                   trading={agent.id === "TRADING_OBSERVER" ? trading : null}
+                  earned={agent.id === "TRADING_OBSERVER" ? earned : null}
                   onOpen={() => openDesk(agent.id)}
                 />
               );
@@ -531,6 +535,7 @@ export default function AgentsFloor({ agents, tasks, events, floorActive, select
           allEvents={events}
           floorActive={floorActive}
           trading={trading}
+          earned={earned}
           onClose={() => setDeskId(null)}
         />
       ) : null}
@@ -539,6 +544,7 @@ export default function AgentsFloor({ agents, tasks, events, floorActive, select
 }
 
 type TradingFeed = ReturnType<typeof useTradingFeed>;
+type EarnedFeed = ReturnType<typeof useLifetimeEarned>;
 
 function FloorRoom({
   agent,
@@ -547,6 +553,7 @@ function FloorRoom({
   tone,
   selected,
   trading,
+  earned,
   onOpen,
 }: {
   agent: WorkforceAgent;
@@ -555,6 +562,7 @@ function FloorRoom({
   tone: Tone;
   selected: boolean;
   trading: TradingFeed | null;
+  earned: EarnedFeed | null;
   onOpen: () => void;
 }) {
   const profile = profileFor(agent);
@@ -602,6 +610,12 @@ function FloorRoom({
       <text x={room.x + 14} y={room.y + 22 * fs} className={styles.roomZone} style={{ fontSize: 10 * fs }}>{profile.zone}</text>
       <text x={room.x + 14} y={room.y + 42 * fs} className={styles.roomName} style={{ fontSize: 16 * fs }}>{profile.name}</text>
       <text x={room.x + room.w - 14} y={room.y + 22 * fs} className={styles.roomState} style={{ fontSize: 9 * fs }}>{toneLabel(tone)}</text>
+      {earned ? (
+        <text x={room.x + 14} y={room.y + 58 * fs} className={styles.roomEarned} style={{ fontSize: 7 * fs }}>
+          <title>{lifetimeEarnedTitle(earned)}</title>
+          EARNED {lifetimeEarnedValue(earned)}
+        </text>
+      ) : null}
 
       {equipment.map((item, index) => (
         <rect
@@ -685,6 +699,7 @@ function DeskView({
   allEvents,
   floorActive,
   trading,
+  earned,
   onClose,
 }: {
   agent: WorkforceAgent;
@@ -693,6 +708,7 @@ function DeskView({
   allEvents: WorkforceEvent[];
   floorActive: boolean;
   trading: TradingFeed;
+  earned: EarnedFeed;
   onClose: () => void;
 }) {
   const profile = profileFor(agent);
@@ -743,7 +759,7 @@ function DeskView({
           <Skyline />
           <div className={styles.monitors}>
             <div className={styles.monitor + " " + styles.monitorLeft}>
-              {isTrading ? <TradingSessionScreen state={trading.state} /> : <TaskScreen tasks={tasks} />}
+              {isTrading ? <TradingSessionScreen state={trading.state} earned={earned} /> : <TaskScreen tasks={tasks} />}
             </div>
             <div className={styles.monitor + " " + styles.monitorMain}>
               {isTrading
@@ -1026,7 +1042,7 @@ function PriceChart({ ticks, observer }: { ticks: Tick[]; observer: ObserverRead
   );
 }
 
-function TradingSessionScreen({ state }: { state: TradingSnapshot | null }) {
+function TradingSessionScreen({ state, earned }: { state: TradingSnapshot | null; earned: EarnedFeed }) {
   const today = state?.today;
   const guard = state?.guardrails;
   const trades = [...(state?.openTrades ?? []), ...(state?.recentTrades ?? [])]
@@ -1035,6 +1051,10 @@ function TradingSessionScreen({ state }: { state: TradingSnapshot | null }) {
   return (
     <div className={styles.screen}>
       <div className={styles.screenHead}><span>SESSION // TODAY</span><b>{state?.account.propFirm ?? state?.account.provider ?? "—"}</b></div>
+      <div className={styles.earnedRow} title={lifetimeEarnedTitle(earned)}>
+        <span>LIFETIME EARNED · VERIFIED PAYOUTS</span>
+        <b>{lifetimeEarnedValue(earned)}</b>
+      </div>
       <div className={styles.statGrid}>
         <div><span>TRADES</span><strong>{today?.trades ?? 0}</strong></div>
         <div><span>WINS</span><strong className={styles.long}>{today?.wins ?? 0}</strong></div>

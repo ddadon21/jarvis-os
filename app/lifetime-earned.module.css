@@ -1,0 +1,33 @@
+/* LIFETIME EARNED header stat + drill-in. Jarvis crimson HUD. */
+.wrap { position: relative; display: inline-flex }
+.stat {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; color: inherit; letter-spacing: inherit; white-space: nowrap;
+}
+.stat span { color: #a5686d }
+.stat b { color: #ff3b44; font-weight: 700 }
+.stat em { font-style: normal; font-size: 0.85em; color: #e0a040 }
+.stat:focus-visible { outline: 1px solid #b71f26; outline-offset: 3px }
+.panel {
+  position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; width: min(340px, calc(100vw - 32px));
+  padding: 12px; border: 1px solid rgba(183, 31, 38, .55); background: rgba(8, 6, 7, .97);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .6); text-align: left; letter-spacing: .04em; white-space: normal;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.panel > strong { display: block; font-size: 18px; color: #fff }
+.panel > p { margin: 4px 0 8px; font-size: 10px; line-height: 1.45; color: #b9a7a9 }
+.panel ul { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px }
+.panel li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; font-size: 10.5px }
+.panel li span { color: #e8dedf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.panel li b { color: #54d8a4 }
+.panel li small { grid-column: 1 / -1; font-size: 8.5px; color: #8d7a7c }
+.sources { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid rgba(183, 31, 38, .25) }
+.sources div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; font-size: 9.5px }
+.sources span { color: #c9bfc0 }
+.sources b { color: #fff; font-weight: 500 }
+.sources small { grid-column: 1 / -1; font-size: 8.5px; color: #8d7a7c }
+.foot { display: block; margin-top: 8px; font-size: 8.5px; color: #8d7a7c }
+@media (max-width: 760px) {
+  /* Bottom sheet on phones so the detail never opens off-screen. */
+  .panel { position: fixed; top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; max-height: 70vh; overflow-y: auto }
+}

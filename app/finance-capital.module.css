@@ -88,11 +88,18 @@
 .finance td small { display:block; font-size:8px; margin-top:4px; }
 .finance td:nth-child(2),.finance td:nth-child(3) { white-space:nowrap; }
 .coverage { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.flows { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:6px 0 10px; }
+.flows > div { display:grid; gap:4px; padding:10px; border:1px solid rgba(255,255,255,.08); min-width:0; }
+.flows span { font-size:8px; letter-spacing:.07em; color:#999; }
+.flows b { font-size:14px; font-weight:600; }
+.flows small { font-size:8.5px; line-height:1.4; color:#8d8d8d; }
+.flowTracked b { color:#fff; }
+.flowUntracked b { color:#9a9a9a; font-size:11px; letter-spacing:.08em; }
 .coverage p { font-size:10px; margin-top:5px; }
 .footer { display:flex; align-items:center; gap:7px; color:#888; font-size:9px; padding:4px 2px; }
 .notice { padding:9px 12px; border-left:2px solid var(--jarvis-red); background:rgba(255,255,255,.025); }
 @media(max-width:900px) { .columns { grid-template-columns:1fr; } .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .debts { grid-template-columns:1fr; } .debtHead { min-height:0; } .finance dl { gap:6px; } }
-@media(max-width:580px) { .header { align-items:flex-start; flex-direction:column; } .sync { align-items:flex-start; } .sync small { font-size:8px; } .planner,.coverage,.goals { grid-template-columns:1fr; } .tabs button { font-size:8px; padding:7px 4px; } .metrics b { font-size:15px; } .metrics > div { padding:9px; } .finance table { min-width:560px; } .chartGrid { grid-template-columns:1fr 1fr; } }
+@media(max-width:580px) { .header { align-items:flex-start; flex-direction:column; } .sync { align-items:flex-start; } .sync small { font-size:8px; } .planner,.coverage,.goals { grid-template-columns:1fr; } .tabs button { font-size:8px; padding:7px 4px; } .metrics b { font-size:15px; } .metrics > div { padding:9px; } .finance table { min-width:560px; } .chartGrid { grid-template-columns:1fr 1fr; } .flows { grid-template-columns:1fr 1fr; } }
 
 /* Capital Path remains interactive while preserving the original Finance design. */
 .stages button{
