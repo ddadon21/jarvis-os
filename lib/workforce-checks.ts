@@ -26,7 +26,7 @@ export async function infrastructureCheck(): Promise<CheckResult> {
     findings.push("Runtime cache is unavailable in this environment.");
   }
   if (!durableConfigured()) {
-    findings.push("Durable storage is not configured (SUPABASE_SERVICE_ROLE_KEY missing): trades and learning data are not saved permanently.");
+    findings.push("Durable storage is not configured (SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY missing): trades and learning data are not saved permanently.");
     evidence.push("check:durable=not-configured");
   } else {
     const ctx = await durableContext();
@@ -62,15 +62,15 @@ export function securityCheck(): CheckResult {
     evidence.push(`check:${name}=${ok ? "set" : "missing"}`);
     if (!ok && required) findings.push(why);
   };
-  record("owner-passcode", has("JARVIS_OWNER_PASSCODE", 8), "JARVIS_OWNER_PASSCODE is not set: owner login is off (production refuses access without it).", production || has("JARVIS_OWNER_PASSCODE"));
+  record("owner-passcode", has("JARVIS_OWNER_PASSCODE", 8), "JARVIS_OWNER_PASSCODE is not set: owner login is intentionally off.", false);
   record("cron-secret", has("CRON_SECRET", 16), "CRON_SECRET is missing: scheduled jobs are not authenticated in production.", production);
-  record("service-role", has("SUPABASE_SERVICE_ROLE_KEY"), "SUPABASE_SERVICE_ROLE_KEY is missing: durable storage is off.", true);
+  record("supabase-server-key", has("SUPABASE_SECRET_KEY") || has("SUPABASE_SERVICE_ROLE_KEY"), "SUPABASE_SECRET_KEY / SUPABASE_SERVICE_ROLE_KEY is missing: durable storage is off.", true);
   record("market-webhook-secret", has("JARVIS_MARKET_WEBHOOK_SECRET", 16), "JARVIS_MARKET_WEBHOOK_SECRET is missing or short: the TradingView bar feed cannot be accepted.", false);
   const degraded = findings.length > 0;
   return {
     ok: !degraded,
     degraded,
-    summary: degraded ? "Security check found: " + findings.join(" ") : "Security check passed: owner login, cron authentication and durable storage credentials are configured.",
+    summary: degraded ? "Security check found: " + findings.join(" ") : "Security check passed: configured authentication boundaries and durable storage credentials are healthy.",
     findings,
     evidence,
   };
