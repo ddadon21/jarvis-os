@@ -5,7 +5,7 @@
   font: inherit; color: inherit; letter-spacing: inherit; white-space: nowrap;
 }
 .stat span { color: #a5686d }
-.stat b { color: #54d8a4; font-weight: 700 }
+.stat b { color: #ff3b44; font-weight: 700 }
 .stat em { font-style: normal; font-size: 0.85em; color: #e0a040 }
 .stat:focus-visible { outline: 1px solid #b71f26; outline-offset: 3px }
 .panel {

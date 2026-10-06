@@ -33,9 +33,23 @@ function dateLabel(value: string | null) {
   return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+type LifetimeEarnedFeed = ReturnType<typeof useLifetimeEarned>;
+
+/** Rounded display value, or an explicit unavailable/loading state (never $0). */
+export function lifetimeEarnedValue({ earned, failed }: LifetimeEarnedFeed) {
+  return earned?.total == null ? (failed || earned ? "UNAVAILABLE" : "…") : earned.display;
+}
+
+/** Tooltip text carrying the exact verified total. */
+export function lifetimeEarnedTitle({ earned }: LifetimeEarnedFeed) {
+  return earned?.total == null
+    ? "Lifetime earned: source unavailable"
+    : `Lifetime earned ${earned.exact} · ${earned.counted.length} verified records · coverage ${earned.coverage}`;
+}
+
 /** Compact header stat (LIFETIME EARNED, rounded to one-decimal thousands) with exact amount and sources on drill-in. */
-export function LifetimeEarnedStat() {
-  const { earned, failed } = useLifetimeEarned();
+export function LifetimeEarnedStat({ feed }: { feed: LifetimeEarnedFeed }) {
+  const { earned } = feed;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -49,10 +63,8 @@ export function LifetimeEarnedStat() {
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
   }, [open]);
 
-  const value = earned?.total == null ? (failed || earned ? "UNAVAILABLE" : "…") : earned.display;
-  const title = earned?.total == null
-    ? "Lifetime earned: source unavailable"
-    : `Lifetime earned ${earned.exact} · ${earned.counted.length} verified records · coverage ${earned.coverage}`;
+  const value = lifetimeEarnedValue(feed);
+  const title = lifetimeEarnedTitle(feed);
 
   return (
     <div className={styles.wrap} ref={ref}>
