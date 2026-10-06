@@ -24,9 +24,13 @@ export function ownerAuthConfigured() {
   return Boolean(process.env.JARVIS_OWNER_PASSCODE);
 }
 
-/** Production and Vercel previews must never run without owner auth. Local development may opt out. */
+/**
+ * Owner auth is opt-in for now: if JARVIS_OWNER_PASSCODE is unset, Jarvis opens
+ * directly in every environment. Setting the passcode later re-enables the
+ * existing owner gate without another code change.
+ */
 export function ownerAuthRequired() {
-  return ownerAuthConfigured() || process.env.VERCEL_ENV === "production" || process.env.VERCEL_ENV === "preview";
+  return ownerAuthConfigured();
 }
 
 function toHex(buffer: ArrayBuffer) {
