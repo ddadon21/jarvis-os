@@ -321,4 +321,3 @@ grant all privileges on table
 to service_role;
 
 grant usage, select on sequence public.trading_trade_events_id_seq to service_role;
-grant usage, select on sequence public.trading_observer_snapshots_id_seq to service_role;
