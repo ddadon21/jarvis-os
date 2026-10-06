@@ -72,7 +72,7 @@ export function LifetimeEarnedStat({ feed }: { feed: LifetimeEarnedFeed }) {
       <button type="button" className={styles.stat} title={title} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span>LIFETIME EARNED</span>
         <b>{value}</b>
-        {earned && earned.coverage !== "COMPLETE" ? <em>{earned.coverage}</em> : null}
+        {earned?.total != null && earned.coverage !== "COMPLETE" ? <em>{earned.coverage}</em> : null}
       </button>
       {open ? (
         <div className={styles.panel} role="dialog" aria-label="Lifetime earned detail">
