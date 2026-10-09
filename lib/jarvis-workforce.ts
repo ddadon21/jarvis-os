@@ -813,7 +813,9 @@ function ensureTask(tasks: AgentTask[], seed: TaskSeed) {
   const existing = tasks.find((task) =>
     task.title === seed.title &&
     task.assignedTo === seed.assignedTo &&
-    ["QUEUED", "RUNNING", "BLOCKED"].includes(task.status),
+    (task.source === "workforce.cycle"
+      ? ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "DONE"].includes(task.status)
+      : ["QUEUED", "RUNNING", "BLOCKED"].includes(task.status)),
   );
   if (existing) return { tasks, task: existing };
 
@@ -846,22 +848,21 @@ function updateTask(tasks: AgentTask[], id: string, patch: Partial<AgentTask>) {
 }
 
 function pruneTasks(tasks: AgentTask[]) {
-  const openStatuses: AgentTask["status"][] = ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"];
+  // Each scheduled check represents one continuing responsibility, not a new
+  // employee assignment every time an unchanged dependency fails.
+  // Keep the latest result (including FAILED), then retry/update it in place.
   const recurringKeys = new Set<string>();
-  const open = [...tasks]
-    .filter((task) => openStatuses.includes(task.status))
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-    .filter((task) => {
-      if (task.source !== "workforce.cycle") return true;
-      const key = [task.source, task.assignedTo, task.domain, task.title].join("|");
-      if (recurringKeys.has(key)) return false;
-      recurringKeys.add(key);
-      return true;
-    });
-  const closed = tasks
-    .filter((task) => !openStatuses.includes(task.status))
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-    .slice(0, 70);
+  const sorted = [...tasks].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  const unique = sorted.filter((task) => {
+    if (task.source !== "workforce.cycle") return true;
+    const key = [task.source, task.assignedTo, task.domain, task.title].join("|");
+    if (recurringKeys.has(key)) return false;
+    recurringKeys.add(key);
+    return true;
+  });
+  const openStatuses: AgentTask["status"][] = ["QUEUED", "RUNNING", "BLOCKED", "WAITING_APPROVAL"];
+  const open = unique.filter((task) => openStatuses.includes(task.status));
+  const closed = unique.filter((task) => !openStatuses.includes(task.status)).slice(0, 70);
   return [...open, ...closed].slice(0, 100);
 }
 
