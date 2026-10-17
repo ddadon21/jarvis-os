@@ -1,131 +1,91 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import type { FinanceAccountState } from "../lib/jarvis-runtime";
 import s from "./finance-capital.module.css";
 
-type Card = { id: string; name: string; balance: number; limit: number | null; apr: number | null; minimum: number; destination: string };
-type Settings = { payout: string; split: string; gross: boolean; taxPct: string; essentials: string; savings: string; trading: string; cards: Card[] };
-const KEY = "jarvis-payout-split-v2";
-const HISTORY = "jarvis-payout-split-history-v2";
-const initial: Settings = {
-  payout: "", split: "90", gross: false, taxPct: "25", essentials: "0", savings: "0", trading: "0",
-  cards: [
-    { id: "capital-platinum", name: "Capital One Platinum", balance: 2000, limit: 2000, apr: null, minimum: 0, destination: "Capital One" },
-    { id: "capital-quicksilver", name: "Capital One Quicksilver", balance: 580.19, limit: null, apr: null, minimum: 0, destination: "Capital One" },
-    { id: "rbfcu-world", name: "RBFCU World Card", balance: 622.43, limit: 600, apr: 18, minimum: 25, destination: "RBFCU" }
-  ]
-};
-const dollars = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-const c = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100);
-const val = (v: string) => Math.max(0, Number(v) || 0);
-const inputValid = (v: string) => v === "" || (/^\d+(\.\d{0,2})?$/.test(v) && Number(v) <= 1000000000);
-const BANKS = [
-  ["TAX RESERVE", "American Express HYSA — separate tax bucket"],
-  ["ESSENTIALS + CARD MINIMUMS", "Bank of America Personal Checking"],
-  ["EMERGENCY SAVINGS", "American Express HYSA"],
-  ["EXTRA DEBT PAYDOWN", "Capital One / RBFCU"],
-  ["TRADING CAPITAL", "Bank of America Business Checking"]
+const KEY = "jarvis-payout-automatic-v1";
+const HISTORY = "jarvis-payout-automatic-history-v1";
+const POLICY = [
+  { key: "tax", name: "TAX RESERVE", pct: 25, destination: "American Express HYSA · earmarked for taxes" },
+  { key: "essentials", name: "ESSENTIALS + MINIMUMS", pct: 25, destination: "BofA Personal Checking · gas, food, bills and card minimums" },
+  { key: "savings", name: "EMERGENCY SAVINGS", pct: 20, destination: "American Express HYSA · emergency fund" },
+  { key: "debt", name: "EXTRA CARD PAYOFF", pct: 30, destination: "Capital One / RBFCU · pay cards directly" },
+  { key: "trading", name: "TRADING REINVESTMENT", pct: 0, destination: "BofA Business Checking · disabled until safety buffer is funded" }
+] as const;
+type Item = typeof POLICY[number]["key"];
+type History = { at: string; net: number; allocation: Record<Item,number> };
+const CARDS = [
+  { key:"world", name:"RBFCU World Card", balance:622.43, apr:18, limit:600 },
+  { key:"quicksilver", name:"Capital One Quicksilver", balance:580.19, apr:null, limit:null },
+  { key:"platinum", name:"Capital One Platinum", balance:2000, apr:null, limit:2000 }
 ];
+const money = (n:number) => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(n);
 export default function PayoutSplitCalculator({ accounts }: { accounts: FinanceAccountState[] }) {
-  const [state, setState] = useState<Settings>(initial);
-  const [notice, setNotice] = useState("");
-  const [history, setHistory] = useState<{ date: string; net: number; tax: number; essentials: number; savings: number; debt: number; trading: number }[]>([]);
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(KEY) || "null");
-      if (saved && typeof saved === "object") {
-        setState({ ...initial, ...saved, cards: initial.cards.map(card => ({ ...card, ...(Array.isArray(saved.cards) ? saved.cards.find((x: Card) => x.id === card.id) : {}) })) });
-      }
-      const prior = JSON.parse(localStorage.getItem(HISTORY) || "[]");
-      if (Array.isArray(prior)) setHistory(prior.slice(0, 15));
-    } catch { setNotice("Stored draft could not be loaded. Review inputs before saving."); }
-  }, []);
-  const update = (field: keyof Omit<Settings, "cards">, value: string | boolean) => { setState(p => ({ ...p, [field]: value })); setNotice(""); };
-  const updateCard = (id: string, field: keyof Card, value: number | null) => setState(p => ({ ...p, cards: p.cards.map(card => card.id === id ? { ...card, [field]: value } : card) }));
-  const calc = useMemo(() => {
-    const gross = c(val(state.payout));
-    const splitPct = Math.min(100, val(state.split));
-    const net = state.gross ? Math.floor(gross * splitPct / 100) : gross;
-    const taxPct = Math.min(100, val(state.taxPct));
-    const tax = Math.floor(net * taxPct / 100);
-    let available = net - tax;
-    const essentials = Math.min(available, c(val(state.essentials))); available -= essentials;
-    const savings = Math.min(available, c(val(state.savings))); available -= savings;
-    const trading = Math.min(available, c(val(state.trading))); available -= trading;
-    const desiredDebt = available;
-    const cards = state.cards.map(card => ({ ...card, payment: 0 }));
-    // All stated minimums are paid from the essentials bucket, never charged twice.
-    // Extra debt is first allocated to bringing over-limit cards below their limits, then to known highest APR.
-    const order = cards.map((card, i) => ({ card, i })).sort((a, b) => {
-      const overA = a.card.limit != null && a.card.balance > a.card.limit ? 1 : 0;
-      const overB = b.card.limit != null && b.card.balance > b.card.limit ? 1 : 0;
-      if (overA !== overB) return overB - overA;
-      return (b.card.apr ?? -1) - (a.card.apr ?? -1);
-    });
-    let unspent = desiredDebt;
-    for (const item of order) {
-      const card = item.card;
-      if (unspent <= 0) break;
-      const payment = Math.min(unspent, c(Math.max(0, card.balance - card.minimum)));
-      cards[item.i].payment = payment / 100;
-      unspent -= payment;
-    }
-    const debt = desiredDebt - unspent;
-    return { net: net / 100, tax: tax / 100, essentials: essentials / 100, savings: savings / 100, trading: trading / 100, debt: debt / 100, unallocated: unspent / 100, cards,
-      shortfall: Math.max(0, c(val(state.essentials)) + c(val(state.savings)) + c(val(state.trading)) - (net - tax)) / 100 };
-  }, [state]);
-  const invalid = ![state.payout, state.split, state.taxPct, state.essentials, state.savings, state.trading].every(inputValid)
-    || val(state.split) > 100 || val(state.taxPct) > 100 || state.cards.some(card => [card.balance, card.minimum, card.apr ?? 0].some(n => !Number.isFinite(n) || n < 0));
-  const save = () => {
-    if (invalid || calc.net <= 0 || calc.shortfall > 0) return;
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-      const records = [{ date: new Date().toISOString(), net: calc.net, tax: calc.tax, essentials: calc.essentials, savings: calc.savings, debt: calc.debt, trading: calc.trading }, ...history].slice(0, 15);
-      localStorage.setItem(HISTORY, JSON.stringify(records)); setHistory(records);
-      setNotice("Scenario saved in this browser only. No bank transfers or card payments were executed.");
-    } catch { setNotice("Could not save on this device. No transfers were made."); }
-  };
-  const bank = (pattern: RegExp) => accounts.find(a => a.type === "depository" && pattern.test(a.institution + " " + a.name));
-  const personal = bank(/bank of america.*(financial ops|7224)/i);
-  const business = bank(/bank of america.*(business|9024)/i);
-  const savingsBank = bank(/american express.*(savings|4276)/i);
-  return <section className={`${s.panel} ${s.splitCalculator}`}>
-    <div className={s.panelHead}><h3>PAYOUT SPLIT CALCULATOR</h3><span>LIVE CALCULATION · MANUAL EXECUTION</span></div>
-    <p className={s.muted}>Set the next payout and obligations. Jarvis calculates an allocation proposal; nothing moves until you make and verify each transfer. Bank snapshots may be stale.</p>
-    <div className={s.planner}>
-      <div>
-        <label>AMOUNT RECEIVED OR EXPECTED ($)<input type="number" min="0" step=".01" value={state.payout} onChange={e => update("payout", e.target.value)} placeholder="Enter payout" /></label>
-        <label><input type="checkbox" checked={state.gross} onChange={e => update("gross", e.target.checked)} /> AMOUNT ABOVE IS GROSS BEFORE FIRM SPLIT</label>
-        {state.gross && <label>YOUR PROP-FIRM SHARE (%)<input type="number" min="0" max="100" value={state.split} onChange={e => update("split", e.target.value)} /></label>}
-        <div className={`${s.fields} ${s.splitFields}`}>
-          <label>TAX RESERVE (%)<input type="number" min="0" max="100" value={state.taxPct} onChange={e => update("taxPct", e.target.value)} /><small>Editable planning assumption, not tax advice</small></label>
-          <label>BILLS + CARD MINIMUMS ($)<input type="number" min="0" step=".01" value={state.essentials} onChange={e => update("essentials", e.target.value)} /><small>Include gas, food, unpaid essentials and required card minimums</small></label>
-          <label>EMERGENCY SAVINGS ($)<input type="number" min="0" step=".01" value={state.savings} onChange={e => update("savings", e.target.value)} /></label>
-          <label>TRADING REINVESTMENT CAP ($)<input type="number" min="0" step=".01" value={state.trading} onChange={e => update("trading", e.target.value)} /><small>Only after taxes, essentials and savings</small></label>
-        </div>
-        <h4 style={{ marginTop: 16 }}>PERSONAL CARDS · EDIT CURRENT VALUES</h4>
-        <p className={s.muted}>Reference balances can be outdated. Authorized-user RBFCU Platinum Premier is deliberately excluded. Confirm minimums and APRs before using the recommendation.</p>
-        <div className={s.splitCards}>
-          {state.cards.map(card => <div className={s.splitCard} key={card.id}><strong>{card.name}</strong><div className={s.splitCardFields}><label>BALANCE ($)<input aria-label={card.name + " balance"} type="number" min="0" step=".01" value={card.balance} onChange={e => updateCard(card.id, "balance", val(e.target.value))} /></label><label>APR (%)<input aria-label={card.name + " APR"} type="number" min="0" max="100" step=".01" value={card.apr ?? ""} placeholder="Unknown" onChange={e => updateCard(card.id, "apr", e.target.value === "" ? null : val(e.target.value))} /></label><label>MINIMUM ($)<input aria-label={card.name + " minimum"} type="number" min="0" step=".01" value={card.minimum} onChange={e => updateCard(card.id, "minimum", val(e.target.value))} /></label></div></div>)}
-        </div>
-      </div>
-      <aside className={s.planSummary} aria-live="polite">
-        <span className={s.eyebrow}>DISTRIBUTION PREVIEW</span><strong>{dollars(calc.net)}</strong><p>NET PAYOUT TO ASSIGN</p>
-        <dl>{[["Tax reserve",calc.tax],["Bills + minimums",calc.essentials],["Emergency savings",calc.savings],["Extra credit payoff",calc.debt],["Trading cap",calc.trading],["Unallocated",calc.unallocated]].map(([name,number])=><div key={name as string}><dt>{name}</dt><dd>{dollars(number as number)}</dd></div>)}</dl>
-        {calc.shortfall > 0 && <p className={s.review}>Inputs exceed distributable funds by {dollars(calc.shortfall)}. Reduce allocations.</p>}
-        {invalid && <p className={s.review}>Correct invalid amounts and percentages before saving.</p>}
-        {calc.cards.map(card => <div key={card.id} style={{ borderTop: "1px solid rgba(255,255,255,.07)", padding: "7px 0" }}><small>{card.name} → {card.destination}</small><strong style={{ display: "block", fontSize: 14, margin: "3px 0" }}>{dollars(card.payment)}</strong><small>Projected balance: {dollars(Math.max(0,card.balance-card.payment))}</small></div>)}
-        <button disabled={invalid || calc.net <= 0 || calc.shortfall > 0} onClick={save}>SAVE PAYOUT SCENARIO</button>
-        <button onClick={() => { setState(initial); setNotice("Inputs reset; previously saved history remains on this device."); }}>RESET INPUTS</button>
-        {notice && <p role="status">{notice}</p>}
-      </aside>
-    </div>
-    <h4 style={{ marginTop: 18 }}>BANK DESTINATIONS</h4>
-    <div className={s.splitRoutes}>
-      {BANKS.map(([purpose,destination],i) => <div className={s.splitRoute} key={purpose}><div><strong>{purpose}</strong><small>{destination}{i === 1 && personal ? " · " + personal.name : ""}{i === 4 && business ? " · " + business.name : ""}{(i === 0 || i === 2) && savingsBank ? " · " + savingsBank.name : ""}</small></div><b>{dollars([calc.tax,calc.essentials,calc.savings,calc.debt,calc.trading][i])}</b></div>)}
-    </div>
-    <p className={s.muted}>Minimum card payments are included only in essentials; extra payoff excludes reserved minimums. The reserve percentage is provisional. No banking integration executes transfers.</p>
-    {history.length > 0 && <div style={{ marginTop: 16 }}><h4>SAVED SCENARIOS ON THIS DEVICE</h4>{history.map((entry,i) => <p key={i}>{new Date(entry.date).toLocaleDateString("en-US")} · Net {dollars(entry.net)} · Taxes {dollars(entry.tax)} · Savings {dollars(entry.savings)} · Extra debt {dollars(entry.debt)}</p>)}</div>}
-  </section>;
+ const [payout,setPayout] = useState("");
+ const [history,setHistory] = useState<History[]>([]);
+ const [message,setMessage] = useState("");
+ useEffect(() => {
+  try {
+   const previous=localStorage.getItem(KEY);
+   if(previous && /^\\d+(\\.\\d{0,2})?$/.test(previous)) setPayout(previous);
+   const stored=JSON.parse(localStorage.getItem(HISTORY) || "[]");
+   if(Array.isArray(stored)) setHistory(stored.slice(0,10));
+  } catch { setMessage("Local history unavailable on this device."); }
+ },[]);
+ const invalid=payout!=="" && (!/^\\d+(\\.\\d{0,2})?$/.test(payout) || Number(payout)>1000000000);
+ const net=invalid?0:Math.round((Number(payout)||0)*100);
+ const allocation=useMemo(()=>{
+  const map={} as Record<Item,number>;
+  let assigned=0;
+  POLICY.forEach((p,i)=>{
+   const cents=i===POLICY.length-1?net-assigned:Math.floor(net*p.pct/100);
+   map[p.key]=Math.max(0,cents); assigned+=map[p.key];
+  });
+  // Never conceal rounding residues as discretionary trading capital.
+  const rounding=net-assigned;
+  map.savings+=rounding;
+  return map;
+ },[net]);
+ const cardPlan=useMemo(()=>{
+  let remaining=allocation.debt;
+  return CARDS.map(card=>{
+   const paid=Math.min(remaining,Math.round(card.balance*100));
+   remaining-=paid;
+   return {...card,payment:paid,balanceAfter:Math.max(0,Math.round(card.balance*100)-paid)};
+  });
+ },[allocation.debt]);
+ const knownCards=accounts.filter(a=>a.type==="credit" && a.ownership!=="AUTHORIZED_USER");
+ const needsReview=knownCards.some(a=>/world|quicksilver/i.test(a.name));
+ const save=()=>{
+  if(invalid||net<=0)return;
+  try{
+   const entry={at:new Date().toISOString(),net,allocation};
+   const next=[entry,...history].slice(0,10);
+   localStorage.setItem(KEY,payout);
+   localStorage.setItem(HISTORY,JSON.stringify(next));
+   setHistory(next);
+   setMessage("Allocation saved on this device. No transfers or payments were made.");
+  }catch{setMessage("Browser storage unavailable; no payments were made.");}
+ };
+ return <section className={`${s.panel} ${s.splitCalculator}`}>
+  <div className={s.panelHead}><h3>AUTOMATIC PAYOUT SPLIT</h3><span>ONE INPUT · FIVE ALLOCATIONS</span></div>
+  <p className={s.muted}>Enter the net amount you actually receive <strong>after the prop-firm split</strong>. Jarvis applies the same conservative payout policy automatically. Estimates are not bank transfers or tax advice.</p>
+  <div className={s.splitEntry}>
+   <label>NET PAYOUT RECEIVED ($)<input aria-label="Net payout received" type="number" inputMode="decimal" min="0" step=".01" placeholder="e.g. 810.00" value={payout} onChange={e=>{setPayout(e.target.value);setMessage("");}} /></label>
+   <div><small>AUTOMATIC DISTRIBUTION</small><strong>{money(net/100)}</strong></div>
+  </div>
+  {invalid && <p className={s.review}>Enter a valid nonnegative payout with no more than two decimal places.</p>}
+  <div className={s.splitRoutes}>
+   {POLICY.map(p=><div className={s.splitRoute} key={p.key}><div><strong>{p.name} · {p.pct}%</strong><small>{p.destination}</small></div><b>{money(allocation[p.key]/100)}</b></div>)}
+  </div>
+  <div className={s.splitPolicyNote}><strong>POLICY: 25% TAXES / 25% LIVING / 20% SAVINGS / 30% DEBT / 0% TRADING</strong><p>This is a provisional starting split, not a guarantee it covers every unpaid bill or tax obligation. Trading reinvestment stays at zero until cash stability improves. Review actual upcoming bills and taxes before acting.</p></div>
+  <h4 style={{marginTop:14}}>CARD PAYOFF ORDER · EXTRA DEBT ALLOCATION</h4>
+  <p className={s.muted}>Reference balances may be outdated. Payments below are <strong>extra payments</strong>; required minimums come from the essentials allocation. RBFCU Platinum Premier is excluded because it is an authorized-user card. Confirm current APRs and dues before paying.</p>
+  <div className={s.splitRoutes}>{cardPlan.map(card=><div className={s.splitRoute} key={card.key}><div><strong>{card.name}</strong><small>Reference owed {money(card.balance)} · projected after extra payment {money(card.balanceAfter/100)}</small></div><b>{money(card.payment/100)}</b></div>)}</div>
+  <p className={s.muted}>The order prioritizes getting the over-limit World Card down, then uses a provisional sequence until the two Capital One APRs are confirmed. Extra payments never exceed reference balances. Any debt allocation beyond those balances must be held, not spent.</p>
+  {needsReview && <p className={s.muted}>Connected card snapshots are available elsewhere in Finance, but these reference amounts are not independently verified as current.</p>}
+  <div className={s.splitActions}><button disabled={invalid||net<=0} onClick={save}>SAVE PAYOUT PLAN</button><button onClick={()=>{setPayout("");setMessage("");}}>CLEAR AMOUNT</button></div>
+  {message && <p role="status">{message}</p>}
+  {history.length>0 && <div className={s.splitHistory}><h4>RECENT SAVED SCENARIOS · THIS DEVICE</h4>{history.map((h,i)=><p key={h.at+i}>{new Date(h.at).toLocaleDateString("en-US")} · Payout {money(h.net/100)} · Savings {money(h.allocation.savings/100)} · Debt {money(h.allocation.debt/100)}</p>)}</div>}
+ </section>;
 }
