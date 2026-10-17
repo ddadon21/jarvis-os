@@ -281,3 +281,23 @@
  .splitRoute { flex-direction:column; }
  .splitRoute b { align-self:flex-start; }
 }
+
+/* One-input automatic payout allocator */
+.splitEntry { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.8fr); gap:12px; align-items:end; margin:14px 0; min-width:0; }
+.splitEntry > * { min-width:0; }
+.splitEntry label { font-size:9px; letter-spacing:.06em; }
+.splitEntry input { display:block; margin-top:6px; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
+.splitEntry > div { padding:10px; border:1px solid rgba(255,255,255,.08); min-width:0; }
+.splitEntry > div small { display:block; font-size:8px; }
+.splitEntry > div strong { display:block; font-size:20px; line-height:1.5; overflow-wrap:anywhere; }
+.splitPolicyNote { margin:12px 0; padding:10px; border-left:2px solid var(--jarvis-red); background:rgba(183,31,38,.045); }
+.splitPolicyNote strong { font-size:9px; letter-spacing:.045em; overflow-wrap:anywhere; }
+.splitPolicyNote p { margin-top:6px; font-size:10px; }
+.splitActions { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0; }
+.splitActions button { flex:1 1 140px; }
+.splitHistory { border-top:1px solid rgba(255,255,255,.09); padding-top:10px; margin-top:14px; }
+.splitHistory p { margin:5px 0; }
+@media(max-width:540px) {
+ .splitEntry { grid-template-columns:minmax(0,1fr); }
+ .splitEntry > div strong { font-size:18px; }
+}
