@@ -5,15 +5,14 @@ import { useCallback, useEffect, useState } from "react";
 import type { FinanceRuntimeState, FinanceAccountState } from "../lib/jarvis-runtime";
 import { FINANCE_IMPORT } from "../lib/finance-import";
 import { FINANCE_STAGES, getNextNetWorthMilestone } from "../lib/finance-snapshot";
-import { financeTotals, payoutMath, EMPTY_PAYOUT_PLAN, PLAN_FIELDS, type PayoutPlan } from "../lib/finance-math";
+import { financeTotals } from "../lib/finance-math";
+import PayoutSplitCalculator from "./payout-split-calculator";
 import s from "./finance-capital.module.css";
 import { useLifetimeEarned } from "./lifetime-earned";
 
 const money = (v: number | null) => v == null ? "UNKNOWN" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
 const stamp = (v?: string | null) => v && Number.isFinite(Date.parse(v)) ? new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(v)) + " CT" : "Not supplied";
 const dateOnly = (v?: string | null) => v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(v + "T12:00:00Z")) : "Not supplied";
-const PLAN_KEY = "jarvis-finance-payout-plan-v1";
-const allocations = { tax: ["TAX RESERVE", "Enter your own reserve amount"], bills: ["BILLS + MINIMUMS", "Required obligations"], reserve: ["CASH RESERVE", "Cash you intend to keep"], debt: ["EXTRA DEBT PAYMENT", "Beyond the minimums above"], business: ["BUSINESS CAPITAL", "Planned operating needs"] } as const;
 type View = "OVERVIEW" | "PAYOUT PLAN" | "ACCOUNTS + DATA";
 
 type CapitalStagePlan = {
@@ -109,8 +108,6 @@ export default function FinanceCockpitV2() {
   const [view, setView] = useState<View>("OVERVIEW");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [plan, setPlan] = useState<PayoutPlan>(EMPTY_PAYOUT_PLAN);
-  const [saved, setSaved] = useState("");
   const [selectedCapitalStage, setSelectedCapitalStage] = useState<(typeof FINANCE_STAGES)[number] | null>(null);
   const refresh = useCallback(async (manual = false, signal?: AbortSignal) => {
     setLoading(true);
@@ -130,14 +127,6 @@ export default function FinanceCockpitV2() {
     const controller = new AbortController();
     void refresh(false, controller.signal);
     const timer = window.setInterval(() => void refresh(false, controller.signal), 60_000);
-    try {
-      const raw = JSON.parse(localStorage.getItem(PLAN_KEY) ?? "null");
-      if (raw && typeof raw === "object") {
-        const restored = { ...EMPTY_PAYOUT_PLAN };
-        for (const key of Object.keys(restored) as (keyof PayoutPlan)[]) if (typeof raw[key] === "string" && raw[key].length < 120) restored[key] = raw[key];
-        setPlan(restored);
-      }
-    } catch { /* A blocked or invalid local store must not prevent Finance loading. */ }
     return () => { controller.abort(); window.clearInterval(timer); };
   }, [refresh]);
 
@@ -159,20 +148,12 @@ export default function FinanceCockpitV2() {
   const debts = accounts.filter(a => a.type === "credit" || a.type === "loan");
   const personal = debts.filter(a => a.ownership !== "AUTHORIZED_USER");
   const banks = accounts.filter(a => a.type === "depository");
-  const debtTarget = personal.find(a => a.key === plan.target);
-  const projection = payoutMath(plan, debtTarget?.current ?? null);
   const milestone = getNextNetWorthMilestone(totals.personalNetWorth);
   const unknownApr = personal.filter(a => liabilities.find(l => l.accountKey === a.key)?.apr == null);
   const missingNames = [!accounts.some(a => /capital.*one/i.test(a.institution) && /platinum/i.test(a.name)) ? "Capital One Platinum" : null,
     !accounts.some(a => /roth/i.test(`${a.name} ${a.subtype}`)) ? "Roth IRA" : null].filter(Boolean);
   const bankFreshnessUnknown = banks.some(a => !a.balanceAsOf);
   const receiptDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date(asOf));
-  const updatePlan = (key: keyof PayoutPlan, value: string) => { setPlan(p => ({ ...p, [key]: value })); setSaved(""); };
-  function savePlan() {
-    if (projection.error) return;
-    try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); window.dispatchEvent(new Event("jarvis-obsidian-sync-now")); setSaved("Saved to local cache; JARVIS Cloud and Obsidian sync follow automatically. No money moved."); }
-    catch { setSaved("Storage unavailable. Your draft remains open but is not saved."); }
-  }
 
   const lifetime = useLifetimeEarned();
 
@@ -188,7 +169,7 @@ export default function FinanceCockpitV2() {
       <Metric label="ADJUSTED NET WORTH" value={money(totals.personalNetWorth)} note="Bank balances + investments − own debt" />
       <Metric label="BANK BALANCES" value={money(totals.liquidity)} note="Reported current · not all available" />
     </div>
-    <nav className={s.tabs} aria-label="Finance views">{(["OVERVIEW", "PAYOUT PLAN", "ACCOUNTS + DATA"] as View[]).map(t => <button key={t} aria-current={view === t ? "page" : undefined} onClick={() => setView(t)}>{t}</button>)}</nav>
+    <nav className={s.tabs} aria-label="Finance views">{(["OVERVIEW", "PAYOUT PLAN", "ACCOUNTS + DATA"] as View[]).map(t => <button key={t} aria-current={view === t ? "page" : undefined} onClick={() => setView(t)}>{t === "PAYOUT PLAN" ? "PAYOUT SPLIT" : t}</button>)}</nav>
 
     {view === "OVERVIEW" && <>
       <section className={`${s.panel} ${s.focus}`}>
@@ -227,7 +208,7 @@ export default function FinanceCockpitV2() {
             <p>{utilization == null ? "Limit / utilization unknown" : `${utilization.toFixed(1)}% utilized · ${money(a.limit)} limit`}</p>
             <dl><div><dt>Purchase APR</dt><dd>{liability?.apr == null ? "Not supplied" : `${liability.apr}%`}</dd></div><div><dt>Statement minimum</dt><dd>{money(liability?.minimum ?? null)}</dd></div><div><dt>Reported due date</dt><dd>{dateOnly(liability?.due)}</dd></div><div><dt>Statement issued</dt><dd>{dateOnly(liability?.statementDate)}</dd></div></dl>
             {oldDue && <p className={s.review}>Past reported due date. Confirm the latest statement and payment status.</p>}
-            {a.ownership !== "AUTHORIZED_USER" && a.current > 0 && <button onClick={() => { updatePlan("target", a.key); setView("PAYOUT PLAN"); }}>PLAN A PAYMENT <ArrowUpRight size={11} /></button>}
+            {a.ownership !== "AUTHORIZED_USER" && a.current > 0 && <button onClick={() => setView("PAYOUT PLAN")}>PLAN A PAYMENT <ArrowUpRight size={11} /></button>}
           </article>;
         })}</div>
       </section>
@@ -272,24 +253,7 @@ export default function FinanceCockpitV2() {
       </section>
     </>}
 
-    {view === "PAYOUT PLAN" && <section className={s.panel}>
-      <div className={s.panelHead}><h3><SlidersHorizontal size={13} />ASSIGN YOUR NEXT PAYOUT</h3><span>SCENARIO · NO MONEY MOVED</span></div>
-      <p className={s.muted}>Enter a net payout and your own dollar allocations. Amounts are hypothetical until you receive and move the money. No tax percentage is assumed.</p>
-      <div className={s.planner}>
-        <div><label>NET PAYOUT ($)<input type="number" min="0" max="1000000000" step="0.01" inputMode="decimal" value={plan.payout} onChange={e => updatePlan("payout", e.target.value)} placeholder="0.00" /></label>
-          <label>PERSONAL DEBT TARGET<select value={debtTarget ? plan.target : ""} onChange={e => updatePlan("target", e.target.value)}><option value="">Choose a card</option>{personal.filter(a => a.current > 0).map(a => <option key={a.key} value={a.key}>{a.name} · {money(a.current)}</option>)}</select></label>
-          <div className={s.fields}>{PLAN_FIELDS.map(k => <label key={k}>{allocations[k][0]} ($)<input type="number" min="0" max="1000000000" step="0.01" inputMode="decimal" value={plan[k]} onChange={e => updatePlan(k, e.target.value)} placeholder="0.00" /><small>{allocations[k][1]}</small></label>)}</div>
-        </div>
-        <aside className={s.planSummary} aria-live="polite"><span className={s.eyebrow}>YOUR PLAN</span><strong>{money(projection.remaining)}</strong><p>{projection.remaining < 0 ? "OVER ASSIGNED" : "UNASSIGNED"}</p>
-          <dl><div><dt>Net payout</dt><dd>{money(projection.payout)}</dd></div><div><dt>Assigned</dt><dd>{money(projection.assigned)}</dd></div><div><dt>Target balance after extra payment</dt><dd>{projection.error ? "—" : money(projection.projectedDebt)}</dd></div></dl>
-          <p className={s.muted}>Projection excludes future interest, charges, and any minimum payment assigned under bills. Actual account balances stay unchanged.</p>
-          {projection.error && <p className={s.review}>{projection.error}</p>}
-          <button disabled={Boolean(projection.error)} onClick={savePlan}>SAVE PLAN ON THIS BROWSER</button>
-          <button onClick={() => { setPlan(EMPTY_PAYOUT_PLAN); try { localStorage.removeItem(PLAN_KEY); setSaved("Draft cleared locally and will be removed from JARVIS Cloud."); } catch { setSaved("Draft cleared; stored copy could not be removed."); } }}>CLEAR DRAFT</button>
-          {saved && <p role="status">{saved}</p>}
-        </aside>
-      </div>
-    </section>}
+    {view === "PAYOUT PLAN" && <PayoutSplitCalculator accounts={accounts} />}
 
     {view === "ACCOUNTS + DATA" && <>
       <section className={s.panel}><div className={s.panelHead}><h3><Landmark size={13} />EVERY ACCOUNT HAS A JOB</h3><span>{accounts.length} ACCOUNTS · {runtime?.connectionCount ?? FINANCE_IMPORT.connectionCount} CONNECTIONS</span></div>
