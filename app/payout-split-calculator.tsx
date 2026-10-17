@@ -90,7 +90,7 @@ export default function PayoutSplitCalculator({ accounts }: { accounts: FinanceA
   const personal = bank(/bank of america.*(financial ops|7224)/i);
   const business = bank(/bank of america.*(business|9024)/i);
   const savingsBank = bank(/american express.*(savings|4276)/i);
-  return <section className={s.panel}>
+  return <section className={`${s.panel} ${s.splitCalculator}`}>
     <div className={s.panelHead}><h3>PAYOUT SPLIT CALCULATOR</h3><span>LIVE CALCULATION · MANUAL EXECUTION</span></div>
     <p className={s.muted}>Set the next payout and obligations. Jarvis calculates an allocation proposal; nothing moves until you make and verify each transfer. Bank snapshots may be stale.</p>
     <div className={s.planner}>
@@ -98,7 +98,7 @@ export default function PayoutSplitCalculator({ accounts }: { accounts: FinanceA
         <label>AMOUNT RECEIVED OR EXPECTED ($)<input type="number" min="0" step=".01" value={state.payout} onChange={e => update("payout", e.target.value)} placeholder="Enter payout" /></label>
         <label><input type="checkbox" checked={state.gross} onChange={e => update("gross", e.target.checked)} /> AMOUNT ABOVE IS GROSS BEFORE FIRM SPLIT</label>
         {state.gross && <label>YOUR PROP-FIRM SHARE (%)<input type="number" min="0" max="100" value={state.split} onChange={e => update("split", e.target.value)} /></label>}
-        <div className={s.fields}>
+        <div className={`${s.fields} ${s.splitFields}`}>
           <label>TAX RESERVE (%)<input type="number" min="0" max="100" value={state.taxPct} onChange={e => update("taxPct", e.target.value)} /><small>Editable planning assumption, not tax advice</small></label>
           <label>BILLS + CARD MINIMUMS ($)<input type="number" min="0" step=".01" value={state.essentials} onChange={e => update("essentials", e.target.value)} /><small>Include gas, food, unpaid essentials and required card minimums</small></label>
           <label>EMERGENCY SAVINGS ($)<input type="number" min="0" step=".01" value={state.savings} onChange={e => update("savings", e.target.value)} /></label>
@@ -106,9 +106,9 @@ export default function PayoutSplitCalculator({ accounts }: { accounts: FinanceA
         </div>
         <h4 style={{ marginTop: 16 }}>PERSONAL CARDS · EDIT CURRENT VALUES</h4>
         <p className={s.muted}>Reference balances can be outdated. Authorized-user RBFCU Platinum Premier is deliberately excluded. Confirm minimums and APRs before using the recommendation.</p>
-        <div className={s.tableWrap}><table><thead><tr><th>CARD</th><th>BALANCE</th><th>APR %</th><th>MINIMUM</th></tr></thead><tbody>
-          {state.cards.map(card => <tr key={card.id}><td>{card.name}</td><td><input aria-label={card.name + " balance"} type="number" min="0" step=".01" value={card.balance} onChange={e => updateCard(card.id, "balance", val(e.target.value))} /></td><td><input aria-label={card.name + " APR"} type="number" min="0" max="100" step=".01" value={card.apr ?? ""} placeholder="Unknown" onChange={e => updateCard(card.id, "apr", e.target.value === "" ? null : val(e.target.value))} /></td><td><input aria-label={card.name + " minimum"} type="number" min="0" step=".01" value={card.minimum} onChange={e => updateCard(card.id, "minimum", val(e.target.value))} /></td></tr>)}
-        </tbody></table></div>
+        <div className={s.splitCards}>
+          {state.cards.map(card => <div className={s.splitCard} key={card.id}><strong>{card.name}</strong><div className={s.splitCardFields}><label>BALANCE ($)<input aria-label={card.name + " balance"} type="number" min="0" step=".01" value={card.balance} onChange={e => updateCard(card.id, "balance", val(e.target.value))} /></label><label>APR (%)<input aria-label={card.name + " APR"} type="number" min="0" max="100" step=".01" value={card.apr ?? ""} placeholder="Unknown" onChange={e => updateCard(card.id, "apr", e.target.value === "" ? null : val(e.target.value))} /></label><label>MINIMUM ($)<input aria-label={card.name + " minimum"} type="number" min="0" step=".01" value={card.minimum} onChange={e => updateCard(card.id, "minimum", val(e.target.value))} /></label></div></div>)}
+        </div>
       </div>
       <aside className={s.planSummary} aria-live="polite">
         <span className={s.eyebrow}>DISTRIBUTION PREVIEW</span><strong>{dollars(calc.net)}</strong><p>NET PAYOUT TO ASSIGN</p>
@@ -122,9 +122,9 @@ export default function PayoutSplitCalculator({ accounts }: { accounts: FinanceA
       </aside>
     </div>
     <h4 style={{ marginTop: 18 }}>BANK DESTINATIONS</h4>
-    <div className={s.tableWrap}><table><thead><tr><th>PURPOSE</th><th>DESTINATION</th><th>AMOUNT</th></tr></thead><tbody>
-      {BANKS.map(([purpose,destination],i) => <tr key={purpose}><td>{purpose}</td><td>{destination}{i === 1 && personal ? " · " + personal.name : ""}{i === 4 && business ? " · " + business.name : ""}{(i === 0 || i === 2) && savingsBank ? " · " + savingsBank.name : ""}</td><td>{dollars([calc.tax,calc.essentials,calc.savings,calc.debt,calc.trading][i])}</td></tr>)}
-    </tbody></table></div>
+    <div className={s.splitRoutes}>
+      {BANKS.map(([purpose,destination],i) => <div className={s.splitRoute} key={purpose}><div><strong>{purpose}</strong><small>{destination}{i === 1 && personal ? " · " + personal.name : ""}{i === 4 && business ? " · " + business.name : ""}{(i === 0 || i === 2) && savingsBank ? " · " + savingsBank.name : ""}</small></div><b>{dollars([calc.tax,calc.essentials,calc.savings,calc.debt,calc.trading][i])}</b></div>)}
+    </div>
     <p className={s.muted}>Minimum card payments are included only in essentials; extra payoff excludes reserved minimums. The reserve percentage is provisional. No banking integration executes transfers.</p>
     {history.length > 0 && <div style={{ marginTop: 16 }}><h4>SAVED SCENARIOS ON THIS DEVICE</h4>{history.map((entry,i) => <p key={i}>{new Date(entry.date).toLocaleDateString("en-US")} · Net {dollars(entry.net)} · Taxes {dollars(entry.tax)} · Savings {dollars(entry.savings)} · Extra debt {dollars(entry.debt)}</p>)}</div>}
   </section>;
