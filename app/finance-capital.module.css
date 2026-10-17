@@ -239,3 +239,45 @@
   .stagePlanHead small{text-align:left}
   .stagePlanGrid{grid-template-columns:1fr}
 }
+
+
+/* Payout split: content-first responsive behavior without horizontal overflow. */
+.splitCalculator { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.splitCalculator .planner { grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); }
+.splitCalculator .planner > * { min-width:0; max-width:100%; }
+.splitCalculator label { display:block; min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.splitCalculator input[type="number"],
+.splitCalculator input:not([type]),
+.splitCalculator select { display:block; box-sizing:border-box; min-width:0; width:100%; max-width:100%; }
+.splitCalculator input[type="checkbox"] { display:inline-block; width:auto; max-width:100%; vertical-align:middle; }
+.splitFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.splitFields > * { min-width:0; }
+.splitCards { display:grid; gap:8px; margin:10px 0 14px; min-width:0; }
+.splitCard { border:1px solid rgba(255,255,255,.09); padding:10px; min-width:0; }
+.splitCard > strong { display:block; margin-bottom:9px; font-size:10px; }
+.splitCardFields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.splitCardFields label { font-size:8px; }
+.splitCardFields input { margin-top:5px; }
+.splitRoutes { display:grid; gap:6px; min-width:0; }
+.splitRoute { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; min-width:0; padding:9px 0; border-bottom:1px solid rgba(255,255,255,.07); }
+.splitRoute > div { min-width:0; flex:1; }
+.splitRoute strong { font-size:9px; display:block; }
+.splitRoute small { display:block; font-size:9px; overflow-wrap:anywhere; }
+.splitRoute b { flex-shrink:0; white-space:nowrap; font-size:11px; font-variant-numeric:tabular-nums; }
+@media(max-width:850px) {
+ .splitCalculator .planner { grid-template-columns:minmax(0,1fr); }
+ .splitFields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:560px) {
+ .splitFields, .splitCardFields { grid-template-columns:minmax(0,1fr); }
+ .splitCalculator .planner { gap:12px; }
+ .splitCalculator .planSummary { min-width:0; padding:12px; }
+ .splitCalculator .planSummary dl div { min-width:0; }
+ .splitRoute { gap:6px; }
+ .splitRoute b { font-size:10px; }
+}
+@media(max-width:320px) {
+ .splitCalculator { padding:9px; }
+ .splitRoute { flex-direction:column; }
+ .splitRoute b { align-self:flex-start; }
+}
