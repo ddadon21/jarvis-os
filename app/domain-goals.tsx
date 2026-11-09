@@ -475,13 +475,11 @@ export default function DomainGoals({ domain, events }: { domain: Domain; events
     }
 
     if (domain === "SENTRYOPS") {
-      const prototype = hasEvent(events, "sentryops.prototype_completed");
-      const customer = hasEvent(events, "sentryops.first_customer_closed");
       return [
-        { name: "COMPLETE PROTOTYPE", status: prototype ? "DONE" : "ACTIVE", detail: prototype ? "Prototype complete." : "Current build objective.", progress: prototype ? 100 : null, active: !prototype },
-        { name: "PILOT-READY DEMO", status: prototype ? "ACTIVE" : "NEXT", detail: "Make the product demonstrably useful to a real agency buyer.", progress: null, active: prototype && !customer },
-        { name: "CLOSE FIRST CUSTOMER", status: customer ? "DONE" : "NEXT", detail: customer ? "First customer closed." : "Convert validated pain into the first paid customer.", progress: customer ? 100 : null },
-        { name: "REPEATABLE SALES", status: customer ? "ACTIVE" : "LOCKED", detail: "Turn one win into a repeatable agency sales motion.", progress: null, active: customer },
+        { name: "LOCK DEAL CRITERIA", status: "ACTIVE", detail: "Set target areas, price range and minimum profit on the Real Estate page.", progress: null, active: true },
+        { name: "BUILD DEAL AGENT", status: "NEXT", detail: "Agent searches target areas and fills the pipeline with matching flips.", progress: null },
+        { name: "FIRST DEAL UNDER CONTRACT", status: "LOCKED", detail: "Offer on a deal that passes every criterion.", progress: null },
+        { name: "FIRST FLIP SOLD", status: "LOCKED", detail: "Rehab, sell, and confirm actual profit against the estimate.", progress: null },
       ];
     }
 

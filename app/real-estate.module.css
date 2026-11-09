@@ -1,0 +1,28 @@
+/* Real Estate page extras; base look comes from finance-capital.module.css. */
+.muted { color:#999 !important; font-size:10px !important; }
+.fields3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0 10px; }
+.wide { grid-column:1 / -1; }
+.section { color:#999; font-size:8px; letter-spacing:.12em; margin:4px 0 10px; padding-top:10px; border-top:1px solid var(--jarvis-card-rule,rgba(255,255,255,.08)); }
+.section:first-child { border-top:0; padding-top:0; }
+.types { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:13px; }
+.types button[aria-pressed=true] { background:rgba(183,31,38,.14); border-color:rgba(183,31,38,.55); color:#fff; }
+.textarea { width:100%; min-height:70px; background:rgba(0,0,0,.28); color:#eee; padding:8px 9px; border:1px solid rgba(255,255,255,.14); border-radius:0; font:inherit; font-size:11px; resize:vertical; color-scheme:dark; }
+.empty { padding:26px 14px; text-align:center; border:1px dashed rgba(255,255,255,.14); }
+.empty strong { display:block; font-size:12px; letter-spacing:.08em; margin-bottom:6px; }
+.empty p { max-width:520px; margin:0 auto 12px !important; }
+.checks { display:flex; flex-direction:column; gap:5px; margin-top:10px; }
+.check { display:flex; justify-content:space-between; gap:8px; font-size:9px; padding:6px 8px; border-left:2px solid #555; background:rgba(255,255,255,.02); }
+.check b { letter-spacing:.06em; font-weight:600; }
+.check span { color:#aaa; text-align:right; }
+.pass { border-left-color:#3fb950; }
+.fail { border-left-color:var(--jarvis-red); }
+.unknown { border-left-color:#d4a72c; }
+.badge { display:inline-block; font-size:8px; letter-spacing:.08em; padding:2px 6px; border:1px solid rgba(255,255,255,.18); }
+.badgePASS { border-color:#3fb950; color:#7ee787; }
+.badgeFAIL { border-color:var(--jarvis-red); color:#ff8a8f; }
+.badgeUNKNOWN { border-color:#d4a72c; color:#e3c067; }
+.rowActions { display:flex; gap:5px; align-items:center; }
+.rowActions select { width:auto; padding:4px 6px; font-size:9px; }
+.rowActions button { min-height:26px; padding:4px 8px; font-size:8px; }
+.negative { color:#ff8a8f; }
+@media(max-width:580px) { .fields3 { grid-template-columns:1fr 1fr; } }

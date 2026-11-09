@@ -3,6 +3,7 @@
 import {
   Activity,
   BriefcaseBusiness,
+  House,
    Mic,
    Send,
    Target,
@@ -33,7 +34,7 @@ import {
 import { tryExecuteDesktopText } from "../lib/jarvis-desktop-client";
 import JarvisPresence from "./jarvis-presence";
 import JarvisLocalClock from "./jarvis-local-clock";
-import SentryOpsCommandPreview from "./sentryops-command-preview";
+import RealEstateDeals from "./real-estate-deals";
 
 type RuntimeEvent = {
   id: string;
@@ -132,7 +133,7 @@ const sectors = [
   { id: "LIFE" as const, icon: Target, title: "LIFE", signal: "ALIGN" },
   { id: "TRADING" as const, icon: TrendingUp, title: "TRADING", signal: "PASS → PAYOUT" },
   { id: "FINANCE" as const, icon: WalletCards, title: "FINANCE", signal: "$100M CASH" },
-  { id: "SENTRYOPS" as const, icon: BriefcaseBusiness, title: "SENTRYOPS", signal: "BUILD → CUSTOMER" },
+  { id: "SENTRYOPS" as const, icon: House, title: "REAL ESTATE", signal: "FIND → FLIP → PROFIT" },
 ];
 
 function quickCoreEvent(summary: string) {
@@ -439,7 +440,7 @@ export default function WorkV2() {
               </div>
             </div>
           </Panel>
-          <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={domain}>
+          <Panel title={domain === "LIFE" ? "DEVELOPMENT" : "GOAL READINESS"} corner={currentSector.title}>
             {domain === "LIFE" ? <><LifeProgress /><details className={lifeStyles.foundations}><summary>DAILY FOUNDATIONS</summary><DomainGoals domain={domain} events={runtimeEvents} /></details></> : <DomainGoals domain={domain} events={runtimeEvents} />}
           </Panel>
           <Panel title="OBSIDIAN" corner="LOCAL" className="obsidian-panel">
@@ -454,7 +455,7 @@ export default function WorkV2() {
 
         <section className={`center-core ${domain === "FINANCE" ? "finance-mode" : ""} ${domain === "TRADING" ? "trading-mode" : ""} ${domain === "SENTRYOPS" ? "sentryops-mode" : ""} ${domain === "LIFE" ? lifeStyles.center : ""}`}>
           <nav className="domain-switcher" aria-label="JARVIS domain navigation">
-            {sectors.map(({ id, icon: Icon }) => (
+            {sectors.map(({ id, icon: Icon, title }) => (
               <button
                 key={id}
                 type="button"
@@ -462,16 +463,16 @@ export default function WorkV2() {
                 aria-current={domain === id ? "page" : undefined}
                 onClick={() => setDomain(id)}
               >
-                <Icon size={15} aria-hidden="true" /> <span>{id}</span>
+                <Icon size={15} aria-hidden="true" /> <span>{title}</span>
               </button>
             ))}
           </nav>
 
           {domain === "FINANCE" ? <StableFinanceCockpit /> : domain === "TRADING" ? <StableTradingCockpit /> : domain === "LIFE" ? <StableLifeCockpit /> : (
-            <SentryOpsCommandPreview />
+            <RealEstateDeals />
           )}
 
-          <div className="command-label"><Activity size={14} /> {domain} // JARVIS WORKING</div>
+          <div className="command-label"><Activity size={14} /> {currentSector.title} // JARVIS WORKING</div>
           <form className="command-box" onSubmit={sendMessage}>
             <button
               type="button"
@@ -482,7 +483,7 @@ export default function WorkV2() {
             >
               <Mic size={18} />
             </button>
-            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={voiceEnabled ? `${voiceState} · ${caption}` : `Tell Jarvis what matters in ${domain.toLowerCase()}...`} autoComplete="off" />
+            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={voiceEnabled ? `${voiceState} · ${caption}` : `Tell Jarvis what matters in ${currentSector.title.toLowerCase()}...`} autoComplete="off" />
             <button type="submit" aria-label="Send" disabled={busy}><Send size={17} /></button>
           </form>
         </section>
@@ -513,7 +514,7 @@ export default function WorkV2() {
           </Panel>
 
           <Panel title="DOMAIN" corner={currentSector.signal}>
-            <div className="sector-feature"><SectorIcon /><div><span>{currentSector.title}</span><strong>{currentSector.signal}</strong><small>{domain === "FINANCE" ? "CFO watches money, debt, credit, capital and lifestyle readiness." : domain === "TRADING" ? "Pass → funded → payout → consistency → scale." : domain === "SENTRYOPS" ? "Prototype → pilot → first customer → repeatable sales." : "Daily alignment with the larger plan."}</small></div></div>
+            <div className="sector-feature"><SectorIcon /><div><span>{currentSector.title}</span><strong>{currentSector.signal}</strong><small>{domain === "FINANCE" ? "CFO watches money, debt, credit, capital and lifestyle readiness." : domain === "TRADING" ? "Pass → funded → payout → consistency → scale." : domain === "SENTRYOPS" ? "Criteria → deal search → offer → rehab → sale." : "Daily alignment with the larger plan."}</small></div></div>
           </Panel>
         </aside>
       </section>

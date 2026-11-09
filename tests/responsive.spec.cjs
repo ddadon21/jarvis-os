@@ -31,7 +31,7 @@ for (const size of viewports) {
     await expect(nav).toBeVisible({ timeout: 30_000 });
     await expect(nav.getByRole("button")).toHaveCount(4);
 
-    for (const domain of ["TRADING", "FINANCE", "SENTRYOPS", "LIFE"]) {
+    for (const domain of ["TRADING", "FINANCE", "REAL ESTATE", "LIFE"]) {
       const button = nav.getByRole("button", { name: domain, exact: true });
       await button.click();
       await expect(button).toHaveAttribute("aria-current", "page");
@@ -63,31 +63,24 @@ for (const size of viewports) {
       }
     }
 
-    await nav.getByRole("button", { name: "SENTRYOPS", exact: true }).click();
-    const frame = page.frameLocator('iframe[title="Actual SentryOps public marketing homepage before sign in"]');
-    await expect(frame.getByRole("heading", { name: /Central Hub for/i })).toBeVisible({ timeout: 30_000 });
-    // The original deployed stylesheet must apply; merely loading unstyled text
-    // is not a successful public marketing preview.
-    await expect.poll(async () => frame.locator(".min-h-screen").evaluate(
-      node => getComputedStyle(node).backgroundImage
-    ), { timeout: 30_000 }).toContain("linear-gradient");
-    await expect(frame.locator(".jarvis-global-controls")).toHaveCount(0);
-    // Parent global controls must live after Work's content, not float across
-    // the actual SentryOps preview or any of the responsive panels.
+    await nav.getByRole("button", { name: "REAL ESTATE", exact: true }).click();
+    const realEstate = page.getByRole("region", { name: "Real estate fix and flip deals" });
+    await expect(realEstate.getByRole("heading", { name: /FIX & FLIP DEAL FINDER/ })).toBeVisible({ timeout: 30_000 });
+    // Parent global controls must not float across the Real Estate page.
     const controlsGeometry = await page.evaluate(() => {
       const controls = document.querySelector(".jarvis-global-controls:not(.ambient-controls)");
-      const preview = document.querySelector(".sentryops-landing-viewport");
+      const preview = document.querySelector('[aria-label="Real estate fix and flip deals"]');
       if (!controls || !preview) return { overlap: false };
       const a = controls.getBoundingClientRect();
       const b = preview.getBoundingClientRect();
       return { overlap: a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top };
     });
-    expect(controlsGeometry.overlap, "Global controls cover SentryOps preview at " + size.width).toBe(false);
+    expect(controlsGeometry.overlap, "Global controls cover Real Estate page at " + size.width).toBe(false);
     await page.locator(".jarvis-right-orb").scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
     await page.evaluate(() => window.scrollTo(0, 0));
 
-    await page.screenshot({ path: "test-results/screenshots/" + size.name + "-sentryops.png", fullPage: true });
+    await page.screenshot({ path: "test-results/screenshots/" + size.name + "-real-estate.png", fullPage: true });
     await context.close();
   });
 }
