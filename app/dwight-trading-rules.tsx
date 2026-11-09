@@ -9,7 +9,7 @@ const RULES = [
   "Mark out 4H and 1D zones",
   "Identify trend",
   "Wait for price to hit HTF zone",
-  "Wait for someone to lose",
+  "FOCUS",
   "Wait for confirmation back in my direction",
   "Look for entry",
 ] as const;

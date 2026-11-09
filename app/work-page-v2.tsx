@@ -416,7 +416,7 @@ export default function WorkV2() {
 
       <section className="workspace">
         <div className="workspace-memo">
-          <strong>WAIT FOR SOMEONE TO LOSE</strong>
+          <strong>FOCUS</strong>
           <span>BUILD DURABLE CASH FLOW, STRONGER CAPITAL, SCALABLE SOFTWARE, AND BETTER DECISIONS WITHOUT LOSING CONTROL.</span>
         </div>
 
