@@ -6,14 +6,14 @@ import { tradeStats } from "./trading-analytics";
 import { barCoverage, listModelRuns } from "./learning/store.ts";
 import { recallMemory, searchVault } from "./jarvis-memory";
 import { addWorkforceTask, getOrSeedWorkforceState } from "./jarvis-workforce";
-import type { AgentId } from "./jarvis-runtime";
+import { AGENT_IDS, type AgentId } from "./jarvis-runtime";
 
 function compact(value: unknown, max = 5000) {
   const text = JSON.stringify(value);
   return text.length > max ? text.slice(0, max) + "…(truncated)" : text;
 }
 
-const AGENTS = ["EXECUTIVE", "FINANCE_CFO", "SENTRYOPS_RESEARCH", "TRADING_OBSERVER", "BUILDER", "JARVIS_QA", "IT_INFRA", "IT_SECURITY", "IT_INTEGRATIONS"] as const;
+const AGENTS = AGENT_IDS;
 
 /** Tools Jarvis chat can call. Read-only except assign_task, which is Dwight's own request. */
 export function jarvisChatTools(): ToolSet {

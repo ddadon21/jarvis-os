@@ -164,39 +164,28 @@ type FloorLayout = {
   rooms: Record<string, Room>;
 };
 
+// Three agents: Supervisor above the JARVIS core, Trading Observer and Deal Finder either side.
 const LANDSCAPE: FloorLayout = {
   width: 1200,
-  height: 720,
+  height: 600,
   fs: 1,
-  core: { cx: 600, cy: 380, r: 70 },
+  core: { cx: 600, cy: 400, r: 70 },
   rooms: {
-    EXECUTIVE: { x: 470, y: 30, w: 260, h: 150, path: "M600 180 V380" },
-    FINANCE_CFO: { x: 40, y: 30, w: 300, h: 190, path: "M340 125 H440 V350 H600" },
-    SENTRYOPS_RESEARCH: { x: 860, y: 30, w: 300, h: 190, path: "M860 125 H760 V350 H600" },
-    TRADING_OBSERVER: { x: 40, y: 260, w: 340, h: 230, path: "M380 375 H600" },
-    BUILDER: { x: 820, y: 260, w: 340, h: 230, path: "M820 375 H600" },
-    JARVIS_QA: { x: 40, y: 530, w: 250, h: 160, path: "M165 530 V510 H600 V380" },
-    IT_INFRA: { x: 330, y: 540, w: 250, h: 150, path: "M455 540 V510 H600 V380" },
-    IT_SECURITY: { x: 620, y: 540, w: 250, h: 150, path: "M745 540 V510 H600 V380" },
-    IT_INTEGRATIONS: { x: 910, y: 530, w: 250, h: 160, path: "M1035 530 V510 H600 V380" },
+    SUPERVISOR: { x: 410, y: 30, w: 380, h: 200, path: "M600 230 V400" },
+    TRADING_OBSERVER: { x: 40, y: 270, w: 400, h: 280, path: "M440 400 H600" },
+    DEAL_FINDER: { x: 760, y: 270, w: 400, h: 280, path: "M760 400 H600" },
   },
 };
 
 const PORTRAIT: FloorLayout = {
   width: 720,
-  height: 1070,
+  height: 780,
   fs: 1.45,
-  core: { cx: 360, cy: 560, r: 56 },
+  core: { cx: 360, cy: 320, r: 56 },
   rooms: {
-    EXECUTIVE: { x: 220, y: 16, w: 280, h: 150, path: "M360 166 V560" },
-    FINANCE_CFO: { x: 20, y: 180, w: 300, h: 180, path: "M320 270 H360 V560" },
-    SENTRYOPS_RESEARCH: { x: 400, y: 180, w: 300, h: 180, path: "M400 270 H360 V560" },
-    TRADING_OBSERVER: { x: 20, y: 390, w: 270, h: 280, path: "M290 560 H360" },
-    BUILDER: { x: 430, y: 390, w: 270, h: 280, path: "M430 560 H360" },
-    JARVIS_QA: { x: 20, y: 700, w: 300, h: 160, path: "M320 780 H360 V560" },
-    IT_INFRA: { x: 400, y: 700, w: 300, h: 160, path: "M400 780 H360 V560" },
-    IT_SECURITY: { x: 20, y: 890, w: 300, h: 160, path: "M320 970 H360 V560" },
-    IT_INTEGRATIONS: { x: 400, y: 890, w: 300, h: 160, path: "M400 970 H360 V560" },
+    SUPERVISOR: { x: 160, y: 16, w: 400, h: 190, path: "M360 206 V320" },
+    TRADING_OBSERVER: { x: 20, y: 440, w: 330, h: 320, path: "M185 440 V410 H360 V320" },
+    DEAL_FINDER: { x: 370, y: 440, w: 330, h: 320, path: "M535 440 V410 H360 V320" },
   },
 };
 

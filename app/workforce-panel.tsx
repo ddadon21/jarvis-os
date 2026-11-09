@@ -57,15 +57,9 @@ type WorkforcePayload = {
 };
 
 const agentLabels: Record<string, string> = {
-  EXECUTIVE: "EXECUTIVE",
-  FINANCE_CFO: "CFO",
-  SENTRYOPS_RESEARCH: "SENTRYOPS RESEARCH",
+  SUPERVISOR: "SUPERVISOR",
   TRADING_OBSERVER: "TRADING OBSERVER",
-  BUILDER: "BUILDER",
-  JARVIS_QA: "QA WATCHDOG",
-  IT_INFRA: "IT INFRA",
-  IT_SECURITY: "IT SECURITY",
-  IT_INTEGRATIONS: "IT INTEGRATIONS",
+  DEAL_FINDER: "DEAL FINDER",
 };
 
 export default function WorkforcePanel() {

@@ -34,7 +34,7 @@ const SYSTEM = [
   "Answer the actual question immediately. Be fast, precise, context-aware, reliable, and useful.",
   "Use connected runtime state before older memory when they conflict. Respect timestamps and source-health flags.",
   "Never invent live balances, market data, broker state, integrations, actions, memories, or research.",
-  "Keep Trading, Finance, SentryOps, and Life evidence separate unless executive synthesis is useful.",
+  "Keep Trading, Finance, Real Estate (internal domain SENTRYOPS), and Life evidence separate unless executive synthesis is useful.",
   "Distinguish observed facts, saved context, inference, and recommendation.",
   "Keep routine answers compact. Expand when complexity genuinely requires it.",
   "For difficult tasks, reason across constraints before answering.",
@@ -143,15 +143,9 @@ type WorkforceCommand =
 
 function workforceAgent(value: string): { id: AgentId; domain: RuntimeDomain; permission: AgentPermission } | null {
   const text = value.toLowerCase();
-  if (/\b(builder|engineer|developer agent)\b/.test(text)) return { id: "BUILDER", domain: "CORE", permission: "WRITE_INTERNAL" };
-  if (/\b(cfo|finance agent|finance cfo)\b/.test(text)) return { id: "FINANCE_CFO", domain: "FINANCE", permission: "ANALYZE" };
-  if (/\b(sentryops research|research agent|researcher)\b/.test(text)) return { id: "SENTRYOPS_RESEARCH", domain: "SENTRYOPS", permission: "ANALYZE" };
-  if (/\b(trading observer|observer agent)\b/.test(text)) return { id: "TRADING_OBSERVER", domain: "TRADING", permission: "READ" };
-  if (/\b(qa watchdog|qa agent|qa)\b/.test(text)) return { id: "JARVIS_QA", domain: "CORE", permission: "ANALYZE" };
-  if (/\b(executive agent|executive)\b/.test(text)) return { id: "EXECUTIVE", domain: "CORE", permission: "WRITE_INTERNAL" };
-  if (/\b(it infra|infrastructure agent|sre|devops agent)\b/.test(text)) return { id: "IT_INFRA", domain: "CORE", permission: "ANALYZE" };
-  if (/\b(it security|security agent|cybersecurity agent|cyber agent)\b/.test(text)) return { id: "IT_SECURITY", domain: "CORE", permission: "ANALYZE" };
-  if (/\b(it integrations|integration agent|integrations agent|api agent)\b/.test(text)) return { id: "IT_INTEGRATIONS", domain: "CORE", permission: "ANALYZE" };
+  if (/\b(trading observer|observer agent|observer|trading agent|indicator agent|arrow agent)\b/.test(text)) return { id: "TRADING_OBSERVER", domain: "TRADING", permission: "READ" };
+  if (/\b(deal finder|deal agent|real estate agent|flip agent|deals agent)\b/.test(text)) return { id: "DEAL_FINDER", domain: "SENTRYOPS", permission: "ANALYZE" };
+  if (/\b(supervisor|supervisor agent|qa agent|qa|executive agent|executive)\b/.test(text)) return { id: "SUPERVISOR", domain: "CORE", permission: "ANALYZE" };
   return null;
 }
 
@@ -290,7 +284,7 @@ export async function POST(request: Request) {
     const open = (workforce.tasks ?? []).filter((task) => ["QUEUED", "RUNNING", "BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status));
     const roster = workforce.agents.map((agent) => `${agent.id}: ${agent.status}`).join(" · ");
     return directSseResponse({
-      answer: `AI workforce is ${workforce.status.toLowerCase()}. ${workforce.agents.length} employees are on the roster. ${open.length} tasks are open. ${roster}. Proof: ${workforce.operatingSystem?.truth.verificationRate ?? 100}% of recorded completions verified. Open gaps: ${workforce.operatingSystem?.metrics.activeGaps ?? 0}. Active opportunity signals: ${workforce.operatingSystem?.metrics.activeOpportunities ?? 0}. Current executive focus: ${workforce.agents.find((agent) => agent.id === "EXECUTIVE")?.currentWork ?? workforce.executiveSummary}`,
+      answer: `AI workforce is ${workforce.status.toLowerCase()}. ${workforce.agents.length} employees are on the roster. ${open.length} tasks are open. ${roster}. Proof: ${workforce.operatingSystem?.truth.verificationRate ?? 100}% of recorded completions verified. Open gaps: ${workforce.operatingSystem?.metrics.activeGaps ?? 0}. Active opportunity signals: ${workforce.operatingSystem?.metrics.activeOpportunities ?? 0}. Current executive focus: ${workforce.agents.find((agent) => agent.id === "SUPERVISOR")?.currentWork ?? workforce.executiveSummary}`,
       activeDomain,
       startedAt,
       provider: "JARVIS Workforce",

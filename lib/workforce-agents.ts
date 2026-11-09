@@ -2,7 +2,7 @@ import { generateText, stepCountIs, tool, type ToolSet } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import { agentModel } from "./jarvis-models";
-import { getRecentEvents, type AgentState, type AgentTask } from "./jarvis-runtime";
+import { AGENT_IDS, getRecentEvents, type AgentId, type AgentState, type AgentTask } from "./jarvis-runtime";
 import { getTradingState } from "./trading-runtime";
 import { listStoredTrades } from "./trading-store";
 import { tradeStats } from "./trading-analytics";
@@ -27,16 +27,10 @@ export type AgentRunResult = {
   model: string | null;
 };
 
-const ROLE: Record<string, string> = {
-  EXECUTIVE: "You are the Chief of Staff for Himie Johnson Ventures (Dwight's company). Prioritize, synthesize what the other agents found, and decide the single most useful next step.",
-  FINANCE_CFO: "You are the CFO agent. Work only from the finance tools. Be precise about what is live versus snapshot data. Never move money or recommend actions you cannot ground in the data.",
-  SENTRYOPS_RESEARCH: "You are the SentryOps research agent. Find evidence-backed public-safety software opportunities. Cite sources for every claim. Never invent contracts, vendors or amounts.",
-  TRADING_OBSERVER: "You are the Trading agent. You study Dwight's observed trades (no broker API: the Observer journal is the record). Analyze execution: timing, R multiples, excursions, give-back, rule adherence, and what distinguishes his best entries. You never place or suggest live orders.",
-  BUILDER: "You are the Builder agent. You turn approved objectives into concrete engineering work for the JARVIS repository and the DEVIANT learning pipeline. You can request a coding run on Dwight's PC only when the task is Dwight-authorized.",
-  JARVIS_QA: "You are the QA agent. Verify claims with the check tools. Report only what the checks prove.",
-  IT_INFRA: "You are the infrastructure agent. Use the check tools and report concrete fixes.",
-  IT_SECURITY: "You are the security agent. Use the check tools and report concrete fixes without revealing secret values.",
-  IT_INTEGRATIONS: "You are the integrations agent. Use the check tools and report concrete fixes.",
+const ROLE: Record<AgentId, string> = {
+  TRADING_OBSERVER: "You are the Trading Observer agent. You study how Dwight actually trades (no broker API: the Observer journal is the record) and use it to make his arrow indicator more precise: timing, R multiples, excursions, give-back, rule adherence, and what distinguishes his best entries. Propose versioned indicator changes only with repeated evidence, and require a backtest before any change is adopted. The baseline indicator file stays immutable. You never place or suggest live orders.",
+  DEAL_FINDER: "You are the Deal Finder agent for Dwight's real estate business. You find fix-and-flip deals that match his criteria (target areas, price, property type, rehab, minimum profit/ROI, max % of ARV). Cite the source for every property and number. Never invent listings, prices, ARVs or comps. Contacting sellers or making offers requires Dwight's approval.",
+  SUPERVISOR: "You are the Supervisor. You keep the Trading Observer and Deal Finder in check: verify their claims against evidence and the check tools, flag stale or unsupported results, and decide the single most useful next step. Report only what the evidence proves.",
 };
 
 function compact(value: unknown, max = 6000) {
@@ -66,7 +60,7 @@ function buildTools(agent: AgentState, task: AgentTask, state: { evidence: strin
       description: "Propose a follow-up task for an agent. It goes through governance (may wait for Dwight's approval).",
       inputSchema: z.object({
         title: z.string().min(8).max(200),
-        assignedTo: z.enum(["EXECUTIVE", "FINANCE_CFO", "SENTRYOPS_RESEARCH", "TRADING_OBSERVER", "BUILDER", "JARVIS_QA", "IT_INFRA", "IT_SECURITY", "IT_INTEGRATIONS"]),
+        assignedTo: z.enum(AGENT_IDS),
         rationale: z.string().max(400),
       }),
       execute: async (input) => {
@@ -78,7 +72,7 @@ function buildTools(agent: AgentState, task: AgentTask, state: { evidence: strin
   };
 
   const domain = agent.domain;
-  if (domain === "TRADING" || agent.id === "EXECUTIVE" || agent.id === "BUILDER") {
+  if (domain === "TRADING" || agent.id === "SUPERVISOR") {
     tools.get_trading_state = tool({
       description: "Live Trading Observer state: current position or order, today's trades, guardrails.",
       inputSchema: z.object({}),
@@ -109,7 +103,7 @@ function buildTools(agent: AgentState, task: AgentTask, state: { evidence: strin
       },
     });
   }
-  if (domain === "FINANCE" || agent.id === "EXECUTIVE") {
+  if (agent.id === "SUPERVISOR") {
     tools.get_finance_state = tool({
       description: "Current finance runtime: mode (direct vs snapshot), liquidity, debt, stage and directive.",
       inputSchema: z.object({}),
@@ -124,10 +118,10 @@ function buildTools(agent: AgentState, task: AgentTask, state: { evidence: strin
     tools.run_security_check = tool({ description: "Check owner login, cron auth and credential configuration (never returns secret values).", inputSchema: z.object({}), execute: async () => compact(securityCheck()) });
     tools.run_integrations_check = tool({ description: "Check Local Agent presence/version and market data freshness.", inputSchema: z.object({}), execute: async () => compact(await integrationsCheck()) });
   }
-  if (agent.id === "SENTRYOPS_RESEARCH" && process.env.ANTHROPIC_API_KEY) {
+  if (agent.id === "DEAL_FINDER" && process.env.ANTHROPIC_API_KEY) {
     tools.web_search = anthropic.tools.webSearch_20250305({ maxUses: 5 }) as unknown as ToolSet[string];
   }
-  if (agent.id === "BUILDER" && task.governance?.action === "USER_AUTHORIZED") {
+  if (agent.id === "TRADING_OBSERVER" && task.governance?.action === "USER_AUTHORIZED") {
     tools.dispatch_coding_run = tool({
       description: "Ask the Local Agent on Dwight's PC to run Claude Code on the jarvis-os repository with this precise engineering prompt. Edits stay local for Dwight to review; nothing is pushed.",
       inputSchema: z.object({ prompt: z.string().min(40).max(8000) }),
@@ -137,7 +131,7 @@ function buildTools(agent: AgentState, task: AgentTask, state: { evidence: strin
         if (!presence.claudeCli) return "Claude Code CLI is not installed on the PC.";
         const command = await enqueueApprovedDesktopCommandForPresentDevice({ action: "RUN_CODING_AGENT", target: "CLAUDE", text: prompt });
         if (!command) return "No paired Local Agent found.";
-        await recordApproval({ subjectType: "DESKTOP_ACTION", subjectId: command.id, decision: "APPROVED", decidedBy: "workforce:dwight-authorized-task:" + task.id, reason: "RUN_CODING_AGENT from Builder" });
+        await recordApproval({ subjectType: "DESKTOP_ACTION", subjectId: command.id, decision: "APPROVED", decidedBy: "workforce:dwight-authorized-task:" + task.id, reason: "RUN_CODING_AGENT from Trading Observer" });
         state.evidence.push(`dispatch:RUN_CODING_AGENT:${command.id}`);
         return `Dispatched coding run ${command.id}. Result will arrive in the Local Agent command results.`;
       },

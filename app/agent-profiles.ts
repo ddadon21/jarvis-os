@@ -1,14 +1,4 @@
-import {
-  Bot,
-  BrainCircuit,
-  Code2,
-  Eye,
-  Landmark,
-  Network,
-  Search,
-  ServerCog,
-  ShieldCheck,
-} from "lucide-react";
+import { Bot, Eye, House, ShieldCheck } from "lucide-react";
 
 export type AgentStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
 
@@ -71,109 +61,43 @@ export type AgentProfile = {
   specialty: string;
   accent: string;
   zone: string;
-  /** Handoff label used in runtime events, e.g. "OBSERVER → BUILDER". */
+  /** Handoff label used in runtime events, e.g. "OBSERVER → SUPERVISOR". */
   handoffName: string;
 };
 
 export const AGENT_PROFILES: Record<string, AgentProfile> = {
-  EXECUTIVE: {
-    name: "EXECUTIVE",
-    short: "EX",
-    role: "Chief of Staff",
+  SUPERVISOR: {
+    name: "SUPERVISOR",
+    short: "SV",
+    role: "Keeps both agents in check",
     station: "Command Center",
-    icon: BrainCircuit,
-    specialty: "Priorities · delegation · approvals",
+    icon: ShieldCheck,
+    specialty: "Evidence · system health · next step",
     accent: "#ef4444",
     zone: "COMMAND DECK",
-    handoffName: "EXECUTIVE",
-  },
-  FINANCE_CFO: {
-    name: "CFO",
-    short: "CF",
-    role: "Capital Intelligence",
-    station: "Capital Desk",
-    icon: Landmark,
-    specialty: "Cash · debt · leverage · capital",
-    accent: "#eab308",
-    zone: "CAPITAL WING",
-    handoffName: "CFO",
-  },
-  SENTRYOPS_RESEARCH: {
-    name: "RESEARCH",
-    short: "RS",
-    role: "SentryOps Intelligence",
-    station: "Research Lab",
-    icon: Search,
-    specialty: "Markets · agencies · competitors",
-    accent: "#3b82f6",
-    zone: "SENTRYOPS LAB",
-    handoffName: "RESEARCH",
+    handoffName: "SUPERVISOR",
   },
   TRADING_OBSERVER: {
     name: "OBSERVER",
     short: "OB",
-    role: "Trading Intelligence",
+    role: "Trading · Arrow Indicator",
     station: "Market Bay",
     icon: Eye,
-    specialty: "Setups · execution · behavior",
+    specialty: "Your entries · arrow tuning · backtests",
     accent: "#f97316",
     zone: "MARKET BAY",
     handoffName: "OBSERVER",
   },
-  BUILDER: {
-    name: "BUILDER",
-    short: "BL",
-    role: "Software Engineer",
-    station: "Build Lab",
-    icon: Code2,
-    specialty: "JARVIS · SentryOps · automation",
-    accent: "#14b8a6",
-    zone: "ENGINEERING",
-    handoffName: "BUILDER",
-  },
-  JARVIS_QA: {
-    name: "QA",
-    short: "QA",
-    role: "Quality Watchdog",
-    station: "QA Control",
-    icon: ShieldCheck,
-    specialty: "Failures · evidence · reliability",
-    accent: "#a855f7",
-    zone: "QA CONTROL",
-    handoffName: "QA",
-  },
-  IT_INFRA: {
-    name: "INFRA",
-    short: "IN",
-    role: "Infrastructure / SRE",
-    station: "Network Operations",
-    icon: ServerCog,
-    specialty: "Runtime · uptime · persistence",
+  DEAL_FINDER: {
+    name: "DEAL FINDER",
+    short: "DF",
+    role: "Real Estate · Fix & Flip",
+    station: "Deal Desk",
+    icon: House,
+    specialty: "Target areas · criteria · ranked deals",
     accent: "#22c55e",
-    zone: "NETWORK OPS",
-    handoffName: "INFRA",
-  },
-  IT_SECURITY: {
-    name: "SECURITY",
-    short: "SC",
-    role: "Security Operations",
-    station: "Security Operations Center",
-    icon: ShieldCheck,
-    specialty: "Access · secrets · boundaries",
-    accent: "#e11d48",
-    zone: "SECURITY OPS",
-    handoffName: "SECURITY",
-  },
-  IT_INTEGRATIONS: {
-    name: "INTEGRATIONS",
-    short: "IG",
-    role: "Systems Integration",
-    station: "Integration Hub",
-    icon: Network,
-    specialty: "APIs · connectors · handoffs",
-    accent: "#06b6d4",
-    zone: "INTEGRATION HUB",
-    handoffName: "INTEGRATIONS",
+    zone: "DEAL DESK",
+    handoffName: "DEAL FINDER",
   },
 };
 

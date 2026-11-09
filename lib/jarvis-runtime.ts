@@ -38,16 +38,17 @@ export type JarvisPulse = {
   sourceCount: number;
 };
 
-export type AgentId =
-  | "EXECUTIVE"
-  | "FINANCE_CFO"
-  | "SENTRYOPS_RESEARCH"
-  | "TRADING_OBSERVER"
-  | "BUILDER"
-  | "JARVIS_QA"
-  | "IT_INFRA"
-  | "IT_SECURITY"
-  | "IT_INTEGRATIONS";
+/**
+ * The AI workforce is three agents:
+ * - TRADING_OBSERVER watches how Dwight trades and refines/backtests the arrow indicator.
+ * - DEAL_FINDER finds fix-and-flip deals that match Dwight's criteria (Real Estate domain).
+ * - SUPERVISOR keeps both in check: verifies their evidence, runs system checks, reports.
+ */
+export const AGENT_IDS = ["SUPERVISOR", "TRADING_OBSERVER", "DEAL_FINDER"] as const;
+export type AgentId = (typeof AGENT_IDS)[number];
+export function isAgentId(value: unknown): value is AgentId {
+  return typeof value === "string" && (AGENT_IDS as readonly string[]).includes(value);
+}
 
 export type AgentRunStatus = "IDLE" | "RUNNING" | "DONE" | "BLOCKED" | "ERROR";
 

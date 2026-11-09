@@ -1,6 +1,6 @@
 import { requestIsOwner } from "../../../lib/owner-auth";
 import { addWorkforceTask, decideWorkforceTask, getOrSeedWorkforceState, runWorkforceCycle, runWorkforceTaskNow } from "../../../lib/jarvis-workforce";
-import { getRecentEvents, type AgentId, type AgentPermission, type AgentTaskPriority, type RuntimeDomain } from "../../../lib/jarvis-runtime";
+import { getRecentEvents, isAgentId, type AgentId, type AgentPermission, type AgentTaskPriority, type RuntimeDomain } from "../../../lib/jarvis-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
     const task = await addWorkforceTask({
       title,
       domain: body.domain,
-      assignedTo: body.assignedTo,
+      assignedTo: isAgentId(body.assignedTo) ? body.assignedTo : undefined,
       priority: body.priority,
       permissionRequired: body.permissionRequired,
       objectiveId: body.objectiveId,

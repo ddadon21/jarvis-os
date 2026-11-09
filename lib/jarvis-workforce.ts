@@ -1,6 +1,5 @@
 import { financeDirective, getOrSeedFinanceState } from "./finance-live";
 import { plaidFinanceConfigured, refreshFinanceFromPlaid } from "./plaid-finance";
-import { runJarvisPulse } from "./jarvis-pulse";
 import { getTradingState } from "./trading-runtime";
 import { getJarvisIntegrationRegistry } from "./jarvis-integration-registry";
 import { JARVIS_BALANCED_GOVERNANCE, JARVIS_OPERATING_DOCTRINE } from "./jarvis-core-policy";
@@ -13,6 +12,7 @@ import {
   AgentState,
   AgentTask,
   AgentTaskPriority,
+  isAgentId,
   WorkforceGap,
   WorkforceGovernanceDecision,
   WorkforceObjective,
@@ -21,11 +21,9 @@ import {
   appendRuntimeEvent,
   createRuntimeEvent,
   getLatestPulse,
-  getLastPulseAt,
   getRecentEvents,
   getWorkforceState,
   setWorkforceState,
-  shouldRunPulse,
 } from "./jarvis-runtime";
 
 const OPERATING_DOCTRINE = [...JARVIS_OPERATING_DOCTRINE];
@@ -41,112 +39,61 @@ const BORING_WORK = [
 
 const DEFAULT_AGENTS: AgentState[] = [
   {
-    id: "EXECUTIVE",
-    domain: "CORE",
-    status: "IDLE",
-    permissionCeiling: "WRITE_INTERNAL",
-    lastRanAt: null,
-    lastResult: "Executive orchestration has not completed its first cycle yet.",
-    currentWork: "Coordinate specialist agents around Dwight's highest-leverage objectives.",
-  },
-  {
-    id: "FINANCE_CFO",
-    domain: "FINANCE",
-    status: "IDLE",
-    permissionCeiling: "WRITE_INTERNAL",
-    lastRanAt: null,
-    lastResult: "Finance agent is waiting for its first cycle.",
-    currentWork: "Keep financial state current and advance the active capital stage.",
-  },
-  {
-    id: "SENTRYOPS_RESEARCH",
-    domain: "SENTRYOPS",
-    status: "IDLE",
-    permissionCeiling: "ANALYZE",
-    lastRanAt: null,
-    lastResult: "Research agent is waiting for its first cycle.",
-    currentWork: "Find evidence-backed public-safety software opportunities.",
-  },
-  {
     id: "TRADING_OBSERVER",
     domain: "TRADING",
     status: "BLOCKED",
-    permissionCeiling: "READ",
+    permissionCeiling: "WRITE_INTERNAL",
     lastRanAt: null,
     lastResult: "Waiting for structured trading observations.",
-    currentWork: "Study actual observed trading behavior without placing trades.",
+    currentWork: "Observe how Dwight trades, then refine and backtest the arrow indicator for more precise entries. Never places trades.",
   },
   {
-    id: "BUILDER",
-    domain: "CORE",
-    status: "IDLE",
-    permissionCeiling: "WRITE_INTERNAL",
-    lastRanAt: null,
-    lastResult: "Builder is available for approved software and business objectives.",
-    currentWork: "Turn validated objectives into internal plans and build tasks without taking unapproved external actions.",
-  },
-  {
-    id: "JARVIS_QA",
-    domain: "CORE",
-    status: "IDLE",
+    id: "DEAL_FINDER",
+    domain: "SENTRYOPS",
+    status: "BLOCKED",
     permissionCeiling: "ANALYZE",
     lastRanAt: null,
-    lastResult: "QA watchdog is waiting for its first workforce cycle.",
-    currentWork: "Check agent failures, blockers, stale evidence, and reliability risks before JARVIS reports success.",
+    lastResult: "Waiting for deal criteria and a property data source.",
+    currentWork: "Find fix-and-flip deals that match Dwight's criteria and learn from the deals he picks.",
   },
   {
-    id: "IT_INFRA",
+    id: "SUPERVISOR",
     domain: "CORE",
     status: "IDLE",
     permissionCeiling: "WRITE_INTERNAL",
     lastRanAt: null,
-    lastResult: "Infrastructure agent is standing by.",
-    currentWork: "Watch runtime health, persistence, scheduled jobs, and core service availability.",
-  },
-  {
-    id: "IT_SECURITY",
-    domain: "CORE",
-    status: "IDLE",
-    permissionCeiling: "ANALYZE",
-    lastRanAt: null,
-    lastResult: "Security agent is standing by.",
-    currentWork: "Audit security boundaries, secrets posture, authorization gates, and risky configuration drift.",
-  },
-  {
-    id: "IT_INTEGRATIONS",
-    domain: "CORE",
-    status: "IDLE",
-    permissionCeiling: "WRITE_INTERNAL",
-    lastRanAt: null,
-    lastResult: "Integration agent is standing by.",
-    currentWork: "Watch connected systems and repair or surface broken integration paths without inventing connectivity.",
+    lastResult: "Supervisor has not completed its first cycle yet.",
+    currentWork: "Keep the Trading Observer and Deal Finder honest: verify their evidence, check system health, and report.",
   },
 ];
 
 const DEFAULT_OBJECTIVES: WorkforceObjective[] = [
   {
-    id: "finance-capital-path",
-    title: "Advance Dwight through the financial path toward $1M net worth",
-    domain: "FINANCE",
-    createdAt: "2026-09-15T00:00:00.000Z",
-    updatedAt: "2026-09-15T00:00:00.000Z",
+    id: "trading-arrow-indicator",
+    title: "Make the arrow indicator precise enough to trade from on its own",
+    domain: "TRADING",
+    createdAt: "2026-11-09T00:00:00.000Z",
+    updatedAt: "2026-11-09T00:00:00.000Z",
     status: "ACTIVE",
-    successDefinition: "Debt controlled, liquidity and credit strengthened, capital compounds, and net worth milestones keep advancing toward $1M.",
-    currentFocus: "Debt → stability → reserves → credit → capital → investing → assets.",
+    successDefinition: "Backtested and forward-observed arrow signals show a consistently high win rate with clear entry criteria, versioned against the baseline indicator.",
+    currentFocus: "Observe Dwight's trades → find what separates his best entries → propose versioned indicator changes → backtest before adopting.",
     requiresApprovalForExternalActions: true,
   },
   {
-    id: "sentryops-product-market",
-    title: "Discover and validate the strongest SentryOps product opportunity",
+    id: "real-estate-fix-flip",
+    title: "Find the best fix-and-flip deals that match Dwight's criteria",
     domain: "SENTRYOPS",
-    createdAt: "2026-09-15T00:00:00.000Z",
-    updatedAt: "2026-09-15T00:00:00.000Z",
+    createdAt: "2026-11-09T00:00:00.000Z",
+    updatedAt: "2026-11-09T00:00:00.000Z",
     status: "ACTIVE",
-    successDefinition: "Evidence supports a repeatable painful problem, identifiable buyer, budget path, competitive wedge, product direction, and pilot path.",
-    currentFocus: "Research agencies, contracts, vendors, workflows, pain, budgets, and repeatability before forcing a product conclusion.",
+    successDefinition: "A steady flow of deals that pass every criterion, ranked by profit, getting better over time from the deals Dwight chooses.",
+    currentFocus: "Lock criteria → connect a property data source → search target areas → score and rank → learn from Dwight's picks.",
     requiresApprovalForExternalActions: true,
   },
 ];
+
+/** Objectives from the retired workforce (finance CFO, SentryOps research) are dropped on load. */
+const RETIRED_OBJECTIVE_IDS = new Set(["finance-capital-path", "sentryops-product-market"]);
 
 type TaskSeed = {
   title: string;
@@ -171,7 +118,9 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
           status: "IDLE" as const,
         }));
     const objectives = mergeMissingObjectives(existing.objectives);
-    const tasks = pruneTasks((Array.isArray(existing.tasks) ? existing.tasks : []).map((task) => ({
+    const legacyRoster = existing.agents.some((agent) => !isAgentId(agent.id)) ||
+      (existing.tasks ?? []).some((task) => !isAgentId(task.assignedTo));
+    const tasks = pruneTasks((Array.isArray(existing.tasks) ? existing.tasks : []).filter((task) => isAgentId(task.assignedTo)).map((task) => ({
       ...task,
       definitionOfDone: task.definitionOfDone?.trim() || defaultDefinitionOfDone(task),
       governance: task.governance ?? classifyTaskGovernance({
@@ -186,6 +135,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
     })));
     const taskSetChanged = tasks.length !== (existing.tasks?.length ?? 0);
     const needsInstitutionalMigration =
+      legacyRoster ||
       !existing.operatingSystem?.truth ||
       !existing.operatingSystem?.worldState ||
       !existing.operatingSystem?.decisionMemory ||
@@ -197,7 +147,7 @@ export async function getOrSeedWorkforceState(): Promise<WorkforceState> {
     const shouldRebuildOperatingPicture = needsInstitutionalMigration || taskSetChanged;
     const rebuiltOperatingSystem = shouldRebuildOperatingPicture
       ? buildOperatingSystem({
-          previous: existing,
+          previous: legacyRoster ? null : existing,
           agents,
           tasks: applyTruthVerification(tasks, new Date().toISOString()),
           executiveFocus: existing.executiveSummary || "Close the highest-risk open loop before expanding.",
@@ -277,201 +227,64 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     }),
   );
 
-  const financeObjective = previous.objectives.find((objective) => objective.status === "ACTIVE" && objective.domain === "FINANCE") ?? null;
-  const sentryObjective = previous.objectives.find((objective) => objective.status === "ACTIVE" && objective.domain === "SENTRYOPS") ?? null;
-
-  const financeTaskResult = ensureTask(tasks, {
-    title: "Review the active financial stage and next capital move",
-    domain: "FINANCE",
-    assignedTo: "FINANCE_CFO",
-    priority: "HIGH",
-    permissionRequired: "ANALYZE",
-    objectiveId: financeObjective?.id ?? null,
-    source: "workforce.cycle",
-  });
-  tasks = financeTaskResult.tasks;
-
-  const sentryTaskResult = ensureTask(tasks, {
-    title: "Refresh SentryOps market evidence and identify the strongest next move",
-    domain: "SENTRYOPS",
-    assignedTo: "SENTRYOPS_RESEARCH",
-    priority: "HIGH",
-    permissionRequired: "ANALYZE",
-    objectiveId: sentryObjective?.id ?? null,
-    source: "workforce.cycle",
-  });
-  tasks = sentryTaskResult.tasks;
+  const tradingObjective = previous.objectives.find((objective) => objective.status === "ACTIVE" && objective.domain === "TRADING") ?? null;
+  const dealObjective = previous.objectives.find((objective) => objective.status === "ACTIVE" && objective.domain === "SENTRYOPS") ?? null;
 
   const tradingTaskResult = ensureTask(tasks, {
-    title: "Inspect the latest Trading Observer state and preserve evidence quality",
+    title: "Review observed trades and arrow indicator evidence",
     domain: "TRADING",
     assignedTo: "TRADING_OBSERVER",
-    priority: "MEDIUM",
+    priority: "HIGH",
     permissionRequired: "READ",
-    objectiveId: null,
+    objectiveId: tradingObjective?.id ?? null,
     source: "workforce.cycle",
   });
   tasks = tradingTaskResult.tasks;
 
-  const qaTaskResult = ensureTask(tasks, {
-    title: "Audit the workforce cycle for failures, blockers, stale evidence, and false-success risk",
+  const dealTaskResult = ensureTask(tasks, {
+    title: "Search target areas for fix-and-flip deals that match criteria",
+    domain: "SENTRYOPS",
+    assignedTo: "DEAL_FINDER",
+    priority: "HIGH",
+    permissionRequired: "ANALYZE",
+    objectiveId: dealObjective?.id ?? null,
+    source: "workforce.cycle",
+  });
+  tasks = dealTaskResult.tasks;
+
+  const supervisorTaskResult = ensureTask(tasks, {
+    title: "Check both agents and system health for failures, stale evidence, and false-success risk",
     domain: "CORE",
-    assignedTo: "JARVIS_QA",
+    assignedTo: "SUPERVISOR",
     priority: "HIGH",
     permissionRequired: "ANALYZE",
     objectiveId: null,
     source: "workforce.cycle",
   });
-  tasks = qaTaskResult.tasks;
+  tasks = supervisorTaskResult.tasks;
 
-  const infraTaskResult = ensureTask(tasks, {
-    title: "Check JARVIS infrastructure health and durable runtime dependencies",
-    domain: "CORE",
-    assignedTo: "IT_INFRA",
-    priority: "HIGH",
-    permissionRequired: "ANALYZE",
-    objectiveId: null,
-    source: "workforce.cycle",
-  });
-  tasks = infraTaskResult.tasks;
-
-  const securityTaskResult = ensureTask(tasks, {
-    title: "Audit security boundaries and automation authorization posture",
-    domain: "CORE",
-    assignedTo: "IT_SECURITY",
-    priority: "HIGH",
-    permissionRequired: "ANALYZE",
-    objectiveId: null,
-    source: "workforce.cycle",
-  });
-  tasks = securityTaskResult.tasks;
-
-  const integrationsTaskResult = ensureTask(tasks, {
-    title: "Check active JARVIS integrations for degradation or broken paths",
-    domain: "CORE",
-    assignedTo: "IT_INTEGRATIONS",
-    priority: "HIGH",
-    permissionRequired: "ANALYZE",
-    objectiveId: null,
-    source: "workforce.cycle",
-  });
-  tasks = integrationsTaskResult.tasks;
-
-  tasks = updateTask(tasks, financeTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
-  agents = setAgent(agents, "FINANCE_CFO", {
-    status: "RUNNING",
-    currentWork: "Refresh finance state when a direct provider is available, then evaluate the active financial stage.",
-  });
-
-  const financeRefresh = plaidFinanceConfigured() ? await refreshFinanceFromPlaid() : null;
-  const finance = financeRefresh?.state ?? await getOrSeedFinanceState();
-  const financeResult = financeRefresh?.refreshed
-    ? `Direct finance refreshed. ${financeDirective(finance)}`
-    : `${finance.mode === "DIRECT" ? "Direct finance state retained." : "Using the latest synchronized finance snapshot."} ${financeDirective(finance)}`;
-  const financeFailed = Boolean(financeRefresh?.configured && !financeRefresh.refreshed);
-
-  agents = setAgent(agents, "FINANCE_CFO", {
-    status: financeFailed ? "ERROR" : "DONE",
-    lastRanAt: now,
-    lastResult: financeResult,
-    currentWork: financeDirective(finance),
-  });
-  tasks = updateTask(tasks, financeTaskResult.task.id, {
-    status: financeFailed ? "FAILED" : "DONE",
-    result: financeResult,
-    evidence: [`mode=${finance.mode}`, `asOf=${finance.asOf}`],
-    blockedReason: financeFailed ? "The configured direct finance refresh did not complete successfully." : null,
-  });
-  await emitIfChanged(previous, agents, "FINANCE_CFO", "finance.cfo_cycle", financeResult);
-  await emitHandoff("CFO", "EXECUTIVE", "FINANCE", financeResult);
-
-  tasks = updateTask(tasks, sentryTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
-  agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
-    status: "RUNNING",
-    currentWork: "Research new evidence and compare it with the previous market pulse.",
-  });
-
-  const lastPulseAt = await getLastPulseAt();
-  const researchDue = options.forceResearch === true || shouldRunPulse(lastPulseAt, 240);
-  const previousPulse = await getLatestPulse();
-  const sentryPulse = researchDue || !previousPulse ? await runJarvisPulse() : previousPulse;
-  const sentryFailed = sentryPulse.status === "ERROR";
-  const sentryDegraded = sentryPulse.status === "DEGRADED";
-  const sentryResult = researchDue
-    ? sentryPulse.summary
-    : "Research pulse is current; no duplicate deep-research spend was needed this hourly workforce cycle. Latest: " + sentryPulse.summary;
-  agents = setAgent(agents, "SENTRYOPS_RESEARCH", {
-    status: sentryFailed ? "ERROR" : sentryDegraded ? "BLOCKED" : "DONE",
-    lastRanAt: now,
-    lastResult: sentryResult,
-    currentWork: sentryPulse.nextMove.title,
-  });
-  tasks = updateTask(tasks, sentryTaskResult.task.id, {
-    status: sentryFailed ? "FAILED" : sentryDegraded ? "BLOCKED" : "DONE",
-    result: sentryResult,
-    evidence: [`sources=${sentryPulse.sourceCount}`, `pulse=${sentryPulse.ranAt}`, `researchStatus=${sentryPulse.status}`],
-    blockedReason: sentryFailed
-      ? "The SentryOps research lane encountered an internal failure."
-      : sentryDegraded
-        ? "The live research provider was unavailable this cycle; JARVIS retained the last verified research state and will retry."
-        : null,
-  });
-  await emitHandoff("RESEARCH", "BUILDER", "SENTRYOPS", sentryPulse.nextMove.title + " · " + sentryResult);
-
-  const opportunityPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 } as const;
-  const topOpportunity = [...sentryPulse.opportunities]
-    .sort((a, b) => opportunityPriority[b.priority] - opportunityPriority[a.priority])[0] ?? null;
-  if (topOpportunity) {
-    const opportunitySource = `jarvis.opportunity:${sentryPulse.id}`;
-    const existingOpportunityTask = tasks.find((task) => task.source === opportunitySource);
-    if (!existingOpportunityTask) {
-      const opportunityTask = ensureTask(tasks, {
-        title: `Validate opportunity signal: ${topOpportunity.title}`,
-        domain: "SENTRYOPS",
-        assignedTo: "EXECUTIVE",
-        priority: topOpportunity.priority === "HIGH" ? "HIGH" : "MEDIUM",
-        permissionRequired: "ANALYZE",
-        objectiveId: sentryObjective?.id ?? null,
-        source: opportunitySource,
-        definitionOfDone: "Research evidence is translated into a clear executive next check, without converting an interesting signal into an external commitment.",
-      });
-      tasks = opportunityTask.tasks;
-      tasks = updateTask(tasks, opportunityTask.task.id, {
-        status: "DONE",
-        result: `Opportunity triaged for executive review. ${topOpportunity.whyItMatters} Next check: ${sentryPulse.nextMove.title}`,
-        evidence: [
-          `researchPulse=${sentryPulse.id}`,
-          `priority=${topOpportunity.priority}`,
-          `sources=${sentryPulse.sourceCount}`,
-          topOpportunity.evidence.slice(0, 240),
-        ],
-        blockedReason: null,
-      });
-      await emitHandoff(
-        "RESEARCH",
-        "EXECUTIVE",
-        "SENTRYOPS",
-        `Opportunity triaged: ${topOpportunity.title} · ${topOpportunity.whyItMatters}`,
-      );
-    }
-  }
-
+  // Trading Observer: live observation state plus any new indicator evidence.
   tasks = updateTask(tasks, tradingTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   const tradingRuntime = await getTradingState();
   const observerOnline =
     tradingRuntime.account.connection === "OBSERVING" ||
     tradingRuntime.account.connection === "DEGRADED" ||
     Boolean(tradingRuntime.observer?.observedAt);
-  const tradingResult = observerOnline
+  const recentEvents = await getRecentEvents();
+  const latestIndicatorEvidence = recentEvents.find((event) => event.type === "trading.indicator_evidence") ?? null;
+  const indicatorNote = latestIndicatorEvidence
+    ? ` New indicator evidence: ${latestIndicatorEvidence.summary.slice(0, 200)} The baseline Pine file stays immutable; changes must be versioned and backtested against repeated evidence, not one screenshot.`
+    : "";
+  const tradingResult = (observerOnline
     ? `Observer active. ${tradingRuntime.observer?.symbol ?? "No active symbol"} · ${tradingRuntime.observer?.status ?? "UNKNOWN"} · ${tradingRuntime.today.trades} trade${tradingRuntime.today.trades === 1 ? "" : "s"} today.`
-    : "Trading Observer is waiting for live observations from the Windows Local Agent.";
+    : "Waiting for live observations from the Windows Local Agent.") + indicatorNote;
 
   agents = setAgent(agents, "TRADING_OBSERVER", {
     status: observerOnline ? "DONE" : "BLOCKED",
     lastRanAt: now,
     lastResult: tradingResult,
     currentWork: observerOnline
-      ? "Study observed setup state, management changes, rule compliance, and journal outcomes without placing trades."
+      ? "Study entries, exits and rule compliance; correlate with arrow signals to find what makes entries precise."
       : "Wait for the Local Agent to resume observation; do not invent trading evidence.",
   });
   tasks = updateTask(tasks, tradingTaskResult.task.id, {
@@ -480,177 +293,94 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     evidence: [
       `connection=${tradingRuntime.account.connection}`,
       `observedAt=${tradingRuntime.observer?.observedAt ?? tradingRuntime.account.lastObservedAt ?? "none"}`,
+      ...(latestIndicatorEvidence ? [`runtimeEvent=${latestIndicatorEvidence.id}`, "baseline=deviant-refined-baseline-v1.pine"] : []),
     ],
     blockedReason: observerOnline ? null : "No current Local Agent observation is available.",
   });
-  await emitHandoff("OBSERVER", "BUILDER", "TRADING", tradingResult);
+  await emitHandoff("OBSERVER", "SUPERVISOR", "TRADING", tradingResult);
 
-  const recentEvents = await getRecentEvents();
-  const latestIndicatorEvidence = recentEvents.find((event) => event.type === "trading.indicator_evidence") ?? null;
-  let indicatorLearningTask: AgentTask | null = null;
-  if (latestIndicatorEvidence) {
-    const source = `indicator-learning:${latestIndicatorEvidence.id}`;
-    indicatorLearningTask = tasks.find((task) => task.source === source) ?? null;
-    if (!indicatorLearningTask) {
-      const indicatorTaskResult = ensureTask(tasks, {
-        title: "Review new trading visual evidence against the DEVIANT indicator baseline",
-        domain: "TRADING",
-        assignedTo: "BUILDER",
-        priority: "HIGH",
-        permissionRequired: "WRITE_INTERNAL",
-        objectiveId: null,
-        source,
-      });
-      tasks = indicatorTaskResult.tasks;
-      indicatorLearningTask = indicatorTaskResult.task;
-    }
-  }
+  // Deal Finder: criteria live in Dwight's browser and no property data source is connected yet.
+  tasks = updateTask(tasks, dealTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  const dealResult = "Not searching yet: deal criteria are only saved in the browser and no property listing data source is connected.";
+  agents = setAgent(agents, "DEAL_FINDER", {
+    status: "BLOCKED",
+    lastRanAt: now,
+    lastResult: dealResult,
+    currentWork: "Waiting for criteria to sync to Jarvis and a property data source, then search target areas and rank deals.",
+  });
+  tasks = updateTask(tasks, dealTaskResult.task.id, {
+    status: "BLOCKED",
+    result: dealResult,
+    evidence: ["criteriaStore=browser-only", "propertyDataSource=none"],
+    blockedReason: "Needs deal criteria stored in Jarvis and a property data source.",
+  });
+  await emitHandoff("DEAL FINDER", "SUPERVISOR", "SENTRYOPS", dealResult);
 
-  tasks = updateTask(tasks, infraTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
-  tasks = updateTask(tasks, securityTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
-  tasks = updateTask(tasks, integrationsTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  // Finance data still refreshes in the background for the Finance page (no agent lane).
+  const financeRefresh = plaidFinanceConfigured() ? await refreshFinanceFromPlaid().catch(() => null) : null;
+  const finance = financeRefresh?.state ?? await getOrSeedFinanceState();
 
+  // Supervisor's measured system checks; evidence lines prefixed "check:" are machine-verified.
   const integrationRegistry = await getJarvisIntegrationRegistry();
-  // IT agents run measured checks; evidence lines prefixed "check:" are what QA can verify.
   const [infra, security, integrations] = await Promise.all([
     infrastructureCheck().catch((error) => ({ ok: false, degraded: true, summary: "Infrastructure check crashed: " + (error instanceof Error ? error.message : "unknown"), findings: [], evidence: ["check:infra=crashed"] })),
     Promise.resolve(securityCheck()),
     integrationsCheck().catch((error) => ({ ok: false, degraded: true, summary: "Integration check crashed: " + (error instanceof Error ? error.message : "unknown"), findings: [], evidence: ["check:integrations=crashed"] })),
   ]);
-  const itLanes: Array<[AgentId, string, typeof infra, string, string]> = [
-    ["IT_INFRA", infraTaskResult.task.id, infra, "Restore degraded infrastructure before expanding automation.", "Keep core runtime, persistence, and scheduled work healthy."],
-    ["IT_SECURITY", securityTaskResult.task.id, security, "Resolve the reported configuration risks without exposing secret values.", "Watch authorization boundaries and keep agents inside their permission ceilings."],
-    ["IT_INTEGRATIONS", integrationsTaskResult.task.id, integrations, "Repair the reported data feeds and Local Agent link.", "Watch the Local Agent, the trade journal sync and the market data feed."],
-  ];
-  for (const [id, taskId, check, fixWork, steadyWork] of itLanes) {
-    agents = setAgent(agents, id, {
-      status: check.degraded ? "ERROR" : "DONE",
-      lastRanAt: now,
-      lastResult: check.summary,
-      currentWork: check.degraded ? fixWork : steadyWork,
-    });
-    tasks = updateTask(tasks, taskId, {
-      status: check.degraded ? "FAILED" : "DONE",
-      result: check.summary,
-      evidence: check.evidence,
-      blockedReason: check.degraded ? check.findings.join(" ") || check.summary : null,
-    });
-  }
-
-  const activeBuildObjective = previous.objectives.find(
-    (objective) =>
-      objective.status === "ACTIVE" &&
-      objective.domain !== "FINANCE" &&
-      objective.domain !== "SENTRYOPS" &&
-      !objective.id.startsWith("finance-") &&
-      !objective.id.startsWith("sentryops-"),
-  ) ?? null;
-
-  if (indicatorLearningTask && latestIndicatorEvidence) {
-    const indicatorReview = [
-      "Trading evidence packet reviewed against the DEVIANT baseline.",
-      latestIndicatorEvidence.summary,
-      "The baseline Pine file remains immutable. Any code revision must be versioned and supported by repeated evidence across journal images/notes plus Observer state, not one isolated screenshot.",
-    ].join(" ");
-    agents = setAgent(agents, "BUILDER", {
-      status: "DONE",
-      lastRanAt: now,
-      lastResult: indicatorReview,
-      currentWork: "Correlate journal screenshots and notes with Observer evidence, then test repeatable DEVIANT arrow hypotheses before proposing code changes.",
-    });
-    tasks = updateTask(tasks, indicatorLearningTask.id, {
-      status: "DONE",
-      result: indicatorReview,
-      evidence: [`runtimeEvent=${latestIndicatorEvidence.id}`, "baseline=deviant-refined-baseline-v1.pine"],
-      blockedReason: null,
-    });
-    await emitHandoff("BUILDER", "QA", "TRADING", "Indicator evidence reviewed; baseline preserved and candidate changes remain evidence-gated.");
-  } else if (activeBuildObjective) {
-    const buildTaskResult = ensureTask(tasks, {
-      title: `Turn objective into internal build plan: ${activeBuildObjective.title}`,
-      domain: activeBuildObjective.domain,
-      assignedTo: "BUILDER",
-      priority: "HIGH",
-      permissionRequired: "WRITE_INTERNAL",
-      objectiveId: activeBuildObjective.id,
-      source: "workforce.objective",
-    });
-    tasks = buildTaskResult.tasks;
-    const buildPlan = buildPlanForObjective(activeBuildObjective);
-    agents = setAgent(agents, "BUILDER", {
-      status: "DONE",
-      lastRanAt: now,
-      lastResult: buildPlan,
-      currentWork: activeBuildObjective.currentFocus,
-    });
-    tasks = updateTask(tasks, buildTaskResult.task.id, {
-      status: "DONE",
-      result: buildPlan,
-      evidence: [`objective=${activeBuildObjective.id}`],
-      blockedReason: null,
-    });
-  } else {
-    agents = setAgent(agents, "BUILDER", {
-      status: "IDLE",
-      lastRanAt: now,
-      lastResult: "No new build or indicator-learning evidence needs action this cycle. Builder remains available.",
-      currentWork: "Stand by for validated product work or new trading evidence from Observer + journal images/notes.",
-    });
-  }
+  const systemChecks = [infra, security, integrations];
+  const systemDegraded = systemChecks.filter((check) => check.degraded);
 
   const executed = await executeQueuedTasks(tasks, agents, now);
   tasks = executed.tasks;
   agents = executed.agents;
 
   tasks = applyTruthVerification(tasks, now);
-  tasks = updateTask(tasks, qaTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
+  tasks = updateTask(tasks, supervisorTaskResult.task.id, { status: "RUNNING", result: null, blockedReason: null });
   const qa = auditCycle(
     agents,
     tasks,
-    activeBuildObjective ?? previous.objectives.find((objective) => objective.status === "ACTIVE") ?? null,
+    previous.objectives.find((objective) => objective.status === "ACTIVE") ?? null,
   );
-  agents = setAgent(agents, "JARVIS_QA", {
-    status: qa.hasErrors ? "ERROR" : qa.hasBlockers ? "BLOCKED" : "DONE",
-    lastRanAt: now,
-    lastResult: qa.summary,
-    currentWork: qa.nextCheck,
-  });
-  tasks = updateTask(tasks, qaTaskResult.task.id, {
-    status: qa.hasErrors ? "FAILED" : qa.hasBlockers ? "BLOCKED" : "DONE",
-    result: qa.summary,
-    evidence: qa.evidence,
-    blockedReason: qa.hasBlockers && !qa.hasErrors ? qa.blockedReason : qa.hasErrors ? "At least one workforce agent reported an error." : null,
+  const systemSummary = systemDegraded.length
+    ? `System checks degraded: ${systemDegraded.map((check) => check.summary).join(" ")}`
+    : "System checks passed (infrastructure, security, integrations).";
+  const supervisorErrored = qa.hasErrors || systemDegraded.length > 0;
+  const supervisorSummary = `${qa.summary} ${systemSummary}`;
+  tasks = updateTask(tasks, supervisorTaskResult.task.id, {
+    status: supervisorErrored ? "FAILED" : "DONE",
+    result: supervisorSummary,
+    evidence: [...qa.evidence, ...systemChecks.flatMap((check) => check.evidence)],
+    blockedReason: supervisorErrored
+      ? [qa.hasErrors ? "At least one agent reported an error." : null, ...systemDegraded.flatMap((check) => check.findings.length ? check.findings : [check.summary])].filter(Boolean).join(" ")
+      : null,
   });
   tasks = applyTruthVerification(tasks, now);
-  await emitHandoff("QA", "EXECUTIVE", "CORE", qa.summary);
 
   const executiveSummary = synthesizeExecutiveSummary({
-    financeResult,
-    sentryResult,
     tradingResult,
-    qaSummary: qa.summary,
+    dealResult,
+    supervisorSummary,
   });
-  const hasErrors = agents.some((agent) => agent.status === "ERROR");
-  const hasBlockers = agents.some((agent) => agent.status === "BLOCKED");
   tasks = pruneTasks(tasks);
-  const executiveFocus = chooseExecutiveFocus(finance, sentryPulse.status, sentryPulse.nextMove.title, tasks);
+  const executiveFocus = chooseExecutiveFocus(tasks);
   const operatingSystem = buildOperatingSystem({
     previous,
     agents,
     tasks,
     executiveFocus,
     finance,
-    sentryPulse,
     tradingRuntime,
     integrationRegistry,
   });
 
-  agents = setAgent(agents, "EXECUTIVE", {
-    status: hasErrors ? "ERROR" : "DONE",
+  agents = setAgent(agents, "SUPERVISOR", {
+    status: supervisorErrored ? "ERROR" : "DONE",
     lastRanAt: now,
-    lastResult: executiveSummary,
+    lastResult: supervisorSummary.slice(0, 600),
     currentWork: operatingSystem.chiefOfStaff.highestLeverage,
   });
+  const hasErrors = agents.some((agent) => agent.status === "ERROR");
+  const hasBlockers = agents.some((agent) => agent.status === "BLOCKED");
 
   const next: WorkforceState = {
     version: 1,
@@ -798,7 +528,7 @@ function mergeMissingAgents(existing: AgentState[]) {
 }
 
 function mergeMissingObjectives(existing: WorkforceObjective[]) {
-  const current = [...existing];
+  const current = existing.filter((objective) => !RETIRED_OBJECTIVE_IDS.has(objective.id));
   for (const fallback of DEFAULT_OBJECTIVES) {
     if (!current.some((objective) => objective.id === fallback.id)) current.push(fallback);
   }
@@ -867,10 +597,9 @@ function pruneTasks(tasks: AgentTask[]) {
 }
 
 function defaultAgentForDomain(domain: AgentTask["domain"]): AgentId {
-  if (domain === "FINANCE") return "FINANCE_CFO";
-  if (domain === "SENTRYOPS") return "SENTRYOPS_RESEARCH";
+  if (domain === "SENTRYOPS") return "DEAL_FINDER";
   if (domain === "TRADING") return "TRADING_OBSERVER";
-  return "BUILDER";
+  return "SUPERVISOR";
 }
 
 function permissionWithinCeiling(required: AgentPermission, ceiling: AgentPermission) {
@@ -992,7 +721,7 @@ function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
           ...task,
           verification: {
             state: "DISPUTED" as const,
-            checkedBy: task.assignedTo === "JARVIS_QA" ? "EXECUTIVE" as const : "JARVIS_QA" as const,
+            checkedBy: "SUPERVISOR" as const,
             checkedAt,
             rationale: "The outcome did not complete cleanly; the result is kept as failure evidence, not success.",
             evidenceCount: task.evidence.length,
@@ -1009,7 +738,7 @@ function applyTruthVerification(tasks: AgentTask[], checkedAt: string) {
       measured && hasResult ? "VERIFIED" as const :
       evidence.length > 0 && hasResult ? "OBSERVED" as const :
       "CLAIMED" as const;
-    const checkedBy = task.assignedTo === "JARVIS_QA" ? "EXECUTIVE" as const : "JARVIS_QA" as const;
+    const checkedBy = "SUPERVISOR" as const;
 
     return {
       ...task,
@@ -1112,13 +841,11 @@ function buildWorldState(input: {
       },
       {
         domain: "SENTRYOPS",
-        status: !input.sentryPulse ? "UNKNOWN" : input.sentryPulse.status === "OK" ? "HEALTHY" : input.sentryPulse.status === "DEGRADED" ? "DEGRADED" : "BLOCKED",
-        truth: !input.sentryPulse ? "CLAIMED" : input.sentryPulse.status === "OK" && input.sentryPulse.sourceCount > 0 ? "VERIFIED" : input.sentryPulse.status === "ERROR" ? "DISPUTED" : "OBSERVED",
-        summary: input.sentryPulse
-          ? `${input.sentryPulse.summary} Sources: ${input.sentryPulse.sourceCount}.`
-          : "No current SentryOps research pulse is loaded.",
-        source: "jarvis.research-pulse",
-        asOf: input.sentryPulse?.ranAt ?? input.now,
+        status: "BLOCKED",
+        truth: "OBSERVED",
+        summary: "Real Estate: Deal Finder is waiting for criteria stored in Jarvis and a property data source.",
+        source: "workforce.deal-finder",
+        asOf: input.now,
       },
       {
         domain: "TRADING",
@@ -1157,17 +884,17 @@ function buildScenarioBook(input: {
       trigger: degraded.length ? `Active degradation detected: ${degraded.map((item) => item.label).join(", ")}.` : "A critical runtime, data, or integration provider becomes unavailable.",
       impact: "Agent evidence can go stale, automation can stall, and false-success risk rises if the system keeps acting as though the provider is healthy.",
       response: "Degrade explicitly, preserve durable state, queue retryable work, isolate the failed dependency, and escalate only the action that requires executive authority.",
-      owner: "IT_INFRA",
+      owner: "SUPERVISOR",
       status: degraded.length ? "ACTIVE" : "WATCH",
     },
     {
-      id: "scenario-sentryops-surge",
-      title: "SentryOps demand outruns delivery capacity",
-      trigger: "Multiple agencies or pilots require implementation in the same window.",
-      impact: "Integration, support, security, and onboarding load can expand faster than product capacity.",
-      response: "Model delivery capacity before commitments, standardize the integration path, protect reliability, and sequence customers by repeatability and strategic value.",
-      owner: "EXECUTIVE",
-      status: input.sentryPulse?.opportunities.some((item) => item.priority === "HIGH") ? "ACTIVE" : "WATCH",
+      id: "scenario-deal-data-gap",
+      title: "Deal Finder has no data to search",
+      trigger: "Criteria are not stored in Jarvis or no property listing source is connected.",
+      impact: "No deals reach the pipeline, so good flips in the target areas are missed.",
+      response: "Sync criteria to Jarvis, connect a listing data source, then search, score and rank deals each cycle.",
+      owner: "DEAL_FINDER",
+      status: "ACTIVE",
     },
     {
       id: "scenario-cashflow-shock",
@@ -1177,7 +904,7 @@ function buildScenarioBook(input: {
         ? "Finance state is unavailable, so JARVIS cannot quantify the immediate capital pressure."
         : `Current runtime shows ${liquidity.toFixed(2)} liquidity and ${debt.toFixed(2)} personal debt; a cash-flow pause would increase the importance of liquidity discipline and high-ROI deployment.`,
       response: "Preserve required liquidity, avoid unmeasured expansion, prioritize obligations and the highest-evidence cash-generating work, then re-open discretionary deployment as the operating picture improves.",
-      owner: "FINANCE_CFO",
+      owner: "SUPERVISOR",
       status: debt !== null && liquidity !== null && debt > liquidity ? "ACTIVE" : "WATCH",
     },
   ];
@@ -1253,7 +980,7 @@ function buildDecisionMemory(input: {
   const record = {
     id: crypto.randomUUID(),
     at: input.now,
-    owner: "EXECUTIVE" as const,
+    owner: "SUPERVISOR" as const,
     decision: input.executiveFocus,
     reason,
     expectedOutcome: input.expansionGate && input.avoidanceGap
@@ -1296,7 +1023,7 @@ function buildContinuity(input: {
     ...approvals.slice(0, 5).map(task => ({
       type: "APPROVAL" as const,
       title: task.title,
-      owner: "EXECUTIVE" as const,
+      owner: "SUPERVISOR" as const,
       reason: task.blockedReason ?? "This action is approval-gated.",
     })),
     ...criticalGaps.slice(0, 5).map(gap => ({
@@ -1382,7 +1109,7 @@ function buildOperatingSystem(input: {
 
   for (const task of input.tasks) {
     if (!["BLOCKED", "FAILED", "WAITING_APPROVAL"].includes(task.status)) continue;
-    const owner = task.status === "WAITING_APPROVAL" ? "EXECUTIVE" : task.assignedTo;
+    const owner = task.status === "WAITING_APPROVAL" ? "SUPERVISOR" as const : task.assignedTo;
     const id = `task:${task.id}`;
     gaps.set(id, {
       id,
@@ -1500,15 +1227,6 @@ function buildOperatingSystem(input: {
   };
 }
 
-function buildPlanForObjective(objective: WorkforceObjective) {
-  return [
-    `Objective: ${objective.title}.`,
-    `Success: ${objective.successDefinition}`,
-    `Current focus: ${objective.currentFocus}`,
-    "Builder prepared internal work only. Publishing, spending, outreach, account changes, and other consequential external actions remain approval-gated.",
-  ].join(" ");
-}
-
 function auditCycle(agents: AgentState[], tasks: AgentTask[], objective: WorkforceObjective | null) {
   const failures = agents.filter((agent) => agent.status === "ERROR");
   const blockers = agents.filter((agent) => agent.status === "BLOCKED");
@@ -1624,32 +1342,23 @@ async function emitIfChanged(previous: WorkforceState, nextAgents: AgentState[],
 }
 
 function synthesizeExecutiveSummary(input: {
-  financeResult: string;
-  sentryResult: string;
   tradingResult: string;
-  qaSummary: string;
+  dealResult: string;
+  supervisorSummary: string;
 }) {
   return [
-    `Finance: ${input.financeResult}`,
-    `SentryOps: ${input.sentryResult}`,
-    `Trading: ${input.tradingResult}`,
-    `QA: ${input.qaSummary}`,
+    `Trading Observer: ${input.tradingResult}`,
+    `Deal Finder: ${input.dealResult}`,
+    `Supervisor: ${input.supervisorSummary}`,
   ].join(" ").slice(0, 900);
 }
 
-function chooseExecutiveFocus(
-  finance: Awaited<ReturnType<typeof getOrSeedFinanceState>>,
-  sentryStatus: string,
-  sentryNext: string,
-  tasks: AgentTask[],
-) {
+function chooseExecutiveFocus(tasks: AgentTask[]) {
   const approvalTask = tasks.find((task) => task.status === "WAITING_APPROVAL");
   if (approvalTask) return `Review approval request: ${approvalTask.title}`;
   const highPriorityOpen = tasks.find((task) => ["QUEUED", "BLOCKED"].includes(task.status) && (task.priority === "CRITICAL" || task.priority === "HIGH"));
   if (highPriorityOpen) return `${highPriorityOpen.assignedTo}: ${highPriorityOpen.title}`;
-  if (finance.metrics.personalDebt > 0) return financeDirective(finance);
-  if (sentryStatus !== "ERROR" && sentryNext) return sentryNext;
-  return "Keep the financial path moving while waiting for the next evidence-backed specialist action.";
+  return "Keep the arrow indicator improving and the deal pipeline flowing while waiting for the next evidence-backed action.";
 }
 
 

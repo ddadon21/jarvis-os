@@ -201,7 +201,7 @@ const WORKFORCE_INTENT_KEY = "jarvis-workforce-operator-intent-v1";
 
 export default function WorkforceWorld() {
   const [payload, setPayload] = useState<Payload | null>(null);
-  const [selectedId, setSelectedId] = useState("EXECUTIVE");
+  const [selectedId, setSelectedId] = useState("SUPERVISOR");
   const [busy, setBusy] = useState(false);
   const [taskText, setTaskText] = useState("");
   const [reasons, setReasons] = useState<Record<string, string>>({});
@@ -388,7 +388,7 @@ export default function WorkforceWorld() {
           title,
           assignedTo: selectedId,
           priority: "HIGH",
-          permissionRequired: selectedId === "TRADING_OBSERVER" ? "READ" : selectedId === "BUILDER" ? "WRITE_INTERNAL" : "ANALYZE",
+          permissionRequired: selectedId === "TRADING_OBSERVER" ? "READ" : "ANALYZE",
         }),
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
