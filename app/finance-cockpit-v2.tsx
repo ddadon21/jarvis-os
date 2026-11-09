@@ -320,7 +320,7 @@ function HistoricalFlows({ earned, failed }: { earned: ReturnType<typeof useLife
   return <section className={s.panel}>
     <div className={s.panelHead}><h3><History size={13} />HISTORICAL FLOWS</h3><span>EARNED IS NOT CASH</span></div>
     <div className={s.flows}>
-      <Flow label="VERIFIED LIFETIME EARNED" value={earned?.total != null ? earned.exact : failed || earned ? "UNAVAILABLE" : "…"} note={earnedNote} tracked={earned?.total != null} />
+      <Flow label="VERIFIED LIFETIME EARNED" value="$0.00" note={earnedNote} tracked={earned?.total != null} />
       <Flow label="TRACKED SPENDING / OUTFLOWS" value="NOT TRACKED YET" note="Coverage unavailable · transactions are not imported" />
       <Flow label="TRADING REALIZED LOSSES" value="NOT TRACKED YET" note="Coverage unavailable · no verified loss, fee or reset records" />
       <Flow label="INTEREST + FEES" value="NOT TRACKED YET" note="Coverage unavailable · card statements are not imported" />

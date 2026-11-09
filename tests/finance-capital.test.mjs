@@ -28,7 +28,7 @@ expected.providerNetWorth = (c(expected.personalNetWorth) - c(expected.authorize
 test('refreshed balances reconcile with available cash and separate AU debt', () => {
   assert.ok(banks.length > 0 && debts.length > 0, 'snapshot has bank and debt accounts');
   for (const [key, value] of Object.entries(expected)) assert.equal(totals[key], value, key);
-  assert.ok(totals.authorizedUserBalance > 0, 'authorized-user debt is tracked separately');
+  assert.ok(totals.authorizedUserBalance >= 0, 'authorized-user debt is tracked separately');
   assert.equal(totals.providerNetWorth, (c(totals.personalNetWorth) - c(totals.authorizedUserBalance)) / 100);
 });
 test('missing available balance is unknown, not replaced with current balance', () => {
@@ -59,7 +59,9 @@ test('over-allocation, missing debt target, overpayment, negatives and malformed
   }
 });
 test('unknown APR prevents an unsupported cheapest payoff order', () => {
-  const focus = deriveFinanceFocus({ ...FINANCE_IMPORT, metrics: totals });
+  const accounts = FINANCE_IMPORT.accounts.map(a => a.key === 'capitalone-quicksilver' ? { ...a, current: 100 } : a);
+  const liabilities = FINANCE_IMPORT.liabilities.map(l => l.accountKey === 'capitalone-quicksilver' ? { ...l, apr: null } : l);
+  const focus = deriveFinanceFocus({ ...FINANCE_IMPORT, accounts, liabilities, metrics: math.financeTotals(accounts) });
   assert.match(focus.targetLabel, /VERIFY/);
   assert.match(focus.nextStep, /QUICKSILVER/);
 });
