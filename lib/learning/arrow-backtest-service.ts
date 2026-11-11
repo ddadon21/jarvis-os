@@ -2,7 +2,7 @@ import { appendRuntimeEvent, createRuntimeEvent } from "../jarvis-runtime";
 import { durableContext } from "../jarvis-db";
 import { priceFamily } from "../trading-symbols";
 import { backtestArrows, DEFAULT_SCORING, DEVIANT_V1, type BacktestResult, type DeviantParams, type ScoringRules } from "./arrow-backtest.ts";
-import { loadBars, timeframeCoverage } from "./store.ts";
+import { loadBars, loadLabeledTrades, timeframeCoverage } from "./store.ts";
 
 /** Dwight trades the arrow on NQ/MNQ and YM/MYM, on these chart timeframes (minutes). */
 export const TRADED_FAMILIES = ["NQ", "YM"] as const;
@@ -70,13 +70,14 @@ export async function runArrowBacktests(input: {
 
   for (const family of [...new Set(families)]) {
     const minuteBars = await loadBars(family, from, now, "1");
+    const trades = await loadLabeledTrades(family).catch(() => []);
     for (const timeframeMinutes of timeframes) {
       const native = await loadBars(family, from, now, String(timeframeMinutes));
       if (!native.length && minuteBars.length < 1440) {
         runs.push({ family, timeframeMinutes, source: "none", result: null, message: `No ${family} ${label(timeframeMinutes)} history stored. Import a TradingView ${label(timeframeMinutes)} chart export.` });
         continue;
       }
-      const result = backtestArrows({ timeframeMinutes, chartBars: native, minuteBars, params: input.params, scoring: input.scoring });
+      const result = backtestArrows({ timeframeMinutes, chartBars: native, minuteBars, params: input.params, scoring: input.scoring, trades });
       const cap = input.maxArrowsReturned ?? 150;
       runs.push({
         family,

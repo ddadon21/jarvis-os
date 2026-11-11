@@ -29,7 +29,7 @@ export type AgentRunResult = {
 };
 
 const ROLE: Record<AgentId, string> = {
-  TRADING_OBSERVER: "You are the Trading Observer agent. You study how Dwight actually trades (no broker API: the Observer journal is the record) and use it to make his arrow indicator more precise: timing, R multiples, excursions, give-back, rule adherence, and what distinguishes his best entries. Use run_arrow_backtest to test any idea against the unchanged baseline on NQ and YM at 30m/2h/3h/4h. A change is only worth proposing when it raises the day win rate (one of the first 2 arrows reaches the opposite bank level in the NY session) on most markets without wiping out arrow days, and it must be proposed as a new versioned Pine file, never an edit to the baseline. The baseline indicator file stays immutable. You never place or suggest live orders.",
+  TRADING_OBSERVER: "You are the Trading Observer agent. Your main job is watching Dwight trade live, with or without arrows: he trades discretionarily from bank-level zones on NQ/MNQ and YM/MYM (30m, 2h, 3h, 4h), and the Observer journal (no broker API) is the record of what he actually did. Learn his real entries, exits, timing, R, excursions, give-back and rule adherence on their own terms. Separately, use the arrow as a lens: run_arrow_backtest shows which arrows he took versus skipped, how each group performed, and which of his trades had no arrow at all; those gaps are what the indicator should learn to catch or filter. To improve the arrow, test any idea against the unchanged baseline with run_arrow_backtest. A change is only worth proposing when it raises the day win rate (one of the first 2 arrows reaches the opposite bank level in the NY session) on most markets without wiping out arrow days, and it must be proposed as a new versioned Pine file, never an edit to the baseline. Journal notes are sparse, so never invent his reasoning; say what the evidence shows. You never place or suggest live orders.",
   DEAL_FINDER: "You are the Deal Finder agent for Dwight's real estate business. You find fix-and-flip deals that match his criteria (target areas, price, property type, rehab, minimum profit/ROI, max % of ARV). Cite the source for every property and number. Never invent listings, prices, ARVs or comps. Contacting sellers or making offers requires Dwight's approval.",
   SUPERVISOR: "You are the Supervisor. You keep the Trading Observer and Deal Finder in check: verify their claims against evidence and the check tools, flag stale or unsupported results, and decide the single most useful next step. Report only what the evidence proves.",
 };
@@ -127,6 +127,7 @@ function buildTools(agent: AgentState, task: AgentTask, state: { evidence: strin
           note: run.message,
           baseline: run.result?.summary ?? null,
           candidate: candidate?.runs[i]?.result?.summary ?? null,
+          dwightVsArrow: run.result?.dwight ? { ...run.result.dwight, tradesWithoutArrow: run.result.dwight.tradesWithoutArrow.slice(0, 10), tradesWithoutArrowCount: run.result.dwight.tradesWithoutArrow.length } : null,
         }));
         state.evidence.push(`backtest:${label ?? "baseline"}:${JSON.stringify(params)}`);
         return compact({ changes: params, rows }, 9000);

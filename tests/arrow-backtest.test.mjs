@@ -98,3 +98,31 @@ test('full backtest runs from minute bars on the 30m timeframe and walks outcome
   const tweaked = backtestArrows({ timeframeMinutes: 30, minuteBars: bars, params: { minCandleBody: 1e9 } });
   assert.equal(tweaked.summary.arrows, 0);
 });
+
+import { compareWithDwight } from '../lib/learning/arrow-backtest.ts';
+
+test('journaled trades mark arrows taken or skipped, and trades with no arrow are listed', () => {
+  const H = 60 * MIN;
+  const scored = (hoursAfterOpen, side, result, day) => ({ ...arrowAt({ t: SESSION_OPEN + hoursAfterOpen * H, side, day }), stop: 0, target: 0, riskPts: 50, result, r: result === 'WIN' ? 2 : -1, mfeR: 0, maeR: 0, exitT: null, minutesToExit: null });
+  const DAY = 24 * H;
+  const arrows = [
+    scored(15, 'LONG', 'WIN', 'd0'),            // before journal starts → unknown
+    { ...scored(15, 'LONG', 'WIN', 'd1'), t: SESSION_OPEN + DAY + 15 * H },
+    { ...scored(16, 'SHORT', 'LOSS', 'd1'), t: SESSION_OPEN + DAY + 16 * H },
+    { ...scored(15, 'LONG', 'LOSS', 'd2'), t: SESSION_OPEN + 2 * DAY + 15 * H },
+  ];
+  const trade = (id, side, at) => ({ id, symbol: 'MNQ', side, openedAt: new Date(at).toISOString(), preparedAt: null, closedAt: null, entryPrice: 1, exitPrice: null, initialStop: null, initialTarget: null, realizedPnl: 100 });
+  const trades = [
+    trade('a', 'LONG', SESSION_OPEN + DAY + 15 * H + 20 * MIN),   // takes d1 long (arrow candle still open)
+    trade('b', 'SHORT', SESSION_OPEN + 2 * DAY + 14 * H),         // no short arrow that day
+  ];
+  const { arrows: marked, dwight } = compareWithDwight(arrows, trades, DEFAULT_SCORING);
+  assert.deepEqual(marked.map((a) => a.taken), [null, true, false, false]);
+  assert.equal(marked[1].tradeId, 'a');
+  assert.equal(dwight.arrowsInJournalPeriod, 3);
+  assert.equal(dwight.taken.arrows, 1);
+  assert.equal(dwight.taken.winRate, 100);
+  assert.equal(dwight.skipped.arrows, 2);
+  assert.equal(dwight.skipped.winRate, 0);
+  assert.deepEqual(dwight.tradesWithoutArrow.map((t) => t.id), ['b']);
+});

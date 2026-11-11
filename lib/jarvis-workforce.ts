@@ -45,7 +45,7 @@ const DEFAULT_AGENTS: AgentState[] = [
     permissionCeiling: "WRITE_INTERNAL",
     lastRanAt: null,
     lastResult: "Waiting for structured trading observations.",
-    currentWork: "Observe how Dwight trades, then refine and backtest the arrow indicator for more precise entries. Never places trades.",
+    currentWork: "Watch Dwight trade live, learn his discretionary entries, and use arrows taken vs. skipped to refine and backtest the indicator. Never places trades.",
   },
   {
     id: "DEAL_FINDER",
@@ -284,7 +284,7 @@ export async function runWorkforceCycle(options: { forceResearch?: boolean } = {
     lastRanAt: now,
     lastResult: tradingResult,
     currentWork: observerOnline
-      ? "Study entries, exits and rule compliance; correlate with arrow signals to find what makes entries precise."
+      ? "Watch Dwight trade live (with or without arrows); compare his picks with the arrows he takes or skips to sharpen the indicator."
       : "Wait for the Local Agent to resume observation; do not invent trading evidence.",
   });
   tasks = updateTask(tasks, tradingTaskResult.task.id, {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FlaskConical, Play, Upload } from "lucide-react";
+import { FlaskConical, Play, Upload, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import f from "./finance-capital.module.css";
 import s from "./real-estate.module.css";
@@ -10,8 +10,10 @@ type Summary = {
   winRate: number | null; avgR: number | null; totalR: number; dayWinRate: number | null;
   daysWithArrows: number; daysWon: number; sessions: number; arrowsPerArrowDay: number | null; avgMinutesToTarget: number | null;
 };
-type ScoredArrow = { t: number; side: "LONG" | "SHORT"; entry: number; stop: number; target: number; result: string; r: number; minutesToExit: number | null };
-type Run = { family: string; timeframeMinutes: number; source: string; message: string | null; result: { from: string | null; to: string | null; pathResolution: string; summary: Summary; arrows: ScoredArrow[] } | null };
+type ScoredArrow = { t: number; side: "LONG" | "SHORT"; entry: number; stop: number; target: number; result: string; r: number; minutesToExit: number | null; taken?: boolean | null };
+type Group = { arrows: number; wins: number; losses: number; open: number; winRate: number | null; avgR: number | null };
+type Dwight = { journalFrom: string; trades: number; arrowsInJournalPeriod: number; taken: Group; skipped: Group; tradesWithoutArrow: Array<{ id: string; side: string; openedAt: string; entryPrice: number | null; realizedPnl: number | null }> };
+type Run = { family: string; timeframeMinutes: number; source: string; message: string | null; result: { from: string | null; to: string | null; pathResolution: string; summary: Summary; arrows: ScoredArrow[]; dwight?: Dwight } | null };
 type Coverage = Array<{ family: string; timeframes: Array<{ timeframe: string; bars: number; from: string | null; to: string | null }> }> | null;
 
 const CHANGE_FIELDS = [
@@ -130,15 +132,30 @@ export default function ArrowBacktestPanel() {
       </table></div>
     </section>}
 
+    {pick && <section className={f.panel}>
+      <div className={f.panelHead}><h3><UserRound size={13} />YOU VS THE ARROW · {runs[selected].family} {tf(runs[selected].timeframeMinutes)}</h3><span>FROM YOUR JOURNAL</span></div>
+      {!pick.dwight ? <p className={s.muted}>No journaled {runs[selected].family} trades yet. As the Observer records your live trades, each arrow here is marked as taken or skipped, and trades you took without an arrow are listed.</p> : <>
+        <p className={s.muted}>Since {pick.dwight.journalFrom.slice(0, 10)}: {pick.dwight.trades} journaled trades, {pick.dwight.arrowsInJournalPeriod} arrows. A trade takes an arrow when it is the same direction and opens between the arrow candle&apos;s open and the session end.</p>
+        <div className={f.metrics} style={{ marginTop: 10 }}>
+          <div className={f.metricAccent}><span>ARROWS YOU TOOK</span><b>{pick.dwight.taken.arrows}</b><small>{pct(pick.dwight.taken.winRate)} win · avg R {num(pick.dwight.taken.avgR)}</small></div>
+          <div><span>ARROWS YOU SKIPPED</span><b>{pick.dwight.skipped.arrows}</b><small>{pct(pick.dwight.skipped.winRate)} win · avg R {num(pick.dwight.skipped.avgR)}</small></div>
+          <div><span>YOUR TRADES, NO ARROW</span><b>{pick.dwight.tradesWithoutArrow.length}</b><small>Entries the arrow doesn&apos;t catch yet</small></div>
+          <div><span>YOUR FILTER</span><b>{pick.dwight.taken.winRate == null || pick.dwight.skipped.winRate == null ? "—" : pick.dwight.taken.winRate >= pick.dwight.skipped.winRate ? "HELPS" : "HURTS"}</b><small>Taken vs. skipped win rate</small></div>
+        </div>
+        {pick.dwight.tradesWithoutArrow.length > 0 && <div className={s.checks}>{pick.dwight.tradesWithoutArrow.slice(-8).reverse().map((trade) => <div key={trade.id} className={`${s.check} ${s.unknown}`}><b>{trade.side} · NO ARROW</b><span>{when(Date.parse(trade.openedAt))}{trade.entryPrice != null ? ` · ${trade.entryPrice.toFixed(2)}` : ""}{trade.realizedPnl != null ? ` · P&L ${trade.realizedPnl.toFixed(0)}` : ""}</span></div>)}</div>}
+      </>}
+    </section>}
+
     {pick && pick.arrows.length > 0 && <section className={f.panel}>
       <div className={f.panelHead}><h3>RECENT ARROWS · {runs[selected].family} {tf(runs[selected].timeframeMinutes)}</h3><span>NEW YORK TIME</span></div>
       <div className={f.tableWrap}><table>
-        <thead><tr><th>ARROW</th><th>ENTRY</th><th>STOP</th><th>TARGET</th><th>RESULT</th><th>R</th></tr></thead>
+        <thead><tr><th>ARROW</th><th>ENTRY</th><th>STOP</th><th>TARGET</th><th>RESULT</th><th>R</th><th>YOU</th></tr></thead>
         <tbody>{[...pick.arrows].reverse().slice(0, 25).map((a) => <tr key={`${a.t}-${a.side}`}>
           <td><strong>{a.side}</strong><small>{when(a.t)}</small></td>
           <td>{a.entry.toFixed(2)}</td><td>{a.stop.toFixed(2)}</td><td>{a.target.toFixed(2)}</td>
           <td><span className={`${s.badge} ${a.result === "WIN" ? s.badgePASS : a.result === "LOSS" ? s.badgeFAIL : s.badgeUNKNOWN}`}>{a.result === "NO_TIME" ? "AFTER SESSION" : a.result}</span>{a.minutesToExit != null && <small>{a.minutesToExit} min</small>}</td>
           <td className={a.r < 0 ? s.negative : ""}>{a.r.toFixed(2)}</td>
+          <td>{a.taken == null ? <small>—</small> : <span className={`${s.badge} ${a.taken ? s.badgePASS : ""}`}>{a.taken ? "TAKEN" : "SKIPPED"}</span>}</td>
         </tr>)}</tbody>
       </table></div>
     </section>}

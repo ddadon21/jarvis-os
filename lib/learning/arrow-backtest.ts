@@ -1,6 +1,6 @@
 import { atr, cci, deviantHma, ema, highest, lowest } from "./indicators.ts";
 import { nyLocal, sessionKey } from "./features.ts";
-import type { Bar, Side } from "./types.ts";
+import type { Bar, LabeledTrade, Side } from "./types.ts";
 
 /**
  * DEVIANT arrow backtester.
@@ -80,6 +80,9 @@ export type ScoredArrow = Arrow & {
   maeR: number;
   exitT: number | null;
   minutesToExit: number | null;
+  /** Did Dwight take this arrow? null = before his journal starts, so unknown. */
+  taken?: boolean | null;
+  tradeId?: string | null;
 };
 
 export type SideSummary = { arrows: number; wins: number; losses: number; open: number; winRate: number | null; avgR: number | null };
@@ -116,6 +119,18 @@ export type BacktestResult = {
   scoring: ScoringRules;
   summary: BacktestSummary;
   arrows: ScoredArrow[];
+  /** Present when journaled trades were supplied: Dwight's picks compared with the arrow. */
+  dwight?: DwightComparison;
+};
+
+export type DwightComparison = {
+  journalFrom: string;
+  trades: number;
+  arrowsInJournalPeriod: number;
+  taken: SideSummary;
+  skipped: SideSummary;
+  /** Journaled trades with no arrow on this timeframe: entries the indicator does not catch yet. */
+  tradesWithoutArrow: Array<{ id: string; side: Side; openedAt: string; entryPrice: number | null; realizedPnl: number | null }>;
 };
 
 const MINUTE = 60_000;
@@ -331,6 +346,8 @@ export function backtestArrows(input: {
   minuteBars?: Bar[];
   params?: Partial<DeviantParams>;
   scoring?: Partial<ScoringRules>;
+  /** Dwight's journaled trades for this market; enables the taken-vs-skipped comparison. */
+  trades?: LabeledTrade[];
 }): BacktestResult {
   const params: DeviantParams = { ...DEVIANT_V1, ...input.params };
   const scoring: ScoringRules = { ...DEFAULT_SCORING, ...input.scoring };
@@ -349,6 +366,7 @@ export function backtestArrows(input: {
     return scoreArrow(arrow, chartBars.slice(arrow.index + 1, lowerBound(chartBars, end)), params, scoring);
   });
   const sessions = new Set(chartBars.map((b) => sessionKey(b.t))).size;
+  const compared = input.trades?.length ? compareWithDwight(scored, input.trades, scoring) : { arrows: scored, dwight: null };
   return {
     timeframeMinutes: input.timeframeMinutes,
     chartBars: chartBars.length,
@@ -358,6 +376,42 @@ export function backtestArrows(input: {
     params,
     scoring,
     summary: summarize(scored, sessions, scoring),
-    arrows: scored,
+    arrows: compared.arrows,
+    ...(compared.dwight ? { dwight: compared.dwight } : {}),
+  };
+}
+
+/**
+ * Compares Dwight's journaled trades with the arrows. A trade takes an arrow when it is the same
+ * side and opens between the arrow candle's open (arrows can show live before the candle closes)
+ * and the arrow's session exit. Each trade takes at most one arrow (the earliest open one).
+ * Arrows before the first journaled trade are marked unknown, not skipped.
+ */
+export function compareWithDwight(arrows: ScoredArrow[], trades: LabeledTrade[], rules: ScoringRules): { arrows: ScoredArrow[]; dwight: DwightComparison | null } {
+  const dated = trades.map((trade) => ({ trade, t: Date.parse(trade.openedAt) })).filter((x) => Number.isFinite(x.t)).sort((a, b) => a.t - b.t);
+  if (!dated.length) return { arrows, dwight: null };
+  const journalFrom = dated[0].t - sinceSessionOpen(dated[0].t) * MINUTE;
+  const used = new Set<string>();
+  const marked = arrows.map((arrow) => {
+    if (arrow.t < journalFrom) return { ...arrow, taken: null, tradeId: null };
+    const end = exitTime(arrow, rules.exitHourNy);
+    const match = dated.find((x) => !used.has(x.trade.id) && x.trade.side === arrow.side && x.t >= arrow.t && x.t < end);
+    if (match) used.add(match.trade.id);
+    return { ...arrow, taken: Boolean(match), tradeId: match?.trade.id ?? null };
+  });
+  const period = marked.filter((a) => a.taken != null);
+  const firstBar = arrows.length ? arrows[0].t : journalFrom;
+  return {
+    arrows: marked,
+    dwight: {
+      journalFrom: new Date(journalFrom).toISOString(),
+      trades: dated.length,
+      arrowsInJournalPeriod: period.length,
+      taken: sideSummary(period.filter((a) => a.taken)),
+      skipped: sideSummary(period.filter((a) => !a.taken)),
+      tradesWithoutArrow: dated
+        .filter((x) => !used.has(x.trade.id) && x.t >= firstBar)
+        .map(({ trade }) => ({ id: trade.id, side: trade.side, openedAt: trade.openedAt, entryPrice: trade.entryPrice, realizedPnl: trade.realizedPnl })),
+    },
   };
 }
