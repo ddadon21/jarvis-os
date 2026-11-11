@@ -41,7 +41,8 @@ export async function upsertBars(family: string, timeframe: string, bars: Bar[],
   return written;
 }
 
-export async function loadBars(family: string, fromMs: number, toMs: number): Promise<Bar[]> {
+/** Loads stored bars for one timeframe ("1" = 1-minute, "30", "120", "180", "240" = native chart exports). */
+export async function loadBars(family: string, fromMs: number, toMs: number, timeframe = "1"): Promise<Bar[]> {
   const ctx = await durableContext();
   if (!ctx) return [];
   const out: Bar[] = [];
@@ -52,7 +53,7 @@ export async function loadBars(family: string, fromMs: number, toMs: number): Pr
       .select("ts,open,high,low,close,volume")
       .eq("workspace_id", ctx.workspaceId)
       .eq("symbol", family)
-      .eq("timeframe", "1")
+      .eq("timeframe", timeframe)
       .gt("ts", guard === 0 ? new Date(fromMs - 1).toISOString() : cursor)
       .lte("ts", end)
       .order("ts", { ascending: true })
@@ -202,4 +203,24 @@ export async function insertSignals(rows: Array<{ id: string; model: string; sym
   })), { onConflict: "id", ignoreDuplicates: true });
   if (error) throw new Error("Signal insert failed: " + error.message);
   return rows.length;
+}
+
+/** Which timeframes have stored bars for a family, with their date range. */
+export async function timeframeCoverage(family: string, timeframes = ["1", "30", "120", "180", "240"]) {
+  const ctx = await durableContext();
+  if (!ctx) return null;
+  const rows = await Promise.all(timeframes.map(async (timeframe) => {
+    const base = () => ctx.db.from("trading_bars").select("ts", { count: "exact" }).eq("workspace_id", ctx.workspaceId).eq("symbol", family).eq("timeframe", timeframe);
+    const [first, last] = await Promise.all([
+      base().order("ts", { ascending: true }).limit(1),
+      base().order("ts", { ascending: false }).limit(1),
+    ]);
+    return {
+      timeframe,
+      bars: first.count ?? 0,
+      from: (first.data?.[0] as { ts?: string } | undefined)?.ts ?? null,
+      to: (last.data?.[0] as { ts?: string } | undefined)?.ts ?? null,
+    };
+  }));
+  return rows.filter((row) => row.bars > 0);
 }

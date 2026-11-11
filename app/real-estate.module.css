@@ -26,3 +26,6 @@
 .rowActions button { min-height:26px; padding:4px 8px; font-size:8px; }
 .negative { color:#ff8a8f; }
 @media(max-width:580px) { .fields3 { grid-template-columns:1fr 1fr; } }
+.importButton { display:inline-flex !important; flex-direction:row !important; align-items:center; gap:6px !important; margin:0 !important; padding:7px 10px; min-height:32px; border:1px solid var(--jarvis-card-border,rgba(255,255,255,.1)); background:var(--jarvis-cell-surface,rgba(0,0,0,.3)); color:#ddd !important; font-size:9px !important; font-weight:600; letter-spacing:.07em; cursor:pointer; }
+.importButton:hover { border-color:rgba(183,31,38,.5); color:#fff !important; background:rgba(183,31,38,.1); }
+.importButton:focus-within { outline:2px solid white; outline-offset:3px; }

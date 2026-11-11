@@ -3,6 +3,7 @@
 import { Activity, Crosshair, Eye, Gauge, Radio, ShieldCheck, TriangleAlert, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import TradingAccountManager, { TradingAccountView } from "./trading-account-manager";
+import ArrowBacktestPanel from "./arrow-backtest-panel";
 import { observerPhase, phaseLabel, type ObserverPhase } from "../lib/trading-phase";
 
 type ObserverState = {
@@ -664,6 +665,7 @@ export default function TradingCockpit() {
           </div>
         </article>
       </div>
+      <ArrowBacktestPanel />
     </section>
   );
 }
