@@ -1368,6 +1368,7 @@ internal sealed class ObserverContext : ApplicationContext
             if (string.IsNullOrWhiteSpace(vault) || !Directory.Exists(vault)) return;
             if (string.IsNullOrWhiteSpace(_config.ServerUrl) || string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken)) return;
 
+            var pullOk = false;
             using (var req = new HttpRequestMessage(HttpMethod.Get, _config.ServerUrl.TrimEnd('/') + "/api/vault/pull"))
             {
                 ApplyVercelBypassHeaders(req);
@@ -1384,6 +1385,7 @@ internal sealed class ObserverContext : ApplicationContext
                         .Where(n => n.Item1.Length > 0)
                         .ToList();
                     var changed = VaultBridge.WriteManaged(vault, notes);
+                    pullOk = true;
                     if (changed > 0) Log(new { type = "vault.notes_written", at = DateTime.UtcNow, changed });
                 }
             }
@@ -1404,15 +1406,25 @@ internal sealed class ObserverContext : ApplicationContext
                 SaveConfig();
                 if (changedNotes.Count > 0) Log(new { type = "vault.indexed", at = DateTime.UtcNow, notes = changedNotes.Count });
             }
+            await ReportVaultHealthAsync(pullOk, uploadedAll);
         }
         catch (Exception ex)
         {
             LogRateLimited("vault.tick.error:" + ex.GetType().Name, TimeSpan.FromMinutes(5));
+            await ReportVaultHealthAsync(false, false);
         }
         finally
         {
             Volatile.Write(ref _vaultBusy, 0);
         }
+    }
+
+    private async Task ReportVaultHealthAsync(bool pullOk, bool indexOk)
+    {
+        var body = JsonSerializer.Serialize(new { pullOk, indexOk });
+        using var response = await PostDeviceJsonAsync("/api/vault/health", body, TimeSpan.FromSeconds(10));
+        if (response is null || !response.IsSuccessStatusCode)
+            LogRateLimited("vault.health.report_failed", TimeSpan.FromMinutes(5));
     }
 
     private void ChooseVaultFolder()
