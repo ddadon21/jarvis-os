@@ -18,6 +18,7 @@ on:
   pull_request:
     branches:
       - claude/jarvis-ai-backend-Iw0x3
+      - claude/charming-cannon-ueus9x
     paths:
       - 'app/**'
       - 'lib/**'
