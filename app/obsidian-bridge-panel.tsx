@@ -68,7 +68,7 @@ export default function ObsidianBridgePanel() {
         if (payload.link?.online) {
           setState(current => current === "ONLINE" ? current : "READY");
           setMessage(current => current === "VAULT ONLINE" ? current : "LOCAL AGENT READY");
-          setDetail(`Agent ${payload.link.observerVersion ?? "connected"} · Obsidian bridge available`);
+          setDetail(`Agent ${payload.link.observerVersion ?? "connected"} · vault connection not yet tested`);
         } else {
           setState("ERROR");
           setMessage("LOCAL AGENT OFFLINE");
@@ -131,7 +131,7 @@ export default function ObsidianBridgePanel() {
           ? { action: "SEARCH" as const, query: query.trim() || "JARVIS" }
           : {
               action: "WRITE" as const,
-              path: "00 Inbox/JARVIS Cloud Bridge Test.md",
+              path: "JARVIS/Connection Test.md",
               content: [
                 "# JARVIS Cloud Bridge Test",
                 "",
@@ -171,7 +171,7 @@ export default function ObsidianBridgePanel() {
         setSearchPreview((result.data ?? "").slice(0, 220));
         setDetail(`Search returned through Local Agent for “${query.trim() || "JARVIS"}”.`);
       } else {
-        setDetail("00 Inbox/JARVIS Cloud Bridge Test.md created.");
+        setDetail("JARVIS/Connection Test.md verified through the Local Agent.");
       }
 
       setState("ONLINE");
