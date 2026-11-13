@@ -706,8 +706,7 @@ internal sealed class ObserverContext : ApplicationContext
     private async Task EnsurePairingAndControlAsync()
     {
         if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out _)) return;
-        if (string.IsNullOrWhiteSpace(GetVercelBypassSecret())) return;
-
+        // Bypass is optional on public production; keep it for protected previews.
         var now = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken))
         {
@@ -1525,7 +1524,7 @@ internal sealed class ObserverContext : ApplicationContext
                 if (forceNew)
                 {
                     MessageBox.Show(
-                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nIf this is 401, set the Vercel automation bypass secret from the Observer tray menu, then try again.\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
+                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nIf this is 401/403 and the deployment is protected, set the optional Vercel automation bypass key in the tray. Also verify the Jarvis server address.\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
                         "Jarvis Observer pairing failed",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -1568,11 +1567,6 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task ShowOrCreatePairingCodeAsync()
     {
-        if (string.IsNullOrWhiteSpace(GetVercelBypassSecret()) && !PromptAndStoreVercelBypassSecret(showSuccess: false))
-        {
-            return;
-        }
-
         var hasValidCode =
             !string.IsNullOrWhiteSpace(_config.PairingCode) &&
             DateTime.TryParse(_config.PairingExpiresAt, out var expiry) &&
@@ -2086,7 +2080,7 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
-    private const string DefaultServerUrl = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+    private const string DefaultServerUrl = "https://jarvis-os-omega.vercel.app";
 
     /// <summary>Respects the configured server; only fills it in when missing. Change it from the tray menu.</summary>
     private void NormalizeServerUrl()
@@ -2524,10 +2518,10 @@ internal sealed class ObserverContext : ApplicationContext
 internal sealed class ObserverConfig
 {
     [JsonPropertyName("serverUrl")]
-    public string? ServerUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+    public string? ServerUrl { get; set; } = "https://jarvis-os-omega.vercel.app";
 
     [JsonPropertyName("accessBootstrapUrl")]
-    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/";
+    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-omega.vercel.app/";
 
     [JsonPropertyName("vercelBypassSecretProtected")]
     public string? VercelBypassSecretProtected { get; set; }
