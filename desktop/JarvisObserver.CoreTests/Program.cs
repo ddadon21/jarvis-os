@@ -156,6 +156,24 @@ Check("index scan respects folder allowlist", VaultBridge.ScanChanged(vault, Dat
 var tradeNote = TradeNotes.RenderGenerated(closedTrade, events);
 Check("generated trade note excludes the review questions", !tradeNote.Contains("Why I took it") && TradeNotes.Template().Contains("Why I took it"));
 
+// ---- Plugin-free Obsidian command bridge ----
+Check("direct WRITE verifies the managed file",
+    ObsidianDirectBridge.Execute(vault, "WRITE", "00 Inbox/JARVIS Cloud Bridge Test.md", "unified connection", null).Contains("verified"));
+Check("direct LIST sees the bridged note",
+    ObsidianDirectBridge.Execute(vault, "LIST", null, null, null).Contains("JARVIS Cloud Bridge Test.md"));
+Check("direct READ returns managed note content",
+    ObsidianDirectBridge.Execute(vault, "READ", "00 Inbox/JARVIS Cloud Bridge Test.md", null, null).Contains("unified connection"));
+Check("direct SEARCH locates the bridged note",
+    ObsidianDirectBridge.Execute(vault, "SEARCH", null, null, "unified connection").Contains("JARVIS Cloud Bridge Test.md"));
+Check("direct writes preserve authored notes outside generated markers",
+    ObsidianDirectBridge.Execute(vault, "WRITE", "Daily/today.md", "generated v3", null).Contains("verified") &&
+    File.ReadAllText(managed).Contains("Dwight's own line"));
+var traversalRejected = false;
+try { ObsidianDirectBridge.Execute(vault, "WRITE", "../escape.md", "bad", null); }
+catch (InvalidOperationException) { traversalRejected = true; }
+Check("direct WRITE rejects traversal", traversalRejected);
+Check("direct bridge never writes outside JARVIS", !File.Exists(Path.Combine(vault, "00 Inbox", "JARVIS Cloud Bridge Test.md")));
+
 ReaderTests.Run(Check);
 
 try { Directory.Delete(tmp, true); } catch { }

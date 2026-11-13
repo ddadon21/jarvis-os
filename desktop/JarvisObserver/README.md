@@ -1,4 +1,28 @@
-# JARVIS Local Agent 1.1.0
+# JARVIS Local Agent 1.1.1
+
+## Integration-only repair (1.1.1)
+This patch does **not** change TradingView detection, capture timing, the five trading phases, the journal, or the Observer HUD.
+
+- **Pairing works without a Vercel bypass key** when the Jarvis URL is publicly accessible. The optional bypass key is still used for protected Vercel deployments.
+- Fresh installations default to the stable `https://jarvis-os-omega.vercel.app` address. Existing installs **keep their saved server address**; use the tray's "Set JARVIS server address" to select the live unified backend after it has been deployed.
+- The selected **Obsidian vault folder is now the preferred command bridge** for LIST, READ, WRITE, and SEARCH. No Local REST API plugin/key is required for that path. The optional legacy plugin still works when no direct vault is selected.
+- Cloud-generated notes and the existing Jarvis browser outbox are written under `<vault>/JARVIS/` using managed markers. Content outside those markers is preserved.
+- "Obsidian: Test connection" verifies direct-vault folder access when a folder is selected, and "Write Local Agent test note" verifies an actual disk write.
+- The Local Agent reports its vault pull/index results to the authenticated Jarvis backend, so cloud integration statuses can be based on evidence rather than a constant CONNECTED flag.
+- Do **not** delete `%LOCALAPPDATA%\\JarvisObserver` or the Obsidian vault when upgrading. The browser's queued notes should not be cleared until delivery is confirmed.
+- The Windows executable has to be rebuilt from this source or downloaded from the green Windows build artifact. The previous 1.1.0 executable will **not** gain these fixes from a web deployment alone.
+
+## Installation prerequisites
+1. Back up `%LOCALAPPDATA%\\JarvisObserver` and your vault.
+2. Confirm Jarvis Cloud is running the corresponding November backend, then install the 1.1.1 executable (do not overwrite your config folder).
+3. In the tray, choose **Set JARVIS server address** and enter the canonical deployed Jarvis URL. Changing the server prompts a fresh pairing.
+4. Select **Show / New pairing code** and enter it in Jarvis → Trading. If your Vercel environment is protected and returns HTTP 401/403, configure its optional Vercel automation-bypass key **locally**.
+5. Select **Obsidian: Choose vault folder (direct sync)** and choose the folder containing your `.obsidian` configuration. Then run **Test connection** and **Write Local Agent test note**.
+6. In Jarvis, use **TEST VAULT**, **WRITE TEST**, then **SYNC NOW / QUEUE**. Only consider the backlog delivered after the queue drains and the notes are visible in the vault.
+
+---
+
+# JARVIS Local Agent 1.1.0 (previous release)
 
 Windows x64 companion for JARVIS. It contains the read-only TradingView Observer, the local Obsidian bridge, the JARVIS Desktop Action Runtime, controlled Chrome/Edge browser actions, and workspace-scoped Codex / Claude Code execution.
 

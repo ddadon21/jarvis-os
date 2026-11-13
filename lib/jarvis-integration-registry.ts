@@ -2,6 +2,9 @@
 
 import { getAssistantRuntimeState } from "./jarvis-assistant-runtime";
 import { getGoogleWorkspaceStatus } from "./google-workspace";
+import { getLocalAgentPresence } from "./trading-device-link";
+import { healthyVaultForDevice, readVaultBridgeHealth } from "./obsidian-vault-health";
+import { durableContext } from "./jarvis-db";
 
 export type JarvisIntegrationId =
   | "GOOGLE_WORKSPACE"
@@ -34,10 +37,15 @@ function has(...keys: string[]) {
 }
 
 export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[]> {
-  const [assistant, google] = await Promise.all([
+  const [assistant, google, localAgent, vaultHealth, supabaseContext] = await Promise.all([
     getAssistantRuntimeState(),
     getGoogleWorkspaceStatus(),
+    getLocalAgentPresence(),
+    readVaultBridgeHealth(),
+    durableContext(),
   ]);
+  const agentOnline = Boolean(localAgent?.online);
+  const vaultOnline = agentOnline && healthyVaultForDevice(vaultHealth, localAgent?.deviceId);
 
   const googleFeedsReady =
     assistant.sources.calendar === "CONNECTED" &&
@@ -58,7 +66,7 @@ export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[
     has("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET");
   const icloudReady =
     has("ICLOUD_CALDAV_USERNAME", "ICLOUD_APP_SPECIFIC_PASSWORD");
-  const supabaseServerConfigured = has("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseServerConfigured = Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY);
   const productionRuntime = process.env.VERCEL_ENV === "production";
 
   return [
@@ -119,31 +127,37 @@ export async function getJarvisIntegrationRegistry(): Promise<JarvisIntegration[
     {
       id: "OBSIDIAN",
       label: "Obsidian",
-      state: "CONNECTED",
+      state: vaultOnline ? "CONNECTED" : agentOnline ? "DEGRADED" : "NEEDS_CONNECTION",
       capabilities: ["Long-term notes", "Knowledge map", "Decision history"],
-      note: "Connected through the Windows Local Agent.",
+      note: vaultOnline
+        ? "Direct vault pull and index confirmed by the paired Windows Local Agent."
+        : agentOnline
+          ? "Local Agent is online, but a recent successful vault sync has not been verified. Choose the vault folder and run a write test."
+          : "No live Windows Local Agent heartbeat. Pair the device before connecting the Obsidian vault.",
     },
     {
       id: "TRADING_OBSERVER",
       label: "Trading Observer",
-      state: "CONNECTED",
+      state: agentOnline ? "CONNECTED" : localAgent ? "DEGRADED" : "NEEDS_CONNECTION",
       capabilities: ["Screen observations", "Trading state", "Journal context"],
-      note: "Observation and analysis only; no trade execution.",
+      note: agentOnline
+        ? "Windows Local Agent heartbeat is current. TradingView detection and journal completeness require their own tests."
+        : "No current Observer heartbeat. A local TradingView notification alone does not confirm cloud pairing.",
     },
     {
       id: "SUPABASE",
       label: "Supabase",
-      state: supabaseServerConfigured
+      state: supabaseContext
         ? "CONNECTED"
-        : productionRuntime
+        : supabaseServerConfigured || productionRuntime
           ? "DEGRADED"
           : "NEEDS_CONNECTION",
       capabilities: ["Structured memory", "Runtime persistence", "History"],
-      note: supabaseServerConfigured
-        ? "Server-side Supabase mirror is active for durable workforce state."
-        : productionRuntime
-          ? "Production expects a server-side Supabase service role for the durable workforce mirror."
-          : "Preview runtime is operating on Vercel Runtime Cache; the Supabase server mirror is intentionally treated as unattached instead of a failed service.",
+      note: supabaseContext
+        ? "Primary Supabase workspace was successfully read by the server."
+        : supabaseServerConfigured
+          ? "A server key is configured but the primary workspace could not be verified."
+          : "A server-side Supabase key is required for durable state; temporary cache does not prove persistence.",
     },
   ];
 }

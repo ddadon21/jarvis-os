@@ -26,7 +26,7 @@ internal static class Program
 
 internal static class ObserverInfo
 {
-    public const string Version = "1.1.0";
+    public const string Version = "1.1.1";
 }
 
 internal sealed class ObserverContext : ApplicationContext
@@ -706,8 +706,7 @@ internal sealed class ObserverContext : ApplicationContext
     private async Task EnsurePairingAndControlAsync()
     {
         if (!Uri.TryCreate(_config.ServerUrl, UriKind.Absolute, out _)) return;
-        if (string.IsNullOrWhiteSpace(GetVercelBypassSecret())) return;
-
+        // Bypass is optional on public production; keep it for protected previews.
         var now = DateTime.UtcNow;
         if (string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken))
         {
@@ -835,6 +834,14 @@ internal sealed class ObserverContext : ApplicationContext
 
         try
         {
+            var directVault = _config.ObsidianVaultPath;
+            if (!string.IsNullOrWhiteSpace(directVault) && Directory.Exists(directVault))
+            {
+                data = ObsidianDirectBridge.Execute(directVault, action!, path, content, query);
+                ok = true;
+            }
+            else
+            {
             var apiKey = GetObsidianApiKey();
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException("Obsidian API key is not configured on this PC.");
@@ -902,6 +909,7 @@ internal sealed class ObserverContext : ApplicationContext
             else
             {
                 throw new InvalidOperationException("Unsupported Obsidian command.");
+            }
             }
         }
         catch (Exception ex)
@@ -1359,6 +1367,7 @@ internal sealed class ObserverContext : ApplicationContext
             if (string.IsNullOrWhiteSpace(vault) || !Directory.Exists(vault)) return;
             if (string.IsNullOrWhiteSpace(_config.ServerUrl) || string.IsNullOrWhiteSpace(_config.DeviceId) || string.IsNullOrWhiteSpace(_config.DeviceToken)) return;
 
+            var pullOk = false;
             using (var req = new HttpRequestMessage(HttpMethod.Get, _config.ServerUrl.TrimEnd('/') + "/api/vault/pull"))
             {
                 ApplyVercelBypassHeaders(req);
@@ -1375,6 +1384,7 @@ internal sealed class ObserverContext : ApplicationContext
                         .Where(n => n.Item1.Length > 0)
                         .ToList();
                     var changed = VaultBridge.WriteManaged(vault, notes);
+                    pullOk = true;
                     if (changed > 0) Log(new { type = "vault.notes_written", at = DateTime.UtcNow, changed });
                 }
             }
@@ -1395,15 +1405,25 @@ internal sealed class ObserverContext : ApplicationContext
                 SaveConfig();
                 if (changedNotes.Count > 0) Log(new { type = "vault.indexed", at = DateTime.UtcNow, notes = changedNotes.Count });
             }
+            await ReportVaultHealthAsync(pullOk, uploadedAll);
         }
         catch (Exception ex)
         {
             LogRateLimited("vault.tick.error:" + ex.GetType().Name, TimeSpan.FromMinutes(5));
+            await ReportVaultHealthAsync(false, false);
         }
         finally
         {
             Volatile.Write(ref _vaultBusy, 0);
         }
+    }
+
+    private async Task ReportVaultHealthAsync(bool pullOk, bool indexOk)
+    {
+        var body = JsonSerializer.Serialize(new { pullOk, indexOk });
+        using var response = await PostDeviceJsonAsync("/api/vault/health", body, TimeSpan.FromSeconds(10));
+        if (response is null || !response.IsSuccessStatusCode)
+            LogRateLimited("vault.health.report_failed", TimeSpan.FromMinutes(5));
     }
 
     private void ChooseVaultFolder()
@@ -1504,7 +1524,7 @@ internal sealed class ObserverContext : ApplicationContext
                 if (forceNew)
                 {
                     MessageBox.Show(
-                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nIf this is 401, set the Vercel automation bypass secret from the Observer tray menu, then try again.\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
+                        $"Jarvis could not create a pairing code.\n\nHTTP {(int)res.StatusCode} {res.StatusCode}\n\nIf this is 401/403 and the deployment is protected, set the optional Vercel automation bypass key in the tray. Also verify the Jarvis server address.\n\nOpen the Observer folder and check observer.jsonl if this repeats.",
                         "Jarvis Observer pairing failed",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -1547,11 +1567,6 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task ShowOrCreatePairingCodeAsync()
     {
-        if (string.IsNullOrWhiteSpace(GetVercelBypassSecret()) && !PromptAndStoreVercelBypassSecret(showSuccess: false))
-        {
-            return;
-        }
-
         var hasValidCode =
             !string.IsNullOrWhiteSpace(_config.PairingCode) &&
             DateTime.TryParse(_config.PairingExpiresAt, out var expiry) &&
@@ -1733,6 +1748,27 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task<bool> TestObsidianConnectionAsync(bool showSuccess)
     {
+        // Prefer the user's explicit direct vault selection; no REST plugin required.
+        if (!string.IsNullOrWhiteSpace(_config.ObsidianVaultPath) && Directory.Exists(_config.ObsidianVaultPath))
+        {
+            try
+            {
+                var listing = ObsidianDirectBridge.Execute(_config.ObsidianVaultPath, "LIST", null, null, null);
+                Log(new { type = "obsidian.connection.test", at = DateTime.UtcNow, mode = "DIRECT_VAULT", connected = true });
+                if (showSuccess)
+                    MessageBox.Show("Selected Obsidian vault is accessible through the direct bridge. Use the write-test option to verify file writes.",
+                        "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log(new { type = "obsidian.connection.error", at = DateTime.UtcNow, mode = "DIRECT_VAULT", error = ex.Message });
+                if (showSuccess)
+                    MessageBox.Show("Direct vault test failed.\n\n" + ex.Message, "JARVIS Local Agent — Obsidian",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+        }
         var apiKey = GetObsidianApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -1807,6 +1843,28 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task<bool> WriteObsidianAgentTestNoteAsync(bool showSuccess)
     {
+        if (!string.IsNullOrWhiteSpace(_config.ObsidianVaultPath) && Directory.Exists(_config.ObsidianVaultPath))
+        {
+            try
+            {
+                var note = "# JARVIS direct vault connection test\n\nVerified from the Windows Local Agent: " + DateTime.UtcNow.ToString("O");
+                var result = ObsidianDirectBridge.Execute(_config.ObsidianVaultPath, "WRITE",
+                    "JARVIS/Connection Test.md", note, null);
+                Log(new { type = "obsidian.write_test.ok", at = DateTime.UtcNow, mode = "DIRECT_VAULT" });
+                if (showSuccess)
+                    MessageBox.Show("Verified JARVIS/Connection Test.md was written in your selected Obsidian vault.",
+                        "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log(new { type = "obsidian.write_test.error", at = DateTime.UtcNow, mode = "DIRECT_VAULT", error = ex.Message });
+                if (showSuccess)
+                    MessageBox.Show("Direct vault write test failed.\n\n" + ex.Message,
+                        "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+        }
         var apiKey = GetObsidianApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -2022,7 +2080,7 @@ internal sealed class ObserverContext : ApplicationContext
         }
     }
 
-    private const string DefaultServerUrl = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+    private const string DefaultServerUrl = "https://jarvis-os-omega.vercel.app";
 
     /// <summary>Respects the configured server; only fills it in when missing. Change it from the tray menu.</summary>
     private void NormalizeServerUrl()
@@ -2460,10 +2518,10 @@ internal sealed class ObserverContext : ApplicationContext
 internal sealed class ObserverConfig
 {
     [JsonPropertyName("serverUrl")]
-    public string? ServerUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app";
+    public string? ServerUrl { get; set; } = "https://jarvis-os-omega.vercel.app";
 
     [JsonPropertyName("accessBootstrapUrl")]
-    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-git-claude-jarvis-ai-119654-dwights-projects-8a9a094f.vercel.app/";
+    public string? AccessBootstrapUrl { get; set; } = "https://jarvis-os-omega.vercel.app/";
 
     [JsonPropertyName("vercelBypassSecretProtected")]
     public string? VercelBypassSecretProtected { get; set; }
