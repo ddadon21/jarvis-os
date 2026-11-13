@@ -26,7 +26,7 @@ internal static class Program
 
 internal static class ObserverInfo
 {
-    public const string Version = "1.1.0";
+    public const string Version = "1.1.1";
 }
 
 internal sealed class ObserverContext : ApplicationContext
@@ -835,6 +835,14 @@ internal sealed class ObserverContext : ApplicationContext
 
         try
         {
+            var directVault = _config.ObsidianVaultPath;
+            if (!string.IsNullOrWhiteSpace(directVault) && Directory.Exists(directVault))
+            {
+                data = ObsidianDirectBridge.Execute(directVault, action!, path, content, query);
+                ok = true;
+            }
+            else
+            {
             var apiKey = GetObsidianApiKey();
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new InvalidOperationException("Obsidian API key is not configured on this PC.");
@@ -902,6 +910,7 @@ internal sealed class ObserverContext : ApplicationContext
             else
             {
                 throw new InvalidOperationException("Unsupported Obsidian command.");
+            }
             }
         }
         catch (Exception ex)
@@ -1733,6 +1742,27 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task<bool> TestObsidianConnectionAsync(bool showSuccess)
     {
+        // Prefer the user's explicit direct vault selection; no REST plugin required.
+        if (!string.IsNullOrWhiteSpace(_config.ObsidianVaultPath) && Directory.Exists(_config.ObsidianVaultPath))
+        {
+            try
+            {
+                var listing = ObsidianDirectBridge.Execute(_config.ObsidianVaultPath, "LIST", null, null, null);
+                Log(new { type = "obsidian.connection.test", at = DateTime.UtcNow, mode = "DIRECT_VAULT", connected = true });
+                if (showSuccess)
+                    MessageBox.Show("Selected Obsidian vault is accessible through the direct bridge. Use the write-test option to verify file writes.",
+                        "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log(new { type = "obsidian.connection.error", at = DateTime.UtcNow, mode = "DIRECT_VAULT", error = ex.Message });
+                if (showSuccess)
+                    MessageBox.Show("Direct vault test failed.\n\n" + ex.Message, "JARVIS Local Agent — Obsidian",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+        }
         var apiKey = GetObsidianApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -1807,6 +1837,28 @@ internal sealed class ObserverContext : ApplicationContext
 
     private async Task<bool> WriteObsidianAgentTestNoteAsync(bool showSuccess)
     {
+        if (!string.IsNullOrWhiteSpace(_config.ObsidianVaultPath) && Directory.Exists(_config.ObsidianVaultPath))
+        {
+            try
+            {
+                var note = "# JARVIS direct vault connection test\n\nVerified from the Windows Local Agent: " + DateTime.UtcNow.ToString("O");
+                var result = ObsidianDirectBridge.Execute(_config.ObsidianVaultPath, "WRITE",
+                    "JARVIS/Connection Test.md", note, null);
+                Log(new { type = "obsidian.write_test.ok", at = DateTime.UtcNow, mode = "DIRECT_VAULT" });
+                if (showSuccess)
+                    MessageBox.Show("Verified JARVIS/Connection Test.md was written in your selected Obsidian vault.",
+                        "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log(new { type = "obsidian.write_test.error", at = DateTime.UtcNow, mode = "DIRECT_VAULT", error = ex.Message });
+                if (showSuccess)
+                    MessageBox.Show("Direct vault write test failed.\n\n" + ex.Message,
+                        "JARVIS Local Agent — Obsidian", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+        }
         var apiKey = GetObsidianApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
